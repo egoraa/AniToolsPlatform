@@ -10,7 +10,13 @@ target_include_directories(atp_platform INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/sr
 
 add_executable(AniToolsPlatform src/main.cpp
         src/platform/module.hpp
-        src/platform/io.hpp)
+        src/platform/io.hpp
+        src/platform/io/input_base.hpp
+        src/platform/io/input.hpp
+        src/platform/io/inputs.hpp
+        src/platform/io/outputs.hpp
+        src/platform/io/queued_input.hpp
+        src/platform/io/threading.hpp)
 target_link_libraries(AniToolsPlatform PRIVATE atp_platform)
 
 enable_testing()

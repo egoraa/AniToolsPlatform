@@ -6,8 +6,9 @@
 namespace {
 
     struct demo_inputs : atp::io::inputs {
-        atp::io::inputs::input<int> number{*this, "number"};
-        atp::io::inputs::input<std::string> text{*this, "text"};
+        atp::io::input<int>& number = make<int>("number");
+        atp::io::input<std::string>& text = make<std::string>("text");
+        atp::io::input<int, double>& pair = make<int, double>("pair");
     };
 
     class DemoModule : public atp::Module<demo_inputs, atp::io::outputs> {
@@ -18,6 +19,9 @@ namespace {
             });
             inputs().text.when([](const std::string& value) {
                 std::cout << "text received: " << value << '\n';
+            });
+            inputs().pair.when([](const int first, double second) {
+                std::cout << "pair received: " << first << ", " << second << '\n';
             });
         }
     };
@@ -30,10 +34,11 @@ int main() {
 
     module.inputs().number(42);
     module.inputs().text("Hello, AniTools!");
+    module.inputs().pair(1, 2.5);
 
     std::cout << "declared inputs:\n";
     for (const auto* info : module.inputs().list()) {
-        std::cout << "  '" << info->name << "' (type hash " << info->type_hash << ")\n";
+        std::cout << "  '" << info->name() << "' (type hash " << info->type().hash_code() << ")\n";
     }
     return 0;
 }

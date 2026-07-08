@@ -6,9 +6,9 @@
 namespace {
 
     struct demo_inputs : atp::io::inputs {
-        atp::io::input<int>& number = make<int>("number");
-        atp::io::input<std::string>& text = make<std::string>("text");
-        atp::io::input<int, double>& pair = make<int, double>("pair");
+        atp::io::input<int>& number = make<atp::io::input<int>>("number");
+        atp::io::input<std::string>& text = make<atp::io::input<std::string>>("text");
+        atp::io::input<int, double>& pair = make<atp::io::input<int, double>>("pair");
     };
 
     class DemoModule : public atp::Module<demo_inputs, atp::io::outputs> {

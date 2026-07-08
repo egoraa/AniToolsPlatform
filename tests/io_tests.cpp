@@ -15,8 +15,8 @@
 namespace {
 
     struct test_inputs : atp::io::inputs {
-        atp::io::input<int>& input1 = make<int>("input1");
-        atp::io::input<std::string>& input2 = make<std::string>("input2");
+        atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
+        atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
     };
 
 } // namespace
@@ -89,7 +89,7 @@ TEST(Input, ReentrantCallbackIsSafe) {
 }
 
 TEST(UnsafeInput, BehavesLikeInput) {
-    atp::io::unsafe_input<int> in{"in_int"};
+    atp::io::input<int> in{"in_int", atp::io::unsafe};
     int observed = 0;
     in.when([&](const int& v) { observed = v; });
     in(7);
@@ -100,7 +100,7 @@ TEST(UnsafeInput, BehavesLikeInput) {
 }
 
 TEST(UnsafeQueuedInput, BehavesLikeQueuedInput) {
-    atp::io::unsafe_queued_input<int> in{"q_int"};
+    atp::io::queued_input<int> in{"q_int", atp::io::unsafe};
     in(1);
     in(2);
     EXPECT_EQ(std::get<0>(in.pop()), 1);
@@ -263,55 +263,58 @@ TEST(InputsRegistry, GetInputByNameReturnsMetadata) {
 
 TEST(InputsRegistry, GetInputAliasesField) {
     test_inputs ins;
-    ins.get_input<int>("input1")(100);
+    ins.get<atp::io::input<int>>("input1")(100);
     EXPECT_EQ(std::get<0>(ins.input1.get()), 100); // то же поле, не копия
 }
 
 TEST(InputsRegistry, WrongTypeThrows) {
     test_inputs ins;
-    EXPECT_THROW((void)ins.get_input<std::string>("input1"), std::runtime_error);
+    EXPECT_THROW((void)ins.get<atp::io::input<std::string>>("input1"), std::runtime_error);
 }
 
 TEST(InputsRegistry, QueuedInputThroughRegistry) {
     atp::io::inputs ins;
-    atp::io::queued_input<int>& q = ins.make_queued<int>("q");
+    atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q");
     q(1);
-    ins.get_queued<int>("q")(2);
+    ins.get<atp::io::queued_input<int>>("q")(2);
     EXPECT_EQ(std::get<0>(q.pop()), 1);
     EXPECT_EQ(std::get<0>(q.pop()), 2);
 }
 
 TEST(InputsRegistry, UnsafeInputsThroughRegistry) {
     atp::io::inputs ins;
-    atp::io::unsafe_input<int>& fast = ins.make<int>("fast", atp::io::unsafe);
-    atp::io::unsafe_queued_input<int>& q = ins.make_queued<int>("q", atp::io::unsafe);
+    atp::io::input<int>& fast = ins.make<atp::io::input<int>>("fast", atp::io::unsafe);
+    atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q", atp::io::unsafe);
     fast(1);
     q(2);
-    EXPECT_EQ(std::get<0>(ins.get_input<int>("fast", atp::io::unsafe).get()), 1);
-    EXPECT_EQ(std::get<0>(ins.get_queued<int>("q", atp::io::unsafe).pop()), 2);
+    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("fast").get()), 1);
+    EXPECT_EQ(std::get<0>(ins.get<atp::io::queued_input<int>>("q").pop()), 2);
 }
 
-TEST(InputsRegistry, ThreadSafetyContractMismatchThrows) {
+TEST(InputsRegistry, SafetyIsNotPartOfTheType) {
     atp::io::inputs ins;
-    ins.make<int>("safe");
-    ins.make<int>("fast", atp::io::unsafe);
-    // Сигнатура tuple<int> общая, но политика блокировки — часть контракта
-    EXPECT_THROW((void)ins.get_input<int>("safe", atp::io::unsafe), std::runtime_error);
-    EXPECT_THROW((void)ins.get_input<int>("fast"), std::runtime_error);
+    ins.make<atp::io::input<int>>("safe");
+    ins.make<atp::io::input<int>>("fast", atp::io::unsafe);
+    // Политика блокировки — рантайм-свойство экземпляра: доступ по имени
+    // одинаков для обоих входов и на политику не смотрит
+    ins.get<atp::io::input<int>>("safe")(1);
+    ins.get<atp::io::input<int>>("fast")(2);
+    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("safe").get()), 1);
+    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("fast").get()), 2);
 }
 
 TEST(InputsRegistry, KindMismatchThrows) {
     test_inputs ins;
-    ins.make_queued<int>("q");
+    ins.make<atp::io::queued_input<int>>("q");
     // Сигнатуры совпадают (tuple<int>), но вид входа разный
-    EXPECT_THROW((void)ins.get_queued<int>("input1"), std::runtime_error);
-    EXPECT_THROW((void)ins.get_input<int>("q"), std::runtime_error);
+    EXPECT_THROW((void)ins.get<atp::io::queued_input<int>>("input1"), std::runtime_error);
+    EXPECT_THROW((void)ins.get<atp::io::input<int>>("q"), std::runtime_error);
 }
 
 TEST(InputsRegistry, UnknownNameThrows) {
     test_inputs ins;
     EXPECT_THROW((void)ins.get_input("no_such_input"), std::runtime_error);
-    EXPECT_THROW((void)ins.get_input<int>("no_such_input"), std::runtime_error);
+    EXPECT_THROW((void)ins.get<atp::io::input<int>>("no_such_input"), std::runtime_error);
 }
 
 TEST(InputsRegistry, ListEnumeratesAll) {
@@ -321,18 +324,18 @@ TEST(InputsRegistry, ListEnumeratesAll) {
 
 TEST(InputsRegistry, DuplicateNameThrowsOnConstruction) {
     struct duplicate_inputs : atp::io::inputs {
-        atp::io::input<int>& a = make<int>("same");
-        atp::io::input<int>& b = make<int>("same");
+        atp::io::input<int>& a = make<atp::io::input<int>>("same");
+        atp::io::input<int>& b = make<atp::io::input<int>>("same");
     };
     EXPECT_THROW((duplicate_inputs{}), std::runtime_error);
 }
 
 TEST(InputsRegistry, DynamicInputCanBeRemoved) {
     test_inputs ins;
-    atp::io::input<int>& extra = ins.make<int>("extra");
+    atp::io::input<int>& extra = ins.make<atp::io::input<int>>("extra");
     extra(5);
     EXPECT_EQ(ins.list().size(), 3u);
-    EXPECT_EQ(std::get<0>(ins.get_input<int>("extra").get()), 5);
+    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("extra").get()), 5);
 
     EXPECT_TRUE(ins.remove("extra"));
     EXPECT_EQ(ins.list().size(), 2u);

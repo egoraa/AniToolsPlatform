@@ -4,7 +4,6 @@
 #include <concepts>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -17,16 +16,16 @@
 
 namespace atp::io {
 
-    // Вход «последнее значение побеждает», параметризованный политикой
-    // блокировки (std::mutex / null_mutex) — см. алиасы input / unsafe_input.
-    // С std::mutex потокобезопасен: колбэк вызывается вне замка со снапшотом
+    // Вход «последнее значение побеждает». Потокобезопасен по умолчанию;
+    // блокировка отключается тегом unsafe в конструкторе (см. safety).
+    // С включённой блокировкой колбэк вызывается вне замка со снапшотом
     // значения именно этого вызова, поэтому реентерабельные и конкурентные
     // записи безопасны; порядок колбэков при конкурентных записях не гарантируется.
-    template <typename Mutex, typename... Args>
-    class basic_input : public input_base {
+    template <typename... Args>
+    class input : public input_base {
     public:
-        explicit basic_input(std::string name)
-            : input_base(std::move(name), typeid(std::tuple<Args...>)) {}
+        explicit input(std::string name, safety s = safe)
+            : input_base(std::move(name), typeid(std::tuple<Args...>), s) {}
 
         // Шаблонные параметры вызова — настоящий perfect forwarding,
         // принимает и lvalue, и rvalue.
@@ -36,7 +35,7 @@ namespace atp::io {
             callback_ptr cb;
             std::optional<std::tuple<Args...>> snapshot;
             {
-                std::lock_guard lock(mutex_);
+                auto guard = lock();
                 value_.emplace(std::forward<CallArgs>(call_args)...);
                 cb = callback_;
                 if (cb) {
@@ -49,14 +48,14 @@ namespace atp::io {
         }
 
         [[nodiscard]] bool has_value() const {
-            std::lock_guard lock(mutex_);
+            auto guard = lock();
             return value_.has_value();
         }
 
         // Возвращает копию: ссылка наружу была бы гонкой — другой поток
         // может перезаписать значение в любой момент.
         [[nodiscard]] std::tuple<Args...> get() const {
-            std::lock_guard lock(mutex_);
+            auto guard = lock();
             if (!value_) {
                 throw std::runtime_error("input '" + name() + "' has no value");
             }
@@ -64,7 +63,7 @@ namespace atp::io {
         }
 
         void reset() override {
-            std::lock_guard lock(mutex_);
+            auto guard = lock();
             value_.reset();
         }
 
@@ -72,7 +71,7 @@ namespace atp::io {
             auto cb = callback
                 ? std::make_shared<const std::function<void(const Args&...)>>(std::move(callback))
                 : callback_ptr{};
-            std::lock_guard lock(mutex_);
+            auto guard = lock();
             callback_ = std::move(cb);
         }
 
@@ -82,16 +81,9 @@ namespace atp::io {
         // объект из-под работающего вызова.
         using callback_ptr = std::shared_ptr<const std::function<void(const Args&...)>>;
 
-        mutable Mutex mutex_;
         std::optional<std::tuple<Args...>> value_;
         callback_ptr callback_;
     };
-
-    template <typename... Args>
-    using input = basic_input<std::mutex, Args...>;
-
-    template <typename... Args>
-    using unsafe_input = basic_input<null_mutex, Args...>;
 
 } // namespace atp::io
 

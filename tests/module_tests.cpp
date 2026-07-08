@@ -10,8 +10,8 @@
 namespace {
 
     struct test_inputs : atp::io::inputs {
-        atp::io::input<int>& input1 = make<int>("input1");
-        atp::io::input<std::string>& input2 = make<std::string>("input2");
+        atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
+        atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
     };
 
     class TestModule : public atp::Module<test_inputs, atp::io::outputs> {
@@ -42,7 +42,7 @@ TEST(Module, NamedAccessThroughModule) {
     TestModule module;
     EXPECT_EQ(module.inputs().get_input("input1").type(),
               std::type_index(typeid(std::tuple<int>)));
-    module.inputs().get_input<int>("input1")(7);
+    module.inputs().get<atp::io::input<int>>("input1")(7);
     EXPECT_EQ(std::get<0>(module.inputs().input1.get()), 7);
 }
 

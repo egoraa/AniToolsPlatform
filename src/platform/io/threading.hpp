@@ -3,20 +3,15 @@
 
 namespace atp::io {
 
-    // Пустой мьютекс для однопоточных входов: удовлетворяет Lockable,
-    // компилятор выкидывает lock/unlock целиком — ноль накладных расходов.
-    struct null_mutex {
-        void lock() noexcept {}
-        void unlock() noexcept {}
-        bool try_lock() noexcept { return true; }
+    // Потокобезопасность — свойство экземпляра входа, а не его типа.
+    // Выбирается в точке создания:
+    //     make<input<int>>("fast", unsafe)
+    struct safety {
+        bool locking;
     };
 
-    // Тег для выбора однопоточного варианта входа в точке сборки пайплайна:
-    //     make<int>("fast", unsafe)
-    struct unsafe_t {
-        explicit unsafe_t() = default;
-    };
-    inline constexpr unsafe_t unsafe{};
+    inline constexpr safety safe{true};
+    inline constexpr safety unsafe{false};
 
 } // namespace atp::io
 

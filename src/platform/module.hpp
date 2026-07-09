@@ -7,9 +7,10 @@
 
 namespace atp {
 
-    class IModule {
+    // Type-erased база модуля — в одном ряду с io_base/input_base/output_base.
+    class module_base {
     public:
-        virtual ~IModule() = default;
+        virtual ~module_base() = default;
 
         virtual void initialize() = 0;
         virtual void start() = 0;
@@ -17,8 +18,10 @@ namespace atp {
         virtual void stop() = 0;
     };
 
+    // «module» — контекстно-зависимое слово C++20: внутри namespace atp
+    // класс с таким именем легален и конфликтов не создаёт.
     template <typename TInputs, typename TOutputs>
-    class Module : public IModule {
+    class module : public module_base {
     public:
         void initialize() override {}
         void start() override {}

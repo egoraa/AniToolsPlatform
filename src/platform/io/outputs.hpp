@@ -11,15 +11,10 @@ namespace atp::io {
     // Реестр выходов; владеет ими. Наследник объявляет выходы ссылками:
     //     output<int>& result = make<output<int>>("result");
     //     output<int>& fast = make<output<int>>("fast", unsafe);
-    // Вся механика (make/get/remove/list) — в detail::registry.
+    // Вся механика (make/get/at/find/remove/list) — в detail::registry.
     class outputs : public detail::registry<output_base> {
     public:
         outputs() : registry("output") {}
-
-        // Нетипизированный доступ — для перечисления, сброса и машинерии
-        // соединений (connect по именам живёт на output_base).
-        [[nodiscard]] output_base& get_output(const std::string& name) { return find(name); }
-        [[nodiscard]] const output_base& get_output(const std::string& name) const { return find(name); }
     };
 
 } // namespace atp::io

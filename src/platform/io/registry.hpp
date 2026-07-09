@@ -46,11 +46,28 @@ namespace atp::io::detail {
         // view. typeid(base) сравнивает именно конкретный вид элемента.
         template <std::derived_from<TBase> TItem>
         [[nodiscard]] TItem& get(const std::string& name) {
-            TBase& base = find(name);
+            TBase& base = at(name);
             if (typeid(base) != typeid(TItem)) {
                 throw std::runtime_error(std::string(kind_) + " '" + name + "' has a different type");
             }
             return static_cast<TItem&>(base);
+        }
+
+        // Type-erased доступ по имени — пара в духе std::map: at() бросает,
+        // find() возвращает nullptr. const-метод отдаёт неконстантную ссылку:
+        // const unique_ptr разыменовывается в неконстантный объект, поэтому
+        // одна функция обслуживает оба варианта.
+        [[nodiscard]] TBase& at(const std::string& name) const {
+            TBase* item = find(name);
+            if (!item) {
+                throw std::runtime_error("no " + std::string(kind_) + " named '" + name + "'");
+            }
+            return *item;
+        }
+
+        [[nodiscard]] TBase* find(const std::string& name) const {
+            auto it = registry_.find(name);
+            return it == registry_.end() ? nullptr : it->second.get();
         }
 
         bool remove(const std::string& name) {
@@ -70,17 +87,6 @@ namespace atp::io::detail {
     protected:
         explicit registry(std::string_view kind) : kind_(kind) {}
         ~registry() = default;  // защищённый: разрушение только через наследника
-
-        // Нетипизированный поиск; наследники публикуют его под доменными
-        // именами get_input/get_output. const unique_ptr разыменовывается в
-        // неконстантную ссылку, поэтому одна функция обслуживает оба варианта.
-        [[nodiscard]] TBase& find(const std::string& name) const {
-            auto it = registry_.find(name);
-            if (it == registry_.end()) {
-                throw std::runtime_error("no " + std::string(kind_) + " named '" + name + "'");
-            }
-            return *it->second;
-        }
 
     private:
         std::string_view kind_;

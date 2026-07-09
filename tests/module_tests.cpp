@@ -13,7 +13,7 @@ namespace {
         atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
     };
 
-    class TestModule : public atp::Module<test_inputs, atp::io::outputs> {
+    class test_module : public atp::module<test_inputs, atp::io::outputs> {
     public:
         void initialize() override { initialized = true; }
         bool initialized = false;
@@ -22,13 +22,13 @@ namespace {
 } // namespace
 
 TEST(Module, InitializeOverrideRuns) {
-    TestModule module;
+    test_module module;
     module.initialize();
     EXPECT_TRUE(module.initialized);
 }
 
 TEST(Module, InputsReturnsReference) {
-    TestModule module;
+    test_module module;
     module.inputs().input1(42);
     std::string world = "World";
     module.inputs().input2(world);
@@ -38,16 +38,16 @@ TEST(Module, InputsReturnsReference) {
 }
 
 TEST(Module, NamedAccessThroughModule) {
-    TestModule module;
-    EXPECT_EQ(module.inputs().get_input("input1").type(),
+    test_module module;
+    EXPECT_EQ(module.inputs().at("input1").type(),
               std::type_index(typeid(int)));
     module.inputs().get<atp::io::input<int>>("input1")(7);
     EXPECT_EQ(module.inputs().input1.get(), 7);
 }
 
 TEST(Module, ConstAccess) {
-    TestModule module;
+    test_module module;
     module.inputs().input1(1);
-    const TestModule& cmodule = module;
+    const test_module& cmodule = module;
     EXPECT_FALSE(cmodule.inputs().input1.empty());
 }

@@ -14,9 +14,9 @@ namespace {
         atp::io::queued_input<int>& history = make<atp::io::queued_input<int>>("history");
     };
 
-    class SourceModule : public atp::Module<atp::io::inputs, source_outputs> {};
+    class source_module : public atp::module<atp::io::inputs, source_outputs> {};
 
-    class SinkModule : public atp::Module<sink_inputs, atp::io::outputs> {
+    class sink_module : public atp::module<sink_inputs, atp::io::outputs> {
     public:
         void initialize() override {
             inputs().number.when([](const int& value) {
@@ -28,15 +28,15 @@ namespace {
 } // namespace
 
 int main() {
-    SourceModule source;
-    SinkModule sink;
+    source_module source;
+    sink_module sink;
     source.initialize();
     sink.initialize();
 
     // Соединение выход→вход: типизированное — прямо в коде,
     // type-erased по именам — путь будущей машинерии соединений.
     source.outputs().number.connect(sink.inputs().number);
-    source.outputs().get_output("number").connect(sink.inputs().get_input("history"));
+    source.outputs().at("number").connect(sink.inputs().at("history"));
 
     source.outputs().number(42);  // рассылка обоим входам + кэш
 

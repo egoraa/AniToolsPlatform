@@ -258,9 +258,9 @@ TEST(InputsRegistry, TypedFieldAccess) {
     EXPECT_EQ(ins.input1.get(), 42);
 }
 
-TEST(InputsRegistry, GetInputByNameReturnsMetadata) {
+TEST(InputsRegistry, AtByNameReturnsMetadata) {
     test_inputs ins;
-    const atp::io::input_base& in = ins.get_input("input1");
+    const atp::io::input_base& in = ins.at("input1");
     EXPECT_EQ(in.name(), "input1");
     EXPECT_EQ(in.type(), std::type_index(typeid(int)));
 }
@@ -317,8 +317,16 @@ TEST(InputsRegistry, KindMismatchThrows) {
 
 TEST(InputsRegistry, UnknownNameThrows) {
     test_inputs ins;
-    EXPECT_THROW((void)ins.get_input("no_such_input"), std::runtime_error);
+    EXPECT_THROW((void)ins.at("no_such_input"), std::runtime_error);
     EXPECT_THROW((void)ins.get<atp::io::input<int>>("no_such_input"), std::runtime_error);
+}
+
+TEST(InputsRegistry, FindDoesNotThrow) {
+    test_inputs ins;
+    atp::io::input_base* in = ins.find("input1");
+    ASSERT_NE(in, nullptr);
+    EXPECT_EQ(in->name(), "input1");
+    EXPECT_EQ(ins.find("no_such_input"), nullptr);
 }
 
 TEST(InputsRegistry, ListEnumeratesAll) {
@@ -343,7 +351,7 @@ TEST(InputsRegistry, DynamicInputCanBeRemoved) {
 
     EXPECT_TRUE(ins.remove("extra"));
     EXPECT_EQ(ins.list().size(), 2u);
-    EXPECT_THROW((void)ins.get_input("extra"), std::runtime_error);
+    EXPECT_THROW((void)ins.at("extra"), std::runtime_error);
     EXPECT_FALSE(ins.remove("extra"));
 }
 
@@ -470,12 +478,12 @@ TEST(Output, ReplayWithEmptyCacheDeliversNothing) {
 TEST(Output, TypeErasedConnectChecksCompatibility) {
     test_outputs outs;
     test_inputs ins;
-    atp::io::output_base& out = outs.get_output("out1");
-    out.connect(ins.get_input("input1")); // int → int: совместимо
+    atp::io::output_base& out = outs.at("out1");
+    out.connect(ins.at("input1")); // int → int: совместимо
     outs.out1(5);
     EXPECT_EQ(ins.input1.get(), 5);
     // int → string: несовместимо, рантайм-проверка отклоняет
-    EXPECT_THROW(out.connect(ins.get_input("input2")), std::runtime_error);
+    EXPECT_THROW(out.connect(ins.at("input2")), std::runtime_error);
 }
 
 TEST(Output, TypeErasedConnectAcceptsQueuedInput) {
@@ -484,7 +492,7 @@ TEST(Output, TypeErasedConnectAcceptsQueuedInput) {
     atp::io::output<int> out{"out_int"};
     // Выходу подходит любой наследник input<int> — в отличие от реестра,
     // где get<> требует точный вид входа
-    static_cast<atp::io::output_base&>(out).connect(ins.get_input("q"), atp::io::replay);
+    static_cast<atp::io::output_base&>(out).connect(ins.at("q"), atp::io::replay);
     out(1);
     EXPECT_EQ(q.pop(), 1);
 }
@@ -543,9 +551,9 @@ TEST(OutputsRegistry, TypedFieldAccess) {
     EXPECT_EQ(outs.get<atp::io::output<int>>("out1").get(), 42); // то же поле, не копия
 }
 
-TEST(OutputsRegistry, GetOutputByNameReturnsMetadata) {
+TEST(OutputsRegistry, AtByNameReturnsMetadata) {
     test_outputs outs;
-    const atp::io::output_base& out = outs.get_output("out1");
+    const atp::io::output_base& out = outs.at("out1");
     EXPECT_EQ(out.name(), "out1");
     EXPECT_EQ(out.type(), std::type_index(typeid(int)));
 }
@@ -557,8 +565,16 @@ TEST(OutputsRegistry, WrongTypeThrows) {
 
 TEST(OutputsRegistry, UnknownNameThrows) {
     test_outputs outs;
-    EXPECT_THROW((void)outs.get_output("no_such_output"), std::runtime_error);
+    EXPECT_THROW((void)outs.at("no_such_output"), std::runtime_error);
     EXPECT_THROW((void)outs.get<atp::io::output<int>>("no_such_output"), std::runtime_error);
+}
+
+TEST(OutputsRegistry, FindDoesNotThrow) {
+    test_outputs outs;
+    atp::io::output_base* out = outs.find("out1");
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(out->name(), "out1");
+    EXPECT_EQ(outs.find("no_such_output"), nullptr);
 }
 
 TEST(OutputsRegistry, ListEnumeratesAll) {
@@ -583,6 +599,6 @@ TEST(OutputsRegistry, DynamicOutputCanBeRemoved) {
 
     EXPECT_TRUE(outs.remove("extra"));
     EXPECT_EQ(outs.list().size(), 2u);
-    EXPECT_THROW((void)outs.get_output("extra"), std::runtime_error);
+    EXPECT_THROW((void)outs.at("extra"), std::runtime_error);
     EXPECT_FALSE(outs.remove("extra"));
 }

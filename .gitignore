@@ -2,3 +2,4 @@ cmake-build-*/
 .idea/
 .superpowers/
 external/
+.claude/

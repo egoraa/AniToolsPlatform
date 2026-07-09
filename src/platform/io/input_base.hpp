@@ -37,7 +37,7 @@ namespace atp::io {
 
     private:
         std::string name_;
-        std::type_index type_;  // typeid(std::tuple<Args...>) — источник истины
+        std::type_index type_;  // typeid(T) — источник истины
         mutable std::mutex mutex_;
         const bool locking_;
     };

@@ -1,5 +1,4 @@
 #include <string>
-#include <tuple>
 #include <typeindex>
 #include <typeinfo>
 
@@ -34,21 +33,21 @@ TEST(Module, InputsReturnsReference) {
     std::string world = "World";
     module.inputs().input2(world);
     // записи не пропадают во временной копии — inputs() отдаёт ссылку на член
-    EXPECT_EQ(std::get<0>(module.inputs().input1.get()), 42);
-    EXPECT_EQ(std::get<0>(module.inputs().input2.get()), "World");
+    EXPECT_EQ(module.inputs().input1.get(), 42);
+    EXPECT_EQ(module.inputs().input2.get(), "World");
 }
 
 TEST(Module, NamedAccessThroughModule) {
     TestModule module;
     EXPECT_EQ(module.inputs().get_input("input1").type(),
-              std::type_index(typeid(std::tuple<int>)));
+              std::type_index(typeid(int)));
     module.inputs().get<atp::io::input<int>>("input1")(7);
-    EXPECT_EQ(std::get<0>(module.inputs().input1.get()), 7);
+    EXPECT_EQ(module.inputs().input1.get(), 7);
 }
 
 TEST(Module, ConstAccess) {
     TestModule module;
     module.inputs().input1(1);
     const TestModule& cmodule = module;
-    EXPECT_TRUE(cmodule.inputs().input1.has_value());
+    EXPECT_FALSE(cmodule.inputs().input1.empty());
 }

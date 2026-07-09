@@ -5,6 +5,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -40,15 +41,16 @@ namespace atp::io {
             return ref;
         }
 
-        // dynamic_cast, а не сравнение type(): сигнатура tuple<Args...> общая
-        // у input и queued_input, различить конкретный вид может только RTTI.
+        // Точное совпадение динамического типа, а не dynamic_cast: queued_input<T>
+        // наследует input<T>, поэтому апкаст к базе прошёл бы и вернул вырожденный
+        // view. typeid(base) сравнивает именно конкретный вид входа.
         template <std::derived_from<input_base> TInput>
         [[nodiscard]] TInput& get(const std::string& name) {
-            auto* typed = dynamic_cast<TInput*>(&find(name));
-            if (typed == nullptr) {
+            input_base& base = find(name);
+            if (typeid(base) != typeid(TInput)) {
                 throw std::runtime_error("input '" + name + "' has a different type");
             }
-            return *typed;
+            return static_cast<TInput&>(base);
         }
 
         bool remove(const std::string& name) {

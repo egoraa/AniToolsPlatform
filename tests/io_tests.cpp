@@ -3,7 +3,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <tuple>
 #include <typeindex>
 #include <typeinfo>
 #include <vector>
@@ -24,27 +23,27 @@ namespace {
 TEST(Input, MetadataCarriesNameAndType) {
     atp::io::input<int> in{"in_int"};
     EXPECT_EQ(in.name(), "in_int");
-    EXPECT_EQ(in.type(), std::type_index(typeid(std::tuple<int>)));
+    EXPECT_EQ(in.type(), std::type_index(typeid(int)));
 }
 
 TEST(Input, EmptyStateThrowsOnGet) {
     atp::io::input<int> in{"in_int"};
-    EXPECT_FALSE(in.has_value());
+    EXPECT_TRUE(in.empty());
     EXPECT_THROW((void)in.get(), std::runtime_error);
 }
 
 TEST(Input, AcceptsRvalue) {
     atp::io::input<int> in{"in_int"};
     in(42);
-    ASSERT_TRUE(in.has_value());
-    EXPECT_EQ(std::get<0>(in.get()), 42);
+    ASSERT_FALSE(in.empty());
+    EXPECT_EQ(in.get(), 42);
 }
 
 TEST(Input, AcceptsLvalueWithoutMoving) {
     atp::io::input<std::string> in{"in_str"};
     std::string hello = "Hello";
     in(hello);
-    EXPECT_EQ(std::get<0>(in.get()), "Hello");
+    EXPECT_EQ(in.get(), "Hello");
     EXPECT_EQ(hello, "Hello"); // lvalue не перемещён
 }
 
@@ -54,21 +53,14 @@ TEST(Input, CallbackFiresAndValueSurvives) {
     in.when([&](const int& v) { observed = v; });
     in(7);
     EXPECT_EQ(observed, 7);
-    EXPECT_EQ(std::get<0>(in.get()), 7); // значение не «съедено» колбэком
+    EXPECT_EQ(in.get(), 7); // значение не «съедено» колбэком
 }
 
 TEST(Input, ResetClearsValue) {
     atp::io::input<int> in{"in_int"};
     in(42);
     in.reset();
-    EXPECT_FALSE(in.has_value());
-}
-
-TEST(Input, MultiArgInput) {
-    atp::io::input<int, std::string> in{"in_pair"};
-    in(1, "one");
-    EXPECT_EQ(std::get<0>(in.get()), 1);
-    EXPECT_EQ(std::get<1>(in.get()), "one");
+    EXPECT_TRUE(in.empty());
 }
 
 TEST(Input, ReentrantCallbackIsSafe) {
@@ -85,7 +77,7 @@ TEST(Input, ReentrantCallbackIsSafe) {
     });
     in(7);
     EXPECT_EQ(outer_value_after_reentry, 7);
-    EXPECT_EQ(std::get<0>(in.get()), 100);
+    EXPECT_EQ(in.get(), 100);
 }
 
 TEST(UnsafeInput, BehavesLikeInput) {
@@ -94,17 +86,17 @@ TEST(UnsafeInput, BehavesLikeInput) {
     in.when([&](const int& v) { observed = v; });
     in(7);
     EXPECT_EQ(observed, 7);
-    EXPECT_EQ(std::get<0>(in.get()), 7);
+    EXPECT_EQ(in.get(), 7);
     in.reset();
-    EXPECT_FALSE(in.has_value());
+    EXPECT_TRUE(in.empty());
 }
 
 TEST(UnsafeQueuedInput, BehavesLikeQueuedInput) {
     atp::io::queued_input<int> in{"q_int", atp::io::unsafe};
     in(1);
     in(2);
-    EXPECT_EQ(std::get<0>(in.pop()), 1);
-    EXPECT_EQ(std::get<0>(in.pop()), 2);
+    EXPECT_EQ(in.pop(), 1);
+    EXPECT_EQ(in.pop(), 2);
     EXPECT_TRUE(in.empty());
 }
 
@@ -121,9 +113,9 @@ TEST(QueuedInput, PopsInFifoOrder) {
     in(2);
     in(3);
     EXPECT_EQ(in.size(), 3u);
-    EXPECT_EQ(std::get<0>(in.pop()), 1);
-    EXPECT_EQ(std::get<0>(in.pop()), 2);
-    EXPECT_EQ(std::get<0>(in.pop()), 3);
+    EXPECT_EQ(in.pop(), 1);
+    EXPECT_EQ(in.pop(), 2);
+    EXPECT_EQ(in.pop(), 3);
     EXPECT_TRUE(in.empty());
 }
 
@@ -131,7 +123,7 @@ TEST(QueuedInput, AcceptsLvalueWithoutMoving) {
     atp::io::queued_input<std::string> in{"q_str"};
     std::string hello = "Hello";
     in(hello);
-    EXPECT_EQ(std::get<0>(in.pop()), "Hello");
+    EXPECT_EQ(in.pop(), "Hello");
     EXPECT_EQ(hello, "Hello"); // lvalue не перемещён
 }
 
@@ -139,7 +131,7 @@ TEST(QueuedInput, MetadataMatchesSignature) {
     atp::io::queued_input<int> in{"q_int"};
     EXPECT_EQ(in.name(), "q_int");
     // Сигнатура та же, что у input<int>: вид входа не влияет на type()
-    EXPECT_EQ(in.type(), std::type_index(typeid(std::tuple<int>)));
+    EXPECT_EQ(in.type(), std::type_index(typeid(int)));
 }
 
 TEST(QueuedInput, ResetClearsQueue) {
@@ -157,7 +149,7 @@ TEST(QueuedInput, TryPopReturnsNulloptWhenEmpty) {
     in(5);
     auto item = in.try_pop();
     ASSERT_TRUE(item.has_value());
-    EXPECT_EQ(std::get<0>(*item), 5);
+    EXPECT_EQ(*item, 5);
     EXPECT_TRUE(in.empty());
 }
 
@@ -169,8 +161,24 @@ TEST(QueuedInput, DrainTakesEverythingAtOnce) {
     auto items = in.drain();
     EXPECT_EQ(items.size(), 3u);
     EXPECT_TRUE(in.empty());
-    EXPECT_EQ(std::get<0>(items.front()), 1);
-    EXPECT_EQ(std::get<0>(items.back()), 3);
+    EXPECT_EQ(items.front(), 1);
+    EXPECT_EQ(items.back(), 3);
+}
+
+TEST(QueuedInput, CallbackFiresOnPushAndValueStaysQueued) {
+    atp::io::queued_input<int> in{"q_int"};
+    int observed = 0;
+    int calls = 0;
+    in.when([&](const int& v) {
+        observed = v;
+        ++calls;
+    });
+    in(7);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(observed, 7);
+    // Колбэк не «съел» значение — оно по-прежнему в очереди
+    EXPECT_EQ(in.size(), 1u);
+    EXPECT_EQ(in.pop(), 7);
 }
 
 TEST(QueuedInput, ConcurrentProducersLoseNothing) {
@@ -203,21 +211,12 @@ TEST(QueuedInput, ProducerAndConsumerRunConcurrently) {
         });
         while (received < kCount) {
             if (auto item = in.try_pop()) {
-                sum += std::get<0>(*item);
+                sum += *item;
                 ++received;
             }
         }
     }
     EXPECT_EQ(sum, static_cast<long long>(kCount) * (kCount + 1) / 2);
-}
-
-TEST(QueuedInput, MultiArgPopsAsTuple) {
-    atp::io::queued_input<int, std::string> in{"q_pair"};
-    in(1, "one");
-    in(2, "two");
-    auto [num, text] = in.pop();
-    EXPECT_EQ(num, 1);
-    EXPECT_EQ(text, "one");
 }
 
 TEST(Input, ConcurrentWritersDeliverEveryCallbackWithOwnValue) {
@@ -245,26 +244,26 @@ TEST(Input, ConcurrentWritersDeliverEveryCallbackWithOwnValue) {
     // а не «последнее на момент вызова» значение.
     EXPECT_EQ(sum.load(),
               static_cast<long long>(kThreads) * kPerThread * (kPerThread + 1) / 2);
-    EXPECT_TRUE(in.has_value());
+    EXPECT_FALSE(in.empty());
 }
 
 TEST(InputsRegistry, TypedFieldAccess) {
     test_inputs ins;
     ins.input1(42);
-    EXPECT_EQ(std::get<0>(ins.input1.get()), 42);
+    EXPECT_EQ(ins.input1.get(), 42);
 }
 
 TEST(InputsRegistry, GetInputByNameReturnsMetadata) {
     test_inputs ins;
     const atp::io::input_base& in = ins.get_input("input1");
     EXPECT_EQ(in.name(), "input1");
-    EXPECT_EQ(in.type(), std::type_index(typeid(std::tuple<int>)));
+    EXPECT_EQ(in.type(), std::type_index(typeid(int)));
 }
 
 TEST(InputsRegistry, GetInputAliasesField) {
     test_inputs ins;
     ins.get<atp::io::input<int>>("input1")(100);
-    EXPECT_EQ(std::get<0>(ins.input1.get()), 100); // то же поле, не копия
+    EXPECT_EQ(ins.input1.get(), 100); // то же поле, не копия
 }
 
 TEST(InputsRegistry, WrongTypeThrows) {
@@ -277,8 +276,8 @@ TEST(InputsRegistry, QueuedInputThroughRegistry) {
     atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q");
     q(1);
     ins.get<atp::io::queued_input<int>>("q")(2);
-    EXPECT_EQ(std::get<0>(q.pop()), 1);
-    EXPECT_EQ(std::get<0>(q.pop()), 2);
+    EXPECT_EQ(q.pop(), 1);
+    EXPECT_EQ(q.pop(), 2);
 }
 
 TEST(InputsRegistry, UnsafeInputsThroughRegistry) {
@@ -287,8 +286,8 @@ TEST(InputsRegistry, UnsafeInputsThroughRegistry) {
     atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q", atp::io::unsafe);
     fast(1);
     q(2);
-    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("fast").get()), 1);
-    EXPECT_EQ(std::get<0>(ins.get<atp::io::queued_input<int>>("q").pop()), 2);
+    EXPECT_EQ(ins.get<atp::io::input<int>>("fast").get(), 1);
+    EXPECT_EQ(ins.get<atp::io::queued_input<int>>("q").pop(), 2);
 }
 
 TEST(InputsRegistry, SafetyIsNotPartOfTheType) {
@@ -299,14 +298,14 @@ TEST(InputsRegistry, SafetyIsNotPartOfTheType) {
     // одинаков для обоих входов и на политику не смотрит
     ins.get<atp::io::input<int>>("safe")(1);
     ins.get<atp::io::input<int>>("fast")(2);
-    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("safe").get()), 1);
-    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("fast").get()), 2);
+    EXPECT_EQ(ins.get<atp::io::input<int>>("safe").get(), 1);
+    EXPECT_EQ(ins.get<atp::io::input<int>>("fast").get(), 2);
 }
 
 TEST(InputsRegistry, KindMismatchThrows) {
     test_inputs ins;
     ins.make<atp::io::queued_input<int>>("q");
-    // Сигнатуры совпадают (tuple<int>), но вид входа разный
+    // Сигнатуры совпадают (typeid(int)), но вид входа разный
     EXPECT_THROW((void)ins.get<atp::io::queued_input<int>>("input1"), std::runtime_error);
     EXPECT_THROW((void)ins.get<atp::io::input<int>>("q"), std::runtime_error);
 }
@@ -335,7 +334,7 @@ TEST(InputsRegistry, DynamicInputCanBeRemoved) {
     atp::io::input<int>& extra = ins.make<atp::io::input<int>>("extra");
     extra(5);
     EXPECT_EQ(ins.list().size(), 3u);
-    EXPECT_EQ(std::get<0>(ins.get<atp::io::input<int>>("extra").get()), 5);
+    EXPECT_EQ(ins.get<atp::io::input<int>>("extra").get(), 5);
 
     EXPECT_TRUE(ins.remove("extra"));
     EXPECT_EQ(ins.list().size(), 2u);

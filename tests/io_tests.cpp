@@ -1,3 +1,4 @@
+#include <any>
 #include <atomic>
 #include <cstddef>
 #include <stdexcept>
@@ -83,6 +84,54 @@ TEST(Input, ReentrantCallbackIsSafe) {
     in(7);
     EXPECT_EQ(outer_value_after_reentry, 7);
     EXPECT_EQ(in.get(), 100);
+}
+
+TEST(InputDeliverProtocol, TypedInputAcceptsExactlyItsType) {
+    atp::io::input<int> in{"in_int"};
+    EXPECT_TRUE(in.accepts(typeid(int)));
+    EXPECT_FALSE(in.accepts(typeid(double)));
+    EXPECT_FALSE(in.accepts(typeid(std::any)));
+}
+
+TEST(InputDeliverProtocol, DeliverStoresValue) {
+    atp::io::input<int> in{"in_int"};
+    int v = 42;
+    in.deliver(&v, atp::io::input_base::erased_of<int>());
+    EXPECT_EQ(in.get(), 42);
+}
+
+TEST(InputDeliverProtocol, AnyInputAcceptsEverything) {
+    atp::io::input<std::any> in{"in_any"};
+    EXPECT_TRUE(in.accepts(typeid(int)));
+    EXPECT_TRUE(in.accepts(typeid(std::string)));
+    EXPECT_TRUE(in.accepts(typeid(std::any)));
+}
+
+TEST(InputDeliverProtocol, AnyInputBoxesDeliveredValue) {
+    atp::io::input<std::any> in{"in_any"};
+    int v = 42;
+    in.deliver(&v, atp::io::input_base::erased_of<int>());
+    EXPECT_EQ(std::any_cast<int>(in.get()), 42);
+}
+
+TEST(InputDeliverProtocol, AnyToAnyIsNotDoubleBoxed) {
+    atp::io::input<std::any> in{"in_any"};
+    std::any v = 42;
+    in.deliver(&v, atp::io::input_base::erased_of<std::any>());
+    // Внутри должен лежать исходный int, а не std::any(std::any(42))
+    EXPECT_EQ(in.get().type(), typeid(int));
+    EXPECT_EQ(std::any_cast<int>(in.get()), 42);
+}
+
+TEST(InputDeliverProtocol, QueuedAnyInputAccumulatesMixedTypes) {
+    atp::io::queued_input<std::any> q{"q_any"};
+    int i = 1;
+    std::string s = "two";
+    q.deliver(&i, atp::io::input_base::erased_of<int>());
+    q.deliver(&s, atp::io::input_base::erased_of<std::string>());
+    EXPECT_EQ(q.size(), 2u);
+    EXPECT_EQ(std::any_cast<int>(q.pop()), 1);
+    EXPECT_EQ(std::any_cast<std::string>(q.pop()), "two");
 }
 
 TEST(UnsafeInput, BehavesLikeInput) {

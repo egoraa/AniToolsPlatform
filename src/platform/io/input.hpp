@@ -1,12 +1,14 @@
 #ifndef ANITOOLSPLATFORM_IO_INPUT_HPP
 #define ANITOOLSPLATFORM_IO_INPUT_HPP
 
+#include <any>
 #include <concepts>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <typeindex>
 #include <typeinfo>
 #include <utility>
 
@@ -18,7 +20,8 @@ namespace atp::io {
     // Базовый вход и одновременно вход «последнее значение побеждает».
     // От него наследуются остальные виды входов (см. queued_input): единственная
     // точка расширения — защищённый virtual store(), куда operator() кладёт
-    // принятое значение. Потокобезопасен по умолчанию; блокировка отключается
+    // принятое значение. Приём type-erased значений от выходов — через протокол
+    // accepts/deliver (см. input_base). Потокобезопасен по умолчанию; блокировка отключается
     // тегом unsafe в конструкторе (см. safety). С включённой блокировкой колбэк
     // вызывается вне замка со снапшотом значения именно этого вызова, поэтому
     // реентерабельные и конкурентные записи безопасны; порядок колбэков при
@@ -79,6 +82,33 @@ namespace atp::io {
                 : callback_ptr{};
             auto guard = lock();
             callback_ = std::move(cb);
+        }
+
+        // Протокол доставки (см. input_base). Типизированный вход принимает
+        // ровно свой T; input<std::any> универсален — принимает всё и
+        // упаковывает значение через meta.box. Обе ветки решаются на этапе
+        // компиляции, полной специализации для std::any не требуется;
+        // queued_input наследует протокол как есть.
+        [[nodiscard]] bool accepts(std::type_index produced) const override {
+            if constexpr (std::same_as<T, std::any>) {
+                return true;
+            } else {
+                return produced == type();
+            }
+        }
+
+        void deliver(const void* value, const erased_type& meta) override {
+            if constexpr (std::same_as<T, std::any>) {
+                // any→any — без двойной упаковки
+                if (meta.type == typeid(std::any)) {
+                    (*this)(*static_cast<const std::any*>(value));
+                } else {
+                    (*this)(meta.box(value));
+                }
+            } else {
+                // meta.type == typeid(T) — протокольная гарантия выхода
+                (*this)(*static_cast<const T*>(value));
+            }
         }
 
     protected:

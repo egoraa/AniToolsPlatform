@@ -5,19 +5,22 @@
 
 namespace {
 
-    struct demo_inputs : atp::io::inputs {
-        atp::io::input<int>& number = make<atp::io::input<int>>("number");
-        atp::io::input<std::string>& text = make<atp::io::input<std::string>>("text");
+    struct source_outputs : atp::io::outputs {
+        atp::io::output<int>& number = make<atp::io::output<int>>("number");
     };
 
-    class DemoModule : public atp::Module<demo_inputs, atp::io::outputs> {
+    struct sink_inputs : atp::io::inputs {
+        atp::io::input<int>& number = make<atp::io::input<int>>("number");
+        atp::io::queued_input<int>& history = make<atp::io::queued_input<int>>("history");
+    };
+
+    class SourceModule : public atp::Module<atp::io::inputs, source_outputs> {};
+
+    class SinkModule : public atp::Module<sink_inputs, atp::io::outputs> {
     public:
         void initialize() override {
             inputs().number.when([](const int& value) {
-                std::cout << "number received: " << value << '\n';
-            });
-            inputs().text.when([](const std::string& value) {
-                std::cout << "text received: " << value << '\n';
+                std::cout << "sink received: " << value << '\n';
             });
         }
     };
@@ -25,14 +28,23 @@ namespace {
 } // namespace
 
 int main() {
-    DemoModule module;
-    module.initialize();
+    SourceModule source;
+    SinkModule sink;
+    source.initialize();
+    sink.initialize();
 
-    module.inputs().number(42);
-    module.inputs().text("Hello, AniTools!");
+    // Соединение выход→вход: типизированное — прямо в коде,
+    // type-erased по именам — путь будущей машинерии соединений.
+    source.outputs().number.connect(sink.inputs().number);
+    source.outputs().get_output("number").connect(sink.inputs().get_input("history"));
 
-    std::cout << "declared inputs:\n";
-    for (const auto* info : module.inputs().list()) {
+    source.outputs().number(42);  // рассылка обоим входам + кэш
+
+    std::cout << "cached: " << source.outputs().number.get()
+              << ", queued: " << sink.inputs().history.pop() << '\n';
+
+    std::cout << "declared outputs:\n";
+    for (const auto* info : source.outputs().list()) {
         std::cout << "  '" << info->name() << "' (type hash " << info->type().hash_code() << ")\n";
     }
     return 0;

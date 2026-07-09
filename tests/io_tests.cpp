@@ -18,6 +18,11 @@ namespace {
         atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
     };
 
+    struct test_outputs : atp::io::outputs {
+        atp::io::output<int>& out1 = make<atp::io::output<int>>("out1");
+        atp::io::output<std::string>& out2 = make<atp::io::output<std::string>>("out2");
+    };
+
 } // namespace
 
 TEST(Input, MetadataCarriesNameAndType) {
@@ -340,4 +345,244 @@ TEST(InputsRegistry, DynamicInputCanBeRemoved) {
     EXPECT_EQ(ins.list().size(), 2u);
     EXPECT_THROW((void)ins.get_input("extra"), std::runtime_error);
     EXPECT_FALSE(ins.remove("extra"));
+}
+
+TEST(Output, MetadataCarriesNameAndType) {
+    atp::io::output<int> out{"out_int"};
+    EXPECT_EQ(out.name(), "out_int");
+    EXPECT_EQ(out.type(), std::type_index(typeid(int)));
+}
+
+TEST(Output, EmptyStateThrowsOnGet) {
+    atp::io::output<int> out{"out_int"};
+    EXPECT_TRUE(out.empty());
+    EXPECT_THROW((void)out.get(), std::runtime_error);
+}
+
+TEST(Output, WriteWithoutTargetsOnlyCaches) {
+    atp::io::output<int> out{"out_int"};
+    out(42);
+    ASSERT_FALSE(out.empty());
+    EXPECT_EQ(out.get(), 42);
+    EXPECT_EQ(out.connections(), 0u);
+}
+
+TEST(Output, AcceptsLvalueWithoutMoving) {
+    atp::io::output<std::string> out{"out_str"};
+    std::string hello = "Hello";
+    out(hello);
+    EXPECT_EQ(out.get(), "Hello");
+    EXPECT_EQ(hello, "Hello"); // lvalue не перемещён
+}
+
+TEST(Output, DeliversToAllConnectedInputs) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> a{"a"};
+    atp::io::input<int> b{"b"};
+    out.connect(a);
+    out.connect(b);
+    EXPECT_EQ(out.connections(), 2u);
+    out(7);
+    EXPECT_EQ(a.get(), 7);
+    EXPECT_EQ(b.get(), 7);
+    EXPECT_EQ(out.get(), 7); // кэш обновлён вместе с рассылкой
+}
+
+TEST(Output, DeliversToQueuedInput) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::queued_input<int> q{"q"};
+    out.connect(q);
+    out(1);
+    out(2);
+    EXPECT_EQ(q.pop(), 1);
+    EXPECT_EQ(q.pop(), 2);
+    EXPECT_EQ(out.get(), 2);
+}
+
+TEST(Output, ResetClearsCacheButKeepsConnections) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> in{"in"};
+    out.connect(in);
+    out(1);
+    out.reset();
+    EXPECT_TRUE(out.empty());
+    EXPECT_EQ(out.connections(), 1u);
+    out(2); // соединение пережило reset — доставка работает
+    EXPECT_EQ(in.get(), 2);
+}
+
+TEST(Output, DuplicateConnectThrows) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> in{"in"};
+    out.connect(in);
+    EXPECT_THROW(out.connect(in), std::runtime_error);
+    EXPECT_EQ(out.connections(), 1u);
+}
+
+TEST(Output, DisconnectStopsDelivery) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> in{"in"};
+    out.connect(in);
+    out(1);
+    EXPECT_TRUE(out.disconnect(in));
+    EXPECT_FALSE(out.disconnect(in)); // повторный разрыв — уже не был подключён
+    out(2);
+    EXPECT_EQ(in.get(), 1); // после разрыва доставки нет
+    EXPECT_EQ(out.get(), 2); // кэш при этом обновляется
+}
+
+TEST(Output, DisconnectAllDropsEveryConnection) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> a{"a"};
+    atp::io::input<int> b{"b"};
+    out.connect(a);
+    out.connect(b);
+    out.disconnect_all();
+    EXPECT_EQ(out.connections(), 0u);
+    out(7);
+    EXPECT_TRUE(a.empty());
+    EXPECT_TRUE(b.empty());
+}
+
+TEST(Output, ReplayDeliversCacheOnConnect) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> in{"in"};
+    out(42);
+    out.connect(in, atp::io::replay);
+    EXPECT_EQ(in.get(), 42);
+}
+
+TEST(Output, ConnectWithoutReplayDoesNotDeliverCache) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> in{"in"};
+    out(42);
+    out.connect(in);
+    EXPECT_TRUE(in.empty());
+}
+
+TEST(Output, ReplayWithEmptyCacheDeliversNothing) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> in{"in"};
+    out.connect(in, atp::io::replay);
+    EXPECT_TRUE(in.empty());
+}
+
+TEST(Output, TypeErasedConnectChecksCompatibility) {
+    test_outputs outs;
+    test_inputs ins;
+    atp::io::output_base& out = outs.get_output("out1");
+    out.connect(ins.get_input("input1")); // int → int: совместимо
+    outs.out1(5);
+    EXPECT_EQ(ins.input1.get(), 5);
+    // int → string: несовместимо, рантайм-проверка отклоняет
+    EXPECT_THROW(out.connect(ins.get_input("input2")), std::runtime_error);
+}
+
+TEST(Output, TypeErasedConnectAcceptsQueuedInput) {
+    atp::io::inputs ins;
+    atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q");
+    atp::io::output<int> out{"out_int"};
+    // Выходу подходит любой наследник input<int> — в отличие от реестра,
+    // где get<> требует точный вид входа
+    static_cast<atp::io::output_base&>(out).connect(ins.get_input("q"), atp::io::replay);
+    out(1);
+    EXPECT_EQ(q.pop(), 1);
+}
+
+TEST(Output, ReentrantWriteBackIsSafe) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<int> in{"in"};
+    out.connect(in);
+    bool reentered = false;
+    in.when([&](const int& v) {
+        if (!reentered) {
+            reentered = true;
+            out(v + 93); // колбэк входа пишет обратно в тот же выход — нет дедлока
+        }
+    });
+    out(7);
+    EXPECT_EQ(in.get(), 100);
+    EXPECT_EQ(out.get(), 100);
+}
+
+TEST(Output, ConcurrentWritersLoseNothingInQueuedTarget) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::queued_input<int> q{"q"};
+    out.connect(q);
+    constexpr int kThreads = 4;
+    constexpr int kPerThread = 1000;
+    {
+        std::vector<std::jthread> writers;
+        for (int t = 0; t < kThreads; ++t) {
+            writers.emplace_back([&out] {
+                for (int i = 0; i < kPerThread; ++i) {
+                    out(i);
+                }
+            });
+        }
+    }
+    EXPECT_EQ(q.size(), static_cast<std::size_t>(kThreads) * kPerThread);
+    EXPECT_FALSE(out.empty());
+}
+
+TEST(UnsafeOutput, BehavesLikeOutput) {
+    atp::io::output<int> out{"out_int", atp::io::unsafe};
+    atp::io::input<int> in{"in", atp::io::unsafe};
+    out.connect(in);
+    out(7);
+    EXPECT_EQ(in.get(), 7);
+    EXPECT_EQ(out.get(), 7);
+    out.reset();
+    EXPECT_TRUE(out.empty());
+}
+
+TEST(OutputsRegistry, TypedFieldAccess) {
+    test_outputs outs;
+    outs.out1(42);
+    EXPECT_EQ(outs.out1.get(), 42);
+    EXPECT_EQ(outs.get<atp::io::output<int>>("out1").get(), 42); // то же поле, не копия
+}
+
+TEST(OutputsRegistry, GetOutputByNameReturnsMetadata) {
+    test_outputs outs;
+    const atp::io::output_base& out = outs.get_output("out1");
+    EXPECT_EQ(out.name(), "out1");
+    EXPECT_EQ(out.type(), std::type_index(typeid(int)));
+}
+
+TEST(OutputsRegistry, WrongTypeThrows) {
+    test_outputs outs;
+    EXPECT_THROW((void)outs.get<atp::io::output<std::string>>("out1"), std::runtime_error);
+}
+
+TEST(OutputsRegistry, UnknownNameThrows) {
+    test_outputs outs;
+    EXPECT_THROW((void)outs.get_output("no_such_output"), std::runtime_error);
+    EXPECT_THROW((void)outs.get<atp::io::output<int>>("no_such_output"), std::runtime_error);
+}
+
+TEST(OutputsRegistry, ListEnumeratesAll) {
+    test_outputs outs;
+    EXPECT_EQ(outs.list().size(), 2u);
+}
+
+TEST(OutputsRegistry, DuplicateNameThrowsOnConstruction) {
+    struct duplicate_outputs : atp::io::outputs {
+        atp::io::output<int>& a = make<atp::io::output<int>>("same");
+        atp::io::output<int>& b = make<atp::io::output<int>>("same");
+    };
+    EXPECT_THROW((duplicate_outputs{}), std::runtime_error);
+}
+
+TEST(OutputsRegistry, DynamicOutputCanBeRemoved) {
+    test_outputs outs;
+    atp::io::output<int>& extra = outs.make<atp::io::output<int>>("extra");
+    extra(5);
+    EXPECT_EQ(outs.list().size(), 3u);
+    EXPECT_EQ(outs.get<atp::io::output<int>>("extra").get(), 5);
+
+    EXPECT_TRUE(outs.remove("extra"));
+    EXPECT_EQ(outs.list().size(), 2u);
+    EXPECT_THROW((void)outs.get_output("extra"), std::runtime_error);
+    EXPECT_FALSE(outs.remove("extra"));
 }

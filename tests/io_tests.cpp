@@ -546,6 +546,87 @@ TEST(Output, TypeErasedConnectAcceptsQueuedInput) {
     EXPECT_EQ(q.pop(), 1);
 }
 
+TEST(Output, TypeErasedConnectAcceptsAnyInput) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<std::any> any_in{"any_in"};
+    static_cast<atp::io::output_base&>(out).connect(any_in);
+    out(7);
+    EXPECT_EQ(std::any_cast<int>(any_in.get()), 7);
+}
+
+TEST(Output, TypedConnectAcceptsAnyInput) {
+    atp::io::output<std::string> out{"out_str"};
+    atp::io::input<std::any> any_in{"any_in"};
+    out.connect(any_in); // типизированная перегрузка, без type-erased пути
+    out(std::string("hello"));
+    EXPECT_EQ(std::any_cast<std::string>(any_in.get()), "hello");
+}
+
+TEST(Output, ReplayBoxesCacheForAnyInput) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<std::any> any_in{"any_in"};
+    out(42);
+    out.connect(any_in, atp::io::replay);
+    EXPECT_EQ(std::any_cast<int>(any_in.get()), 42);
+}
+
+TEST(Output, QueuedAnyInputAccumulatesFromTypedOutput) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::queued_input<std::any> q{"q_any"};
+    out.connect(q);
+    out(1);
+    out(2);
+    EXPECT_EQ(q.size(), 2u);
+    EXPECT_EQ(std::any_cast<int>(q.pop()), 1);
+    EXPECT_EQ(std::any_cast<int>(q.pop()), 2);
+}
+
+TEST(Output, AnyOutputToAnyInputNoDoubleBoxing) {
+    atp::io::output<std::any> out{"out_any"};
+    atp::io::input<std::any> in{"in_any"};
+    out.connect(in); // при T == std::any работает обычная типизированная пара
+    out(std::any(42));
+    EXPECT_EQ(in.get().type(), typeid(int));
+    EXPECT_EQ(std::any_cast<int>(in.get()), 42);
+}
+
+TEST(Output, AnyOutputTypedConnectHasNoAmbiguity) {
+    // При T == std::any any-перегрузка исключена requires-клаузой —
+    // вызов с replay разрешается в обычную connect(input<T>&, replay_t)
+    atp::io::output<std::any> out{"out_any"};
+    atp::io::input<std::any> in{"in_any"};
+    out.connect(in, atp::io::replay);
+    out(std::string("x"));
+    EXPECT_EQ(std::any_cast<std::string>(in.get()), "x");
+}
+
+TEST(Output, IncompatibleInputStillRejected) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<double> in{"in_double"};
+    EXPECT_THROW(static_cast<atp::io::output_base&>(out).connect(in), std::runtime_error);
+    EXPECT_EQ(out.connections(), 0u);
+}
+
+TEST(Output, DuplicateAnyConnectThrowsAcrossPaths) {
+    // Дубликат ловится по адресу входа независимо от пути подключения
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<std::any> any_in{"any_in"};
+    out.connect(any_in);
+    EXPECT_THROW(static_cast<atp::io::output_base&>(out).connect(any_in), std::runtime_error);
+    EXPECT_EQ(out.connections(), 1u);
+}
+
+TEST(Output, DisconnectAnyInputStopsDelivery) {
+    atp::io::output<int> out{"out_int"};
+    atp::io::input<std::any> any_in{"any_in"};
+    out.connect(any_in);
+    out(1);
+    EXPECT_TRUE(out.disconnect(any_in));
+    out(2);
+    EXPECT_EQ(std::any_cast<int>(any_in.get()), 1); // после разрыва доставки нет
+    EXPECT_EQ(out.connections(), 0u);
+}
+
 TEST(Output, ReentrantWriteBackIsSafe) {
     atp::io::output<int> out{"out_int"};
     atp::io::input<int> in{"in"};

@@ -1,5 +1,5 @@
-#ifndef ANITOOLSPLATFORM_IO_REGISTRY_HPP
-#define ANITOOLSPLATFORM_IO_REGISTRY_HPP
+#ifndef ANITOOLSPLATFORM_IO_IO_REGISTRY_HPP
+#define ANITOOLSPLATFORM_IO_IO_REGISTRY_HPP
 
 #include <concepts>
 #include <memory>
@@ -24,10 +24,10 @@ namespace atp::io::detail {
     // kind — слово для сообщений об ошибках («input»/«output»); ожидается
     // строковый литерал, поэтому хранится как string_view без владения.
     template <std::derived_from<io_base> TBase>
-    class registry {
+    class io_registry {
     public:
-        registry(const registry&) = delete;
-        registry& operator=(const registry&) = delete;
+        io_registry(const io_registry&) = delete;
+        io_registry& operator=(const io_registry&) = delete;
 
         template <std::derived_from<TBase> TItem>
         TItem& make(std::string name, safety s = safe) {
@@ -85,8 +85,8 @@ namespace atp::io::detail {
         }
 
     protected:
-        explicit registry(std::string_view kind) : kind_(kind) {}
-        ~registry() = default;  // защищённый: разрушение только через наследника
+        explicit io_registry(std::string_view kind) : kind_(kind) {}
+        ~io_registry() = default;  // защищённый: разрушение только через наследника
 
     private:
         std::string_view kind_;
@@ -95,4 +95,4 @@ namespace atp::io::detail {
 
 } // namespace atp::io::detail
 
-#endif // ANITOOLSPLATFORM_IO_REGISTRY_HPP
+#endif // ANITOOLSPLATFORM_IO_IO_REGISTRY_HPP

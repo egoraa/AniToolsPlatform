@@ -4,7 +4,7 @@
 #include <string>
 
 #include <atp/io/input_base.hpp>
-#include <atp/io/registry.hpp>
+#include <atp/io/io_registry.hpp>
 
 namespace atp::io {
 
@@ -12,10 +12,10 @@ namespace atp::io {
     //     input<int>& number = make<input<int>>("number");
     //     input<int>& fast = make<input<int>>("fast", unsafe);
     //     queued_input<int>& events = make<queued_input<int>>("events");
-    // Вся механика (make/get/at/find/remove/list) — в detail::registry.
-    class inputs : public detail::registry<input_base> {
+    // Вся механика (make/get/at/find/remove/list) — в detail::io_registry.
+    class inputs : public detail::io_registry<input_base> {
     public:
-        inputs() : registry("input") {}
+        inputs() : io_registry("input") {}
     };
 
 } // namespace atp::io

@@ -8,8 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "input.hpp"
-#include "threading.hpp"
+#include <atp/io/input.hpp>
+#include <atp/io/threading.hpp>
 
 namespace atp::io {
 

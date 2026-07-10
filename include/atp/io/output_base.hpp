@@ -3,8 +3,8 @@
 
 #include <cstddef>
 
-#include "io_base.hpp"
-#include "input_base.hpp"
+#include <atp/io/io_base.hpp>
+#include <atp/io/input_base.hpp>
 
 namespace atp::io {
 

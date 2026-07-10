@@ -3,7 +3,7 @@
 
 #include <stop_token>
 
-#include "version.hpp"
+#include <atp/version.hpp>
 
 namespace atp {
 

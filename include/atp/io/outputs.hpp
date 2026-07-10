@@ -3,8 +3,8 @@
 
 #include <string>
 
-#include "output_base.hpp"
-#include "registry.hpp"
+#include <atp/io/output_base.hpp>
+#include <atp/io/registry.hpp>
 
 namespace atp::io {
 

@@ -3,9 +3,9 @@
 
 #include <stop_token>
 
-#include "io.hpp"
-#include "module_base.hpp"
-#include "version.hpp"
+#include <atp/io.hpp>
+#include <atp/module_base.hpp>
+#include <atp/version.hpp>
 
 namespace atp {
 

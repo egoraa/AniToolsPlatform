@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string>
 
-#include "platform/module.hpp"
+#include <atp/module.hpp>
 
 namespace {
 

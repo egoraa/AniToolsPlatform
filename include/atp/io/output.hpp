@@ -12,9 +12,9 @@
 #include <utility>
 #include <vector>
 
-#include "input.hpp"
-#include "output_base.hpp"
-#include "threading.hpp"
+#include <atp/io/input.hpp>
+#include <atp/io/output_base.hpp>
+#include <atp/io/threading.hpp>
 
 namespace atp::io {
 

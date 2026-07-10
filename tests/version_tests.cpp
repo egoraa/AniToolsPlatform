@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "platform/version.hpp"
+#include <atp/version.hpp>
 
 // Compile-time доступ: структурный тип обязан сравниваться в constexpr.
 static_assert(atp::version{1, 2} == atp::version{1, 2, 0});

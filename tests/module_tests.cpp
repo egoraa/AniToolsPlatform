@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 
-#include "platform/module.hpp"
+#include <atp/module.hpp>
 
 namespace {
 

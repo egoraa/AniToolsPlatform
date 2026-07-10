@@ -11,8 +11,8 @@
 #include <utility>
 #include <vector>
 
-#include "io_base.hpp"
-#include "threading.hpp"
+#include <atp/io/io_base.hpp>
+#include <atp/io/threading.hpp>
 
 namespace atp::io::detail {
 

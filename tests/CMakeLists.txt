@@ -17,7 +17,8 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(atp_tests
         io_tests.cpp
-        module_tests.cpp)
+        module_tests.cpp
+        version_tests.cpp)
 target_link_libraries(atp_tests PRIVATE atp_platform GTest::gtest_main)
 
 include(GoogleTest)

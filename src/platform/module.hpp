@@ -4,6 +4,7 @@
 #include <stop_token>
 
 #include "io.hpp"
+#include "version.hpp"
 
 namespace atp {
 
@@ -16,13 +17,28 @@ namespace atp {
         virtual void start() = 0;
         virtual void iterate(std::stop_token stop_token) = 0;
         virtual void stop() = 0;
+
+        // Версия модуля для рантайм-сравнения через type-erased ссылку.
+        // Наследник, не объявивший версию, отвечает default_version; сама
+        // версия объявляется один раз — NTTP-параметром module (см. ниже),
+        // здесь только точка доступа. Имя get_version, а не STL-шное
+        // version() — имя занято типом atp::version (тот же приём, что
+        // std::vector::get_allocator при занятом allocator).
+        [[nodiscard]] virtual version get_version() const noexcept { return default_version; }
     };
 
     // «module» — контекстно-зависимое слово C++20: внутри namespace atp
     // класс с таким именем легален и конфликтов не создаёт.
-    template <typename TInputs, typename TOutputs>
+    template <typename TInputs, typename TOutputs, version Version = default_version>
     class module : public module_base {
     public:
+        // Версия объявляется один раз, NTTP-параметром, и доступна и на
+        // компиляции (module_version), и в рантайме (get_version) — хранить
+        // в объекте нечего.
+        static constexpr version module_version = Version;
+
+        [[nodiscard]] version get_version() const noexcept override { return Version; }
+
         void initialize() override {}
         void start() override {}
         void iterate(std::stop_token) override {}

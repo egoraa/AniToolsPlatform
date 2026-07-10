@@ -19,7 +19,14 @@ namespace {
         bool initialized = false;
     };
 
+    class versioned_module
+        : public atp::module<test_inputs, atp::io::outputs, atp::version{1, 2, 3}> {};
+
 } // namespace
+
+// Compile-time доступ к версии — прямо из типа модуля.
+static_assert(versioned_module::module_version == atp::version{1, 2, 3});
+static_assert(test_module::module_version == atp::default_version);
 
 TEST(Module, InitializeOverrideRuns) {
     test_module module;
@@ -50,4 +57,20 @@ TEST(Module, ConstAccess) {
     module.inputs().input1(1);
     const test_module& cmodule = module;
     EXPECT_FALSE(cmodule.inputs().input1.empty());
+}
+
+TEST(Module, DefaultVersionThroughBase) {
+    test_module module;
+    atp::module_base& base = module;
+    // Модуль, не объявивший версию, отвечает 0.0.1
+    EXPECT_EQ(base.get_version(), atp::default_version);
+    EXPECT_EQ(base.get_version(), atp::version(0, 0, 1));
+}
+
+TEST(Module, DeclaredVersionThroughBase) {
+    versioned_module module;
+    atp::module_base& base = module;
+    EXPECT_EQ(base.get_version(), atp::version(1, 2, 3));
+    // Сравнение с версией другой длины: 1.2 == 1.2.0 < 1.2.3
+    EXPECT_GT(base.get_version(), atp::version(1, 2));
 }

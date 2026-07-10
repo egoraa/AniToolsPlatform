@@ -97,9 +97,11 @@ namespace atp {
                 register_modules(registrar);
                 modules_ = registrar.registered();
             } catch (...) {
-                // частичная регистрация не должна пережить закрытие библиотеки
-                for (const auto& name : registrar.registered()) {
-                    registry.remove(name);
+                // частичная регистрация не должна пережить закрытие библиотеки;
+                // снимаются только свои пары (имя, версия) — чужие версии
+                // тех же имён не задеваются
+                for (const auto& [name, ver] : registrar.registered()) {
+                    registry.remove(name, ver);
                 }
                 detail::close_library(handle_);
                 handle_ = nullptr;
@@ -129,8 +131,10 @@ namespace atp {
             return *this;
         }
 
-        // Имена модулей, зарегистрированных этим плагином.
-        [[nodiscard]] const std::vector<std::string>& modules() const { return modules_; }
+        // Пары (имя, версия) модулей, зарегистрированных этим плагином.
+        [[nodiscard]] const std::vector<std::pair<std::string, version>>& modules() const {
+            return modules_;
+        }
         [[nodiscard]] const std::filesystem::path& path() const { return path_; }
 
     private:
@@ -148,9 +152,10 @@ namespace atp {
             if (!handle_) {
                 return;
             }
-            // сначала фабрики — их vtable лежат в ещё загруженной библиотеке
-            for (const auto& name : modules_) {
-                registry_->remove(name);
+            // сначала фабрики — их vtable лежат в ещё загруженной библиотеке;
+            // снимаются точечно по (имя, версия)
+            for (const auto& [name, ver] : modules_) {
+                registry_->remove(name, ver);
             }
             modules_.clear();
             detail::close_library(handle_);
@@ -160,7 +165,7 @@ namespace atp {
         std::filesystem::path path_;
         module_registry* registry_;
         void* handle_ = nullptr;
-        std::vector<std::string> modules_;
+        std::vector<std::pair<std::string, version>> modules_;
     };
 
 } // namespace atp

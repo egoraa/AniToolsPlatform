@@ -1,6 +1,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,6 +15,14 @@ namespace {
         : public atp::module<atp::io::inputs, atp::io::outputs, atp::version{1, 0}> {};
 
     class beta_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+
+    // вторая версия того же по смыслу модуля — для тестов мультиверсионности
+    class alpha_v2_module
+        : public atp::module<atp::io::inputs, atp::io::outputs, atp::version{2, 0}> {};
+
+    // второй безверсионный тип (default_version, как beta_module) — для
+    // проверки, что дубликат определяется парой (имя, версия), а не типом
+    class gamma_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
 
 } // namespace
 
@@ -32,12 +41,112 @@ TEST(ModuleRegistry, AddReturnsFactoryReference) {
     EXPECT_EQ(factory.get_version(), atp::version(1, 0));
 }
 
-TEST(ModuleRegistry, DuplicateNameThrows) {
+TEST(ModuleRegistry, SameNameDifferentVersionsCoexist) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");     // 1.0
+    registry.add<alpha_v2_module>("proc");  // 2.0 — не дубликат
+    EXPECT_EQ(registry.list().size(), 2u);
+}
+
+TEST(ModuleRegistry, DuplicateNameAndVersionThrows) {
     atp::module_registry registry;
     registry.add<alpha_module>("dup");
-    EXPECT_THROW(registry.add<beta_module>("dup"), std::runtime_error);
+    try {
+        registry.add<alpha_module>("dup");  // та же версия 1.0
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("duplicate module 'dup' version '1.0'"),
+                  std::string::npos);
+    }
     // неудачная регистрация не портит существующую
     EXPECT_EQ(registry.at("dup").get_version(), atp::version(1, 0));
+}
+
+TEST(ModuleRegistry, DuplicateDefaultVersionThrows) {
+    atp::module_registry registry;
+    registry.add<beta_module>("dup");
+    // другой тип, но та же default_version — дубликат пары (имя, версия)
+    EXPECT_THROW(registry.add<gamma_module>("dup"), std::runtime_error);
+}
+
+TEST(ModuleRegistry, CreateWithoutVersionReturnsLatest) {
+    atp::module_registry registry;
+    registry.add<alpha_v2_module>("proc");  // регистрируем «не по порядку»
+    registry.add<alpha_module>("proc");
+    auto module = registry.create("proc");
+    ASSERT_NE(module, nullptr);
+    EXPECT_EQ(module->get_version(), atp::version(2, 0));
+}
+
+TEST(ModuleRegistry, ListEnumeratesAllVersions) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");
+    registry.add<alpha_v2_module>("proc");
+    registry.add<beta_module>("beta");
+    EXPECT_EQ(registry.list().size(), 3u);
+}
+
+TEST(ModuleRegistry, CreateExactVersion) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");     // 1.0
+    registry.add<alpha_v2_module>("proc");  // 2.0
+    auto module = registry.create("proc", atp::version(1, 0));
+    ASSERT_NE(module, nullptr);
+    EXPECT_EQ(module->get_version(), atp::version(1, 0));
+}
+
+TEST(ModuleRegistry, CreateExactVersionIgnoresZeroPadding) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");  // 1.0
+    // 1.0 == 1.0.0 — дополнение нулями, тот же ключ
+    EXPECT_NE(registry.create("proc", atp::version(1, 0, 0)), nullptr);
+}
+
+TEST(ModuleRegistry, CreateMissingVersionThrows) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");
+    try {
+        registry.create("proc", atp::version(9, 9));
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("module 'proc' has no version '9.9'"),
+                  std::string::npos);
+    }
+}
+
+TEST(ModuleRegistry, CreateVersionOfUnknownNameThrows) {
+    atp::module_registry registry;
+    try {
+        registry.create("missing", atp::version(1, 0));
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("no module named 'missing'"),
+                  std::string::npos);
+    }
+}
+
+TEST(ModuleRegistry, FindWithVersion) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");
+    registry.add<alpha_v2_module>("proc");
+    atp::module_factory* factory = registry.find("proc", atp::version(1, 0));
+    ASSERT_NE(factory, nullptr);
+    EXPECT_EQ(factory->get_version(), atp::version(1, 0));
+    EXPECT_EQ(registry.find("proc", atp::version(9, 9)), nullptr);
+    EXPECT_EQ(registry.find("missing", atp::version(1, 0)), nullptr);
+}
+
+TEST(ModuleRegistry, VersionsSortedAscending) {
+    atp::module_registry registry;
+    registry.add<alpha_v2_module>("proc");  // регистрируем «не по порядку»
+    registry.add<alpha_module>("proc");
+    EXPECT_EQ(registry.versions("proc"),
+              (std::vector<atp::version>{atp::version(1, 0), atp::version(2, 0)}));
+}
+
+TEST(ModuleRegistry, VersionsUnknownNameEmpty) {
+    atp::module_registry registry;
+    EXPECT_TRUE(registry.versions("missing").empty());
 }
 
 TEST(ModuleRegistry, NullFactoryThrows) {
@@ -61,6 +170,40 @@ TEST(ModuleRegistry, RemoveErasesFactory) {
     EXPECT_TRUE(registry.remove("alpha"));
     EXPECT_FALSE(registry.remove("alpha"));
     EXPECT_EQ(registry.find("alpha"), nullptr);
+}
+
+TEST(ModuleRegistry, RemoveVersionKeepsOthers) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");     // 1.0
+    registry.add<alpha_v2_module>("proc");  // 2.0
+    EXPECT_TRUE(registry.remove("proc", atp::version(2, 0)));
+    // «последняя» пересчитана — осталась 1.0
+    EXPECT_EQ(registry.at("proc").get_version(), atp::version(1, 0));
+    // повторное снятие той же версии — false
+    EXPECT_FALSE(registry.remove("proc", atp::version(2, 0)));
+}
+
+TEST(ModuleRegistry, RemoveLastVersionErasesName) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");
+    EXPECT_TRUE(registry.remove("proc", atp::version(1, 0)));
+    // имя без версий не должно находиться
+    EXPECT_EQ(registry.find("proc"), nullptr);
+    EXPECT_TRUE(registry.versions("proc").empty());
+}
+
+TEST(ModuleRegistry, RemoveNameErasesAllVersions) {
+    atp::module_registry registry;
+    registry.add<alpha_module>("proc");
+    registry.add<alpha_v2_module>("proc");
+    EXPECT_TRUE(registry.remove("proc"));
+    EXPECT_FALSE(registry.remove("proc"));
+    EXPECT_EQ(registry.find("proc"), nullptr);
+}
+
+TEST(ModuleRegistry, RemoveVersionOfUnknownNameReturnsFalse) {
+    atp::module_registry registry;
+    EXPECT_FALSE(registry.remove("missing", atp::version(1, 0)));
 }
 
 TEST(ModuleRegistry, ListEnumeratesFactories) {
@@ -90,18 +233,24 @@ TEST(ModuleRegistrar, ForwardsToRegistry) {
     EXPECT_NE(registry.find("alpha"), nullptr);
 }
 
-TEST(ModuleRegistrar, RecordsRegisteredNames) {
+TEST(ModuleRegistrar, RecordsNameVersionPairs) {
     atp::module_registry registry;
     atp::module_registrar registrar{registry};
     registrar.add<alpha_module>("alpha");
     registrar.add<beta_module>("beta");
-    EXPECT_EQ(registrar.registered(), (std::vector<std::string>{"alpha", "beta"}));
+    EXPECT_EQ(registrar.registered(),
+              (std::vector<std::pair<std::string, atp::version>>{
+                  {"alpha", atp::version(1, 0)},
+                  {"beta", atp::default_version}}));
 }
 
 TEST(ModuleRegistrar, FailedAddIsNotRecorded) {
     atp::module_registry registry;
     atp::module_registrar registrar{registry};
     registrar.add<alpha_module>("dup");
-    EXPECT_THROW(registrar.add<beta_module>("dup"), std::runtime_error);
-    EXPECT_EQ(registrar.registered(), (std::vector<std::string>{"dup"}));
+    // тот же тип — та же версия 1.0, дубликат пары (имя, версия)
+    EXPECT_THROW(registrar.add<alpha_module>("dup"), std::runtime_error);
+    EXPECT_EQ(registrar.registered(),
+              (std::vector<std::pair<std::string, atp::version>>{
+                  {"dup", atp::version(1, 0)}}));
 }

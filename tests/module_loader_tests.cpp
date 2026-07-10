@@ -6,15 +6,27 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/module.hpp>
 #include <atp/module_loader.hpp>
 
 // Пути к тестовым плагинам приходят из CMake (см. tests/CMakeLists.txt).
+
+namespace {
+
+    // Хостовая версия имени, которое регистрирует и тестовый плагин (2.0), —
+    // для проверки, что выгрузка плагина не задевает чужие версии.
+    class host_module
+        : public atp::module<atp::io::inputs, atp::io::outputs, atp::version{1, 0}> {};
+
+} // namespace
 
 TEST(ModuleLoader, LoadsAndRegisters) {
     atp::module_registry registry;
     atp::module_loader loader{ATP_TEST_PLUGIN, registry};
     EXPECT_EQ(loader.modules(),
-              (std::vector<std::string>{"plugin_module", "plugin_alias"}));
+              (std::vector<std::pair<std::string, atp::version>>{
+                  {"plugin_module", atp::version(2, 0)},
+                  {"plugin_alias", atp::version(2, 0)}}));
 
     auto module = registry.create("plugin_module");
     ASSERT_NE(module, nullptr);
@@ -38,6 +50,19 @@ TEST(ModuleLoader, UnloadRemovesFactories) {
     // после разрушения загрузчика его фабрик в реестре нет
     EXPECT_EQ(registry.find("plugin_module"), nullptr);
     EXPECT_EQ(registry.find("plugin_alias"), nullptr);
+}
+
+TEST(ModuleLoader, UnloadKeepsHostVersionOfSameName) {
+    atp::module_registry registry;
+    registry.add<host_module>("plugin_module");  // хостовая 1.0
+    {
+        atp::module_loader loader{ATP_TEST_PLUGIN, registry};
+        // пока плагин загружен, последняя версия имени — плагинная 2.0
+        EXPECT_EQ(registry.at("plugin_module").get_version(), atp::version(2, 0));
+    }
+    // выгрузка сняла только пару ("plugin_module", 2.0); хостовая 1.0 на месте
+    ASSERT_NE(registry.find("plugin_module"), nullptr);
+    EXPECT_EQ(registry.at("plugin_module").get_version(), atp::version(1, 0));
 }
 
 TEST(ModuleLoader, MissingFileThrows) {

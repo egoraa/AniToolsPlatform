@@ -1,0 +1,91 @@
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include <atp/module_loader.hpp>
+
+// Пути к тестовым плагинам приходят из CMake (см. tests/CMakeLists.txt).
+
+TEST(ModuleLoader, LoadsAndRegisters) {
+    atp::module_registry registry;
+    atp::module_loader loader{ATP_TEST_PLUGIN, registry};
+    EXPECT_EQ(loader.modules(),
+              (std::vector<std::string>{"plugin_module", "plugin_alias"}));
+
+    auto module = registry.create("plugin_module");
+    ASSERT_NE(module, nullptr);
+    EXPECT_EQ(module->get_version(), atp::version(2, 0));
+    module.reset();  // модуль умирает до загрузчика — контракт времени жизни
+}
+
+TEST(ModuleLoader, VersionAvailableWithoutInstantiation) {
+    atp::module_registry registry;
+    atp::module_loader loader{ATP_TEST_PLUGIN, registry};
+    EXPECT_EQ(registry.at("plugin_alias").get_version(), atp::version(2, 0));
+}
+
+TEST(ModuleLoader, UnloadRemovesFactories) {
+    atp::module_registry registry;
+    {
+        atp::module_loader loader{ATP_TEST_PLUGIN, registry};
+        EXPECT_NE(registry.find("plugin_module"), nullptr);
+        EXPECT_NE(registry.find("plugin_alias"), nullptr);
+    }
+    // после разрушения загрузчика его фабрик в реестре нет
+    EXPECT_EQ(registry.find("plugin_module"), nullptr);
+    EXPECT_EQ(registry.find("plugin_alias"), nullptr);
+}
+
+TEST(ModuleLoader, MissingFileThrows) {
+    atp::module_registry registry;
+    EXPECT_THROW((atp::module_loader{"no_such_plugin.dll", registry}),
+                 std::runtime_error);
+    EXPECT_TRUE(registry.list().empty());
+}
+
+TEST(ModuleLoader, EmptyPluginReportsMissingSymbol) {
+    atp::module_registry registry;
+    try {
+        atp::module_loader loader{ATP_TEST_PLUGIN_EMPTY, registry};
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("atp_abi_version"),
+                  std::string::npos);
+    }
+    EXPECT_TRUE(registry.list().empty());
+}
+
+TEST(ModuleLoader, AbiMismatchReportsVersions) {
+    atp::module_registry registry;
+    try {
+        atp::module_loader loader{ATP_TEST_PLUGIN_BAD_ABI, registry};
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("ABI"), std::string::npos);
+    }
+    EXPECT_TRUE(registry.list().empty());
+}
+
+TEST(ModuleLoader, MoveConstructorTransfersOwnership) {
+    atp::module_registry registry;
+    atp::module_loader first{ATP_TEST_PLUGIN, registry};
+    atp::module_loader second{std::move(first)};
+    EXPECT_NE(registry.find("plugin_module"), nullptr);
+    EXPECT_EQ(second.modules().size(), 2u);
+}  // разрушение обоих: пустой first ничего не снимает, second выгружает
+
+TEST(ModuleLoader, MoveAssignmentUnloadsTarget) {
+    atp::module_registry first_registry;
+    atp::module_registry second_registry;
+    atp::module_loader source{ATP_TEST_PLUGIN, first_registry};
+    atp::module_loader target{ATP_TEST_PLUGIN, second_registry};
+
+    target = std::move(source);
+    // target сначала снял свои фабрики из second_registry, затем принял source
+    EXPECT_EQ(second_registry.find("plugin_module"), nullptr);
+    EXPECT_NE(first_registry.find("plugin_module"), nullptr);
+}

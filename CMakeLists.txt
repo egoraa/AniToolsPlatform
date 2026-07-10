@@ -14,6 +14,7 @@ file(GLOB_RECURSE ATP_PLATFORM_HEADERS CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/include/atp/*.hpp)
 
 add_subdirectory(examples/demo)
+add_subdirectory(examples/plugin_demo)
 
 enable_testing()
 add_subdirectory(tests)

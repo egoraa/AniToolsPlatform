@@ -1,6 +1,8 @@
 #include <memory>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -12,19 +14,50 @@
 namespace {
 
     class alpha_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, atp::version{1, 0}> {};
+        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
 
     class beta_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
 
     // вторая версия того же по смыслу модуля — для тестов мультиверсионности
     class alpha_v2_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, atp::version{2, 0}> {};
+        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 0}> {};
 
     // второй безверсионный тип (default_version, как beta_module) — для
     // проверки, что дубликат определяется парой (имя, версия), а не типом
     class gamma_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
 
+    // модуль со встроенным именем — для add<M>() без аргумента
+    class named_module
+        : public atp::module<atp::io::inputs, atp::io::outputs, "named", atp::version{1, 0}> {};
+
+    // модуль мимо шаблона module<>: контракт — статический член, не NTTP
+    class handmade_module : public atp::module_base {
+    public:
+        static constexpr std::string_view module_name = "handmade";
+        void initialize() override {}
+        void start() override {}
+        void iterate(std::stop_token) override {}
+        void stop() override {}
+    };
+
+    // requires-выражение вне шаблона GCC проверяет жёстко (не SFINAE),
+    // поэтому невозможность вызова проверяется через концепты: подстановка
+    // параметра — уже immediate context, отказ разрешения даёт false.
+    template <typename M>
+    concept registry_adds_by_own_name =
+        requires(atp::module_registry r) { r.add<M>(); };
+
+    template <typename M>
+    concept registrar_adds_by_own_name =
+        requires(atp::module_registrar r) { r.add<M>(); };
+
 } // namespace
+
+// Анонимный модуль (module_name пуст) не проходит constraint add<M>()
+// без аргумента — регистрация только под явным именем.
+static_assert(!registry_adds_by_own_name<beta_module>);
+static_assert(!registrar_adds_by_own_name<beta_module>);
+static_assert(registry_adds_by_own_name<named_module>);
 
 TEST(ModuleRegistry, AddAndCreate) {
     atp::module_registry registry;
@@ -242,6 +275,40 @@ TEST(ModuleRegistrar, RecordsNameVersionPairs) {
               (std::vector<std::pair<std::string, atp::version>>{
                   {"alpha", atp::version(1, 0)},
                   {"beta", atp::default_version}}));
+}
+
+TEST(ModuleRegistry, AddWithoutNameUsesModuleName) {
+    atp::module_registry registry;
+    atp::module_factory& factory = registry.add<named_module>();
+    EXPECT_EQ(factory.name(), "named");
+    EXPECT_EQ(factory.get_version(), atp::version(1, 0));
+    EXPECT_NE(registry.create("named"), nullptr);
+}
+
+TEST(ModuleRegistry, AliasOnTopOfOwnName) {
+    atp::module_registry registry;
+    registry.add<named_module>();
+    registry.add<named_module>("alias");
+    // обе записи живут независимо — собственное имя и алиас
+    EXPECT_NE(registry.create("named"), nullptr);
+    EXPECT_NE(registry.create("alias"), nullptr);
+}
+
+TEST(ModuleRegistrar, AddWithoutNameRecordsPair) {
+    atp::module_registry registry;
+    atp::module_registrar registrar{registry};
+    registrar.add<named_module>();
+    EXPECT_EQ(registrar.registered(),
+              (std::vector<std::pair<std::string, atp::version>>{
+                  {"named", atp::version(1, 0)}}));
+}
+
+TEST(ModuleRegistry, HandmadeModuleNameContract) {
+    atp::module_registry registry;
+    // контракт add<M>() — статический член module_name, а не сам шаблон
+    registry.add<handmade_module>();
+    EXPECT_NE(registry.create("handmade"), nullptr);
+    EXPECT_EQ(registry.at("handmade").get_version(), atp::default_version);
 }
 
 TEST(ModuleRegistrar, FailedAddIsNotRecorded) {

@@ -16,7 +16,7 @@ namespace {
     // Хостовая версия имени, которое регистрирует и тестовый плагин (2.0), —
     // для проверки, что выгрузка плагина не задевает чужие версии.
     class host_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, atp::version{1, 0}> {};
+        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
 
 } // namespace
 

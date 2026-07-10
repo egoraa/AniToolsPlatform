@@ -2,6 +2,7 @@
 #define ANITOOLSPLATFORM_MODULE_BASE_HPP
 
 #include <stop_token>
+#include <string_view>
 
 #include <atp/version.hpp>
 
@@ -24,6 +25,12 @@ namespace atp {
         // version() — имя занято типом atp::version (тот же приём, что
         // std::vector::get_allocator при занятом allocator).
         [[nodiscard]] virtual version get_version() const noexcept { return default_version; }
+
+        // Имя модуля через type-erased ссылку — симметрично get_version.
+        // Модуль, не объявивший имени, — «аноним»: пустой string_view
+        // (аналог default_version у версии). Имя объявляется один раз —
+        // NTTP-параметром module (module.hpp), здесь только точка доступа.
+        [[nodiscard]] virtual std::string_view get_name() const noexcept { return {}; }
     };
 
 } // namespace atp

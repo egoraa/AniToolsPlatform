@@ -1,4 +1,5 @@
 #include <string>
+#include <string_view>
 #include <typeindex>
 #include <typeinfo>
 
@@ -20,13 +21,27 @@ namespace {
     };
 
     class versioned_module
-        : public atp::module<test_inputs, atp::io::outputs, atp::version{1, 2, 3}> {};
+        : public atp::module<test_inputs, atp::io::outputs, "", atp::version{1, 2, 3}> {};
+
+    // имя третьим NTTP-параметром; версия не указана — default_version
+    class named_module : public atp::module<test_inputs, atp::io::outputs, "named"> {};
+
+    // имя и версия вместе
+    class full_module
+        : public atp::module<test_inputs, atp::io::outputs, "full", atp::version{1, 2, 3}> {};
 
 } // namespace
 
 // Compile-time доступ к версии — прямо из типа модуля.
 static_assert(versioned_module::module_version == atp::version{1, 2, 3});
 static_assert(test_module::module_version == atp::default_version);
+
+// Compile-time доступ к имени — прямо из типа модуля.
+static_assert(test_module::module_name.empty());
+static_assert(named_module::module_name == "named");
+static_assert(full_module::module_name == "full");
+static_assert(named_module::module_version == atp::default_version);
+static_assert(full_module::module_version == atp::version{1, 2, 3});
 
 TEST(Module, InitializeOverrideRuns) {
     test_module module;
@@ -73,4 +88,17 @@ TEST(Module, DeclaredVersionThroughBase) {
     EXPECT_EQ(base.get_version(), atp::version(1, 2, 3));
     // Сравнение с версией другой длины: 1.2 == 1.2.0 < 1.2.3
     EXPECT_GT(base.get_version(), atp::version(1, 2));
+}
+
+TEST(Module, DefaultNameThroughBaseIsEmpty) {
+    test_module module;
+    atp::module_base& base = module;
+    // Модуль, не объявивший имени, — «аноним»: пустой string_view
+    EXPECT_EQ(base.get_name(), std::string_view{});
+}
+
+TEST(Module, DeclaredNameThroughBase) {
+    named_module module;
+    atp::module_base& base = module;
+    EXPECT_EQ(base.get_name(), "named");
 }

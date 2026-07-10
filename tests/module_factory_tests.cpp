@@ -11,7 +11,7 @@ namespace {
     class plain_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
 
     class versioned_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, atp::version{2, 1}> {};
+        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 1}> {};
 
     // Модуль мимо шаблона module<> — без константы module_version:
     // фабрика должна отвечать default_version (симметрия с module_base).

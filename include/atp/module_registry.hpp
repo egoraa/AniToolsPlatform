@@ -6,6 +6,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -27,6 +28,20 @@ namespace atp {
 
         module_registry(const module_registry&) = delete;
         module_registry& operator=(const module_registry&) = delete;
+
+        // Имя из самого модуля: контракт — статический член module_name
+        // (module<> порождает его из NTTP; модуль мимо шаблона объявляет
+        // руками). Пустое имя отсекается на компиляции: анонимный модуль
+        // регистрируется только явным add<M>(name).
+        template <std::derived_from<module_base> M>
+            requires std::default_initializable<M>
+                     && requires { { M::module_name } -> std::convertible_to<std::string_view>; }
+                     && (!std::string_view{M::module_name}.empty())
+        module_factory& add() {
+            // явный <M>: без него unqualified add(std::string) ушёл бы
+            // в перегрузку add(unique_ptr) и не скомпилировался
+            return add<M>(std::string{M::module_name});
+        }
 
         // Сахар: типовая фабрика по умолчанию. Имя задаётся здесь, в точке
         // регистрации, — один тип можно зарегистрировать под алиасами.
@@ -171,6 +186,15 @@ namespace atp {
     class module_registrar {
     public:
         explicit module_registrar(module_registry& registry) : registry_(&registry) {}
+
+        // имя из типа — тот же контракт, что у module_registry::add<M>()
+        template <std::derived_from<module_base> M>
+            requires std::default_initializable<M>
+                     && requires { { M::module_name } -> std::convertible_to<std::string_view>; }
+                     && (!std::string_view{M::module_name}.empty())
+        module_factory& add() {
+            return add<M>(std::string{M::module_name});
+        }
 
         template <std::derived_from<module_base> M>
             requires std::default_initializable<M>

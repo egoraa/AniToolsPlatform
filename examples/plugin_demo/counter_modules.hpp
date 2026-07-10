@@ -14,7 +14,7 @@ namespace demo {
     };
 
     class counter_module
-        : public atp::module<atp::io::inputs, counter_outputs, atp::ver<"1.0">> {
+        : public atp::module<atp::io::inputs, counter_outputs, "counter", atp::ver<"1.0">> {
     public:
         void iterate(std::stop_token) override { outputs().count(++value_); }
 
@@ -23,7 +23,9 @@ namespace demo {
     };
 
     inline void register_counter_modules(atp::module_registrar& registrar) {
-        registrar.add<counter_module>("counter");
+        // имя берётся из самого модуля (module_name) — точка регистрации
+        // больше не дублирует строку
+        registrar.add<counter_module>();
     }
 
 } // namespace demo

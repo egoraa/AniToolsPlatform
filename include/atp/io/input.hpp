@@ -3,8 +3,6 @@
 
 #include <any>
 #include <concepts>
-#include <functional>
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -21,11 +19,11 @@ namespace atp::io {
 // От него наследуются остальные виды входов (см. queued_input): единственная
 // точка расширения — защищённый virtual store(), куда operator() кладёт
 // принятое значение. Приём type-erased значений от выходов — через протокол
-// accepts/deliver (см. input_base). Потокобезопасен по умолчанию; блокировка отключается
-// тегом unsafe в конструкторе (см. safety). С включённой блокировкой колбэк
-// вызывается вне замка со снапшотом значения именно этого вызова, поэтому
-// реентерабельные и конкурентные записи безопасны; порядок колбэков при
-// конкурентных записях не гарантируется.
+// accepts/deliver (см. input_base). Потокобезопасен по умолчанию; блокировка
+// отключается тегом unsafe в конструкторе (см. safety). Чтение — pull-only:
+// get() — копия состояния, take() — изъятие события; реакция на новые
+// значения — опросом с потока потребителя (см. watcher). Доставка не
+// исполняет пользовательский код — на потоке пишущего только store под замком.
 template <typename T>
 class input : public input_base {
    public:
@@ -38,19 +36,8 @@ class input : public input_base {
     void operator()(U&& value) {
         // Конструируем T вне замка — критическая секция только на store().
         T incoming(std::forward<U>(value));
-        callback_ptr cb;
-        std::optional<T> snapshot;
-        {
-            auto guard = lock();
-            cb = callback_;
-            if (cb) {
-                snapshot = incoming;  // копия для колбэка, пока держим замок
-            }
-            store(std::move(incoming));  // virtual: наследник решает, куда положить
-        }
-        if (cb) {
-            (*cb)(*snapshot);
-        }
+        auto guard = lock();
+        store(std::move(incoming));  // virtual: наследник решает, куда положить
     }
 
     // Универсальный запрос «пусто ли»: у base — нет ли значения, у
@@ -85,13 +72,6 @@ class input : public input_base {
     void reset() override {
         auto guard = lock();
         value_.reset();
-    }
-
-    void when(std::function<void(const T&)> callback) {
-        auto cb =
-            callback ? std::make_shared<const std::function<void(const T&)>>(std::move(callback)) : callback_ptr{};
-        auto guard = lock();
-        callback_ = std::move(cb);
     }
 
     // Протокол доставки (см. input_base). Типизированный вход принимает
@@ -129,13 +109,7 @@ class input : public input_base {
     }
 
    private:
-    // shared_ptr: operator() дёшево копирует указатель под замком и зовёт
-    // колбэк уже без замка — when() из другого потока не выдернет
-    // объект из-под работающего вызова.
-    using callback_ptr = std::shared_ptr<const std::function<void(const T&)>>;
-
     std::optional<T> value_;
-    callback_ptr callback_;
 };
 
 }  // namespace atp::io

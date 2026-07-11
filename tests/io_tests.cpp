@@ -53,15 +53,6 @@ TEST(Input, AcceptsLvalueWithoutMoving) {
     EXPECT_EQ(hello, "Hello");  // lvalue не перемещён
 }
 
-TEST(Input, CallbackFiresAndValueSurvives) {
-    atp::io::input<int> in{"in_int"};
-    int observed = 0;
-    in.when([&](const int& v) { observed = v; });
-    in(7);
-    EXPECT_EQ(observed, 7);
-    EXPECT_EQ(in.get(), 7);  // значение не «съедено» колбэком
-}
-
 TEST(Input, ResetClearsValue) {
     atp::io::input<int> in{"in_int"};
     in(42);
@@ -82,23 +73,6 @@ TEST(Input, TakeRemovesValue) {
 TEST(Input, TakeOnEmptyReturnsNullopt) {
     atp::io::input<int> in{"in_int"};
     EXPECT_EQ(in.take(), std::nullopt);
-}
-
-TEST(Input, ReentrantCallbackIsSafe) {
-    atp::io::input<int> in{"in_int"};
-    bool reentered = false;
-    int outer_value_after_reentry = -1;
-    in.when([&](const int& v) {
-        if (!reentered) {
-            reentered = true;
-            in(100);  // реентерабельный вызов перезаписывает value_
-            // v привязан к snapshot-копии внешнего вызова — не повис
-            outer_value_after_reentry = v;
-        }
-    });
-    in(7);
-    EXPECT_EQ(outer_value_after_reentry, 7);
-    EXPECT_EQ(in.get(), 100);
 }
 
 TEST(InputDeliverProtocol, TypedInputAcceptsExactlyItsType) {
@@ -151,11 +125,11 @@ TEST(InputDeliverProtocol, QueuedAnyInputAccumulatesMixedTypes) {
 
 TEST(UnsafeInput, BehavesLikeInput) {
     atp::io::input<int> in{"in_int", atp::io::unsafe};
-    int observed = 0;
-    in.when([&](const int& v) { observed = v; });
     in(7);
-    EXPECT_EQ(observed, 7);
     EXPECT_EQ(in.get(), 7);
+    EXPECT_EQ(in.take(), std::optional<int>(7));
+    EXPECT_TRUE(in.empty());
+    in(8);
     in.reset();
     EXPECT_TRUE(in.empty());
 }
@@ -245,20 +219,48 @@ TEST(QueuedInput, TakePopsHead) {
     EXPECT_EQ(q.size(), 1u);
 }
 
-TEST(QueuedInput, CallbackFiresOnPushAndValueStaysQueued) {
-    atp::io::queued_input<int> in{"q_int"};
+TEST(Watcher, FiresHandlerOnFreshValue) {
+    atp::io::input<int> in{"in_int"};
+    atp::io::watcher w;
     int observed = 0;
-    int calls = 0;
-    in.when([&](const int& v) {
-        observed = v;
-        ++calls;
-    });
+    w.watch(in, [&](const int& v) { observed = v; });
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // писем не было
     in(7);
-    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(w.poll(), atp::io::work_status::busy);
     EXPECT_EQ(observed, 7);
-    // Колбэк не «съел» значение — оно по-прежнему в очереди
-    EXPECT_EQ(in.size(), 1u);
-    EXPECT_EQ(in.pop(), 7);
+    EXPECT_TRUE(in.empty());                          // значение изъято правилом
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // повторно не срабатывает
+}
+
+TEST(Watcher, QueuedRuleDrainsPerElement) {
+    atp::io::queued_input<int> q{"q_int"};
+    atp::io::watcher w;
+    std::vector<int> seen;
+    w.watch(q, [&](const int& v) { seen.push_back(v); });
+    q(1);
+    q(2);
+    q(3);
+    EXPECT_EQ(w.poll(), atp::io::work_status::busy);
+    EXPECT_EQ(seen, (std::vector<int>{1, 2, 3}));
+    EXPECT_TRUE(q.empty());
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);
+}
+
+TEST(Watcher, PollWithoutRulesIsIdle) {
+    atp::io::watcher w;
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);
+}
+
+TEST(Watcher, HandlerRunsOnPollingThread) {
+    atp::io::input<int> in{"in_int"};
+    atp::io::watcher w;
+    std::thread::id handler_thread{};
+    w.watch(in, [&](const int&) { handler_thread = std::this_thread::get_id(); });
+    {
+        std::jthread writer([&in] { in(7); });  // запись с чужого потока
+    }
+    EXPECT_EQ(w.poll(), atp::io::work_status::busy);
+    EXPECT_EQ(handler_thread, std::this_thread::get_id());  // обработчик — на потоке poll
 }
 
 TEST(QueuedInput, ConcurrentProducersLoseNothing) {
@@ -297,33 +299,6 @@ TEST(QueuedInput, ProducerAndConsumerRunConcurrently) {
         }
     }
     EXPECT_EQ(sum, static_cast<long long>(kCount) * (kCount + 1) / 2);
-}
-
-TEST(Input, ConcurrentWritersDeliverEveryCallbackWithOwnValue) {
-    atp::io::input<int> in{"in_int"};
-    std::atomic<int> calls{0};
-    std::atomic<long long> sum{0};
-    in.when([&](const int& v) {
-        calls.fetch_add(1, std::memory_order_relaxed);
-        sum.fetch_add(v, std::memory_order_relaxed);
-    });
-    constexpr int kThreads = 4;
-    constexpr int kPerThread = 1000;
-    {
-        std::vector<std::jthread> writers;
-        for (int t = 0; t < kThreads; ++t) {
-            writers.emplace_back([&in] {
-                for (int i = 1; i <= kPerThread; ++i) {
-                    in(i);
-                }
-            });
-        }
-    }
-    EXPECT_EQ(calls.load(), kThreads * kPerThread);
-    // Сумма сходится, только если каждый колбэк получил снапшот своего вызова,
-    // а не «последнее на момент вызова» значение.
-    EXPECT_EQ(sum.load(), static_cast<long long>(kThreads) * kPerThread * (kPerThread + 1) / 2);
-    EXPECT_FALSE(in.empty());
 }
 
 TEST(InputsRegistry, TypedFieldAccess) {
@@ -650,22 +625,6 @@ TEST(Output, DisconnectAnyInputStopsDelivery) {
     out(2);
     EXPECT_EQ(std::any_cast<int>(any_in.get()), 1);  // после разрыва доставки нет
     EXPECT_EQ(out.connections(), 0u);
-}
-
-TEST(Output, ReentrantWriteBackIsSafe) {
-    atp::io::output<int> out{"out_int"};
-    atp::io::input<int> in{"in"};
-    out.connect(in);
-    bool reentered = false;
-    in.when([&](const int& v) {
-        if (!reentered) {
-            reentered = true;
-            out(v + 93);  // колбэк входа пишет обратно в тот же выход — нет дедлока
-        }
-    });
-    out(7);
-    EXPECT_EQ(in.get(), 100);
-    EXPECT_EQ(out.get(), 100);
 }
 
 TEST(Output, ConcurrentWritersLoseNothingInQueuedTarget) {

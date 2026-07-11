@@ -1,4 +1,5 @@
 #include <iostream>
+#include <stop_token>
 #include <string>
 
 #include <atp/module.hpp>
@@ -19,8 +20,14 @@ class source_module : public atp::module<atp::io::inputs, source_outputs> {};
 class sink_module : public atp::module<sink_inputs, atp::io::outputs> {
    public:
     void initialize(atp::module_context&) override {
-        inputs().number.when([](const int& value) { std::cout << "sink received: " << value << '\n'; });
+        watcher_.watch(inputs().number, [](const int& value) { std::cout << "sink received: " << value << '\n'; });
     }
+    void iterate(std::stop_token) override {
+        (void)watcher_.poll();  // возврат нужен раннеру; демо тикает вручную
+    }
+
+   private:
+    atp::io::watcher watcher_;
 };
 
 }  // namespace
@@ -39,7 +46,8 @@ int main() {
     source.outputs().number.connect(sink.inputs().number);
     source.outputs().at("number").connect(sink.inputs().at("history"));
 
-    source.outputs().number(42);  // рассылка обоим входам + кэш
+    source.outputs().number(42);      // рассылка обоим входам + кэш
+    sink.iterate(std::stop_token{});  // опрос: обработчик печатает на потоке модуля
 
     std::cout << "cached: " << source.outputs().number.get() << ", queued: " << sink.inputs().history.pop() << '\n';
 

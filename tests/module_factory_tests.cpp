@@ -26,22 +26,22 @@ namespace {
 } // namespace
 
 TEST(ModuleFactory, NameIsStoredFromRegistration) {
-    atp::typed_module_factory<plain_module> factory{"plain"};
+    atp::module_factory<plain_module> factory{"plain"};
     EXPECT_EQ(factory.name(), "plain");
 }
 
 TEST(ModuleFactory, VersionWithoutInstantiation) {
-    atp::typed_module_factory<versioned_module> factory{"versioned"};
+    atp::module_factory<versioned_module> factory{"versioned"};
     EXPECT_EQ(factory.get_version(), atp::version(2, 1));
 }
 
 TEST(ModuleFactory, VersionFallsBackToDefault) {
-    atp::typed_module_factory<bare_module> factory{"bare"};
+    atp::module_factory<bare_module> factory{"bare"};
     EXPECT_EQ(factory.get_version(), atp::default_version);
 }
 
 TEST(ModuleFactory, CreateReturnsWorkingModule) {
-    atp::typed_module_factory<versioned_module> factory{"versioned"};
+    atp::module_factory<versioned_module> factory{"versioned"};
     std::unique_ptr<atp::module_base> module = factory.create();
     ASSERT_NE(module, nullptr);
     EXPECT_EQ(module->get_version(), atp::version(2, 1));
@@ -50,8 +50,8 @@ TEST(ModuleFactory, CreateReturnsWorkingModule) {
 }
 
 TEST(ModuleFactory, TypeErasedThroughBase) {
-    atp::typed_module_factory<plain_module> typed{"plain"};
-    atp::module_factory& factory = typed;
+    atp::module_factory<plain_module> typed{"plain"};
+    atp::module_factory_base& factory = typed;
     EXPECT_EQ(factory.name(), "plain");
     EXPECT_NE(factory.create(), nullptr);
 }

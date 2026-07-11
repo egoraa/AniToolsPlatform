@@ -37,7 +37,7 @@ namespace atp {
             requires std::default_initializable<M>
                      && requires { { M::module_name } -> std::convertible_to<std::string_view>; }
                      && (!std::string_view{M::module_name}.empty())
-        module_factory& add() {
+        module_factory_base& add() {
             // явный <M>: без него unqualified add(std::string) ушёл бы
             // в перегрузку add(unique_ptr) и не скомпилировался
             return add<M>(std::string{M::module_name});
@@ -47,17 +47,17 @@ namespace atp {
         // регистрации, — один тип можно зарегистрировать под алиасами.
         template <std::derived_from<module_base> M>
             requires std::default_initializable<M>
-        module_factory& add(std::string name) {
-            return add(std::make_unique<typed_module_factory<M>>(std::move(name)));
+        module_factory_base& add(std::string name) {
+            return add(std::make_unique<module_factory<M>>(std::move(name)));
         }
 
         // Общий путь — для нестандартных фабрик. Дубликат — совпадение
         // и имени, и версии; одно имя с разными версиями — норма.
-        module_factory& add(std::unique_ptr<module_factory> factory) {
+        module_factory_base& add(std::unique_ptr<module_factory_base> factory) {
             if (!factory) {
                 throw std::invalid_argument("null module factory");
             }
-            module_factory& ref = *factory;
+            module_factory_base& ref = *factory;
             // Пустая внутренняя map при новом имени не «повисает»: следом
             // try_emplace обязательно вставляет в неё первую версию.
             auto& versions = registry_[std::string(ref.name())];
@@ -85,8 +85,8 @@ namespace atp {
         }
 
         // Пара в духе std::map: at() бросает, find() возвращает nullptr.
-        [[nodiscard]] module_factory& at(const std::string& name) const {
-            module_factory* factory = find(name);
+        [[nodiscard]] module_factory_base& at(const std::string& name) const {
+            module_factory_base* factory = find(name);
             if (!factory) {
                 throw std::runtime_error("no module named '" + name + "'");
             }
@@ -94,7 +94,7 @@ namespace atp {
         }
 
         // Различает два случая: имя не найдено / имя есть, версии нет.
-        [[nodiscard]] module_factory& at(const std::string& name, const version& v) const {
+        [[nodiscard]] module_factory_base& at(const std::string& name, const version& v) const {
             auto it = registry_.find(name);
             if (it == registry_.end()) {
                 throw std::runtime_error("no module named '" + name + "'");
@@ -107,7 +107,7 @@ namespace atp {
             return *found->second;
         }
 
-        [[nodiscard]] module_factory* find(const std::string& name) const {
+        [[nodiscard]] module_factory_base* find(const std::string& name) const {
             auto it = registry_.find(name);
             if (it == registry_.end()) {
                 return nullptr;
@@ -116,7 +116,7 @@ namespace atp {
             return it->second.rbegin()->second.get();
         }
 
-        [[nodiscard]] module_factory* find(const std::string& name, const version& v) const {
+        [[nodiscard]] module_factory_base* find(const std::string& name, const version& v) const {
             auto it = registry_.find(name);
             if (it == registry_.end()) {
                 return nullptr;
@@ -159,8 +159,8 @@ namespace atp {
             return true;
         }
 
-        [[nodiscard]] std::vector<const module_factory*> list() const {
-            std::vector<const module_factory*> result;
+        [[nodiscard]] std::vector<const module_factory_base*> list() const {
+            std::vector<const module_factory_base*> result;
             for (const auto& [name, versions] : registry_) {
                 for (const auto& [ver, factory] : versions) {
                     result.push_back(factory.get());
@@ -173,7 +173,7 @@ namespace atp {
         // Имя → версии по возрастанию (operator<=> у version). Инвариант:
         // внутренняя map никогда не пуста — при удалении последней версии
         // стирается вся запись имени, find(name) не находит имя-пустышку.
-        std::unordered_map<std::string, std::map<version, std::unique_ptr<module_factory>>>
+        std::unordered_map<std::string, std::map<version, std::unique_ptr<module_factory_base>>>
             registry_;
     };
 
@@ -192,19 +192,19 @@ namespace atp {
             requires std::default_initializable<M>
                      && requires { { M::module_name } -> std::convertible_to<std::string_view>; }
                      && (!std::string_view{M::module_name}.empty())
-        module_factory& add() {
+        module_factory_base& add() {
             return add<M>(std::string{M::module_name});
         }
 
         template <std::derived_from<module_base> M>
             requires std::default_initializable<M>
-        module_factory& add(std::string name) {
-            return add(std::make_unique<typed_module_factory<M>>(std::move(name)));
+        module_factory_base& add(std::string name) {
+            return add(std::make_unique<module_factory<M>>(std::move(name)));
         }
 
-        module_factory& add(std::unique_ptr<module_factory> factory) {
+        module_factory_base& add(std::unique_ptr<module_factory_base> factory) {
             // пара (имя, версия) запоминается только после успешной регистрации
-            module_factory& ref = registry_->add(std::move(factory));
+            module_factory_base& ref = registry_->add(std::move(factory));
             registered_.emplace_back(std::string(ref.name()), ref.get_version());
             return ref;
         }

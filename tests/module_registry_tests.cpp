@@ -69,7 +69,7 @@ TEST(ModuleRegistry, AddAndCreate) {
 
 TEST(ModuleRegistry, AddReturnsFactoryReference) {
     atp::module_registry registry;
-    atp::module_factory& factory = registry.add<alpha_module>("alpha");
+    atp::module_factory_base& factory = registry.add<alpha_module>("alpha");
     EXPECT_EQ(factory.name(), "alpha");
     EXPECT_EQ(factory.get_version(), atp::version(1, 0));
 }
@@ -139,7 +139,7 @@ TEST(ModuleRegistry, CreateMissingVersionThrows) {
     atp::module_registry registry;
     registry.add<alpha_module>("proc");
     try {
-        registry.create("proc", atp::version(9, 9));
+        (void)registry.create("proc", atp::version(9, 9));
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
         EXPECT_NE(std::string(error.what()).find("module 'proc' has no version '9.9'"),
@@ -150,7 +150,7 @@ TEST(ModuleRegistry, CreateMissingVersionThrows) {
 TEST(ModuleRegistry, CreateVersionOfUnknownNameThrows) {
     atp::module_registry registry;
     try {
-        registry.create("missing", atp::version(1, 0));
+        (void)registry.create("missing", atp::version(1, 0));
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
         EXPECT_NE(std::string(error.what()).find("no module named 'missing'"),
@@ -162,7 +162,7 @@ TEST(ModuleRegistry, FindWithVersion) {
     atp::module_registry registry;
     registry.add<alpha_module>("proc");
     registry.add<alpha_v2_module>("proc");
-    atp::module_factory* factory = registry.find("proc", atp::version(1, 0));
+    atp::module_factory_base* factory = registry.find("proc", atp::version(1, 0));
     ASSERT_NE(factory, nullptr);
     EXPECT_EQ(factory->get_version(), atp::version(1, 0));
     EXPECT_EQ(registry.find("proc", atp::version(9, 9)), nullptr);
@@ -189,7 +189,7 @@ TEST(ModuleRegistry, NullFactoryThrows) {
 
 TEST(ModuleRegistry, CreateUnknownThrows) {
     atp::module_registry registry;
-    EXPECT_THROW(registry.create("missing"), std::runtime_error);
+    EXPECT_THROW((void)registry.create("missing"), std::runtime_error);
 }
 
 TEST(ModuleRegistry, FindReturnsNullptrForUnknown) {
@@ -255,7 +255,7 @@ TEST(ModuleRegistry, AliasesShareType) {
 
 TEST(ModuleRegistry, CustomFactoryThroughGeneralPath) {
     atp::module_registry registry;
-    registry.add(std::make_unique<atp::typed_module_factory<beta_module>>("custom"));
+    registry.add(std::make_unique<atp::module_factory<beta_module>>("custom"));
     EXPECT_NE(registry.create("custom"), nullptr);
 }
 
@@ -279,7 +279,7 @@ TEST(ModuleRegistrar, RecordsNameVersionPairs) {
 
 TEST(ModuleRegistry, AddWithoutNameUsesModuleName) {
     atp::module_registry registry;
-    atp::module_factory& factory = registry.add<named_module>();
+    atp::module_factory_base& factory = registry.add<named_module>();
     EXPECT_EQ(factory.name(), "named");
     EXPECT_EQ(factory.get_version(), atp::version(1, 0));
     EXPECT_NE(registry.create("named"), nullptr);

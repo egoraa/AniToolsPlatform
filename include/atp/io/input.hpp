@@ -70,6 +70,18 @@ class input : public input_base {
         return *value_;
     }
 
+    // Изъятие значения: optional пуст, если писем не было. Пара к get():
+    // get() — вход-«состояние» (читается многократно), take() — вход-«событие»
+    // (каждое значение обрабатывается ровно раз). virtual: наследник изымает
+    // из своего хранилища (queued_input отдаёт голову очереди) — в отличие от
+    // невиртуального get(), take через ссылку на базу работает у всех входов.
+    [[nodiscard]] virtual std::optional<T> take() {
+        auto guard = lock();
+        std::optional<T> out = std::move(value_);
+        value_.reset();
+        return out;
+    }
+
     void reset() override {
         auto guard = lock();
         value_.reset();

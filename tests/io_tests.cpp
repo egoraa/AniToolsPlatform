@@ -69,6 +69,21 @@ TEST(Input, ResetClearsValue) {
     EXPECT_TRUE(in.empty());
 }
 
+TEST(Input, TakeRemovesValue) {
+    atp::io::input<int> in{"in_int"};
+    in(7);
+    auto taken = in.take();
+    ASSERT_TRUE(taken.has_value());
+    EXPECT_EQ(*taken, 7);
+    EXPECT_TRUE(in.empty());
+    EXPECT_EQ(in.take(), std::nullopt);  // второй take — уже пусто
+}
+
+TEST(Input, TakeOnEmptyReturnsNullopt) {
+    atp::io::input<int> in{"in_int"};
+    EXPECT_EQ(in.take(), std::nullopt);
+}
+
 TEST(Input, ReentrantCallbackIsSafe) {
     atp::io::input<int> in{"in_int"};
     bool reentered = false;
@@ -217,6 +232,17 @@ TEST(QueuedInput, DrainTakesEverythingAtOnce) {
     EXPECT_TRUE(in.empty());
     EXPECT_EQ(items.front(), 1);
     EXPECT_EQ(items.back(), 3);
+}
+
+TEST(QueuedInput, TakePopsHead) {
+    atp::io::queued_input<int> q{"q_int"};
+    q(1);
+    q(2);
+    atp::io::input<int>& as_base = q;
+    // Виртуальность: через ссылку на базу изымается голова очереди,
+    // а не пустой value_ базы (контраст с невиртуальным get()).
+    EXPECT_EQ(as_base.take(), std::optional<int>(1));
+    EXPECT_EQ(q.size(), 1u);
 }
 
 TEST(QueuedInput, CallbackFiresOnPushAndValueStaysQueued) {

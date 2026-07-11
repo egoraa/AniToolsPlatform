@@ -55,6 +55,11 @@ class queued_input : public input<T> {
         return front;
     }
 
+    // Изъятие очередного значения для очереди — голова FIFO (см. input::take).
+    [[nodiscard]] std::optional<T> take() override {
+        return try_pop();
+    }
+
     // Забирает всю очередь одним захватом замка — самый дешёвый способ
     // пакетной обработки.
     [[nodiscard]] std::deque<T> drain() {

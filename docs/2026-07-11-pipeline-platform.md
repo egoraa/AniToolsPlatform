@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Реализовать платформу исполнения модулей по спеке `.superpowers/specs/2026-07-11-pipeline-platform-design.md`: `atp::group` (структура), `atp::pipeline` (корень), `atp::pipeline_runner` (пул потоков с назначениями, жизненный цикл, ошибки).
+**Goal:** Реализовать платформу исполнения модулей: `atp::group` (структура), `atp::pipeline` (корень), `atp::pipeline_runner` (пул потоков с назначениями, жизненный цикл, ошибки). План самодостаточен (исходная спека не сохранилась); решения поздних ревизий — в `.superpowers/specs/2026-07-11-runner-stop-wait-design.md`, `...-iterate-idle-design.md`, `...-input-pull-model-design.md`, `...-plugin-pinning-design.md`.
 
 **Architecture:** Группа — владеющий структурный узел (модули + подгруппы + экспорт портов как алиасы + записи соединений). Раннер строит карту «группа → поток» из таблицы назначений (невыделенная группа — inline у ближайшего назначенного предка, корень → поток 0), валидирует `safe`-входы на межпоточных соединениях, гоняет каскады `initialize/start/stop` и кооперативные циклы потоков с backoff простоя (busy/idle от `iterate`).
 
@@ -1845,7 +1845,7 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
 **Files:**
 - Modify: `examples/demo/main.cpp` (переписать на пайплайн)
 - Modify: `examples/demo/CMakeLists.txt` (линковать `atp_host`, добавить `${ATP_HOST_HEADERS}` в сорцы)
-- Modify: `.superpowers/specs/2026-07-11-pipeline-platform-design.md` → напомнить пользователю синхронизировать копию `docs/2026-07-11-pipeline-platform-design.md` (копии разошлись после правок спеки; сами файлы docs/ не трогать без его решения)
+- Modify: `docs/2026-07-11-pipeline-platform-resume.md` — отметить завершение исполнения плана (спека платформы не сохранилась, канонический источник — этот план)
 
 **Interfaces:**
 - Consumes: всё из Tasks 4–9.
@@ -1968,7 +1968,7 @@ cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
 ```
 Ожидание: 100% passed.
 
-- [ ] **Step 5: Напомнить пользователю**: копия спеки `docs/2026-07-11-pipeline-platform-design.md` отстала от `.superpowers/specs/...` (правки про пул потоков и ABI 3) — синхронизировать или убрать одну из копий; и предложить финальный коммит.
+- [ ] **Step 5: Отметить завершение** в `docs/2026-07-11-pipeline-platform-resume.md` и предложить финальный коммит.
 
 Сообщение: `demo: nested groups pipeline on a two-thread pool`
 

@@ -17,8 +17,10 @@ class module_base {
     // Контекст — в фазах настройки: в initialize модуль публикует свои
     // интерфейсы (context.services.provide), в start ищет соседей (at/find) —
     // двухфазность делает порядок инициализации модулей неважным; в stop
-    // симметрично снимает публикации. iterate — горячий путь, службы фазы
-    // настройки ему не передаются.
+    // симметрично снимает публикации. stop() обязан быть корректен и после
+    // initialize без start: при ошибке каскада запуска исполнитель
+    // откатывается, вызывая stop всем прошедшим initialize. iterate —
+    // горячий путь, службы фазы настройки ему не передаются.
     virtual void initialize(module_context& context) = 0;
     virtual void start(module_context& context) = 0;
     virtual void iterate(std::stop_token stop_token) = 0;

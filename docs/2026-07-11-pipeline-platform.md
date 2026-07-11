@@ -4,9 +4,9 @@
 
 **Goal:** Реализовать платформу исполнения модулей по спеке `.superpowers/specs/2026-07-11-pipeline-platform-design.md`: `atp::group` (структура), `atp::pipeline` (корень), `atp::pipeline_runner` (пул потоков с назначениями, жизненный цикл, ошибки).
 
-**Architecture:** Группа — владеющий структурный узел (модули + подгруппы + экспорт портов как алиасы + записи соединений). Раннер строит карту «группа → поток» из таблицы назначений (невыделенная группа — inline у ближайшего назначенного предка, корень → поток 0), валидирует `safe`-входы на межпоточных соединениях, гоняет каскады `initialize/start/stop` и кооперативные циклы потоков.
+**Architecture:** Группа — владеющий структурный узел (модули + подгруппы + экспорт портов как алиасы + записи соединений). Раннер строит карту «группа → поток» из таблицы назначений (невыделенная группа — inline у ближайшего назначенного предка, корень → поток 0), валидирует `safe`-входы на межпоточных соединениях, гоняет каскады `initialize/start/stop` и кооперативные циклы потоков с backoff простоя (busy/idle от `iterate`).
 
-**Tech Stack:** C++23 header-only, googletest, CMake ≥ 4.1 + Ninja, MinGW (CLion).
+**Tech Stack:** C++23 header-only, googletest, CMake ≥ 4.1 + Ninja, MSVC (CLion, профиль `cmake-build-debug`).
 
 ## Global Constraints
 
@@ -15,12 +15,13 @@
 - Канонический include — `<atp/...>` везде, и из `include/`, и из `src/`.
 - Header guards: `ANITOOLSPLATFORM_<PATH>_HPP` (в `src/` — тот же формат, без различий).
 - **НЕ коммитить.** Пользователь коммитит сам. В конце каждой задачи — предложить пользователю коммит с готовым сообщением и остановиться до его решения (или продолжать по его указанию без коммита).
-- Сборка/тесты из shell требуют PATH-префикса MinGW **в той же команде** (иначе gcc падает без вывода, а тесты умирают с 0xC0000135):
+- Профиль `cmake-build-debug` сконфигурирован под **MSVC + Ninja**. Сборка/тесты из shell — только в окружении VS, одной командой через vcvars64 (иначе cl.exe не находит стандартные заголовки):
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug --target atp_tests
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake-build-debug\tests\atp_tests.exe --gtest_filter='Group.*'
+cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1 && cmake --build cmake-build-debug --target atp_tests 2>&1 && cmake-build-debug\tests\atp_tests.exe --gtest_filter="Group.*" 2>&1'
 ```
+
+Команды в задачах ниже показаны без обёртки — исполнять их в этом окружении.
 
 - Новые заголовки в `include/atp/` попадают в IDE-глоб автоматически, но **не** добавляются в umbrella `include/atp/io.hpp` (платформа — не io-слой). Для `src/` глоб появится в задаче 3.
 - `(void)x` вместо `std::ignore`.
@@ -56,7 +57,7 @@ TEST(IoBase, ThreadSafeReflectsConstructionTag) {
 - [ ] **Step 2: Убедиться, что тест не компилируется**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug --target atp_tests
+cmake --build cmake-build-debug --target atp_tests
 ```
 Ожидание: ошибка компиляции `'thread_safe' ... no member`.
 
@@ -75,7 +76,7 @@ $env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:
 - [ ] **Step 4: Тест зелёный**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug --target atp_tests; cmake-build-debug\tests\atp_tests.exe --gtest_filter='IoBase.*'
+cmake --build cmake-build-debug --target atp_tests; cmake-build-debug\tests\atp_tests.exe --gtest_filter='IoBase.*'
 ```
 Ожидание: `[  PASSED  ] 1 test`.
 
@@ -85,19 +86,21 @@ $env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:
 
 ---
 
-### Task 2: `module_base::inputs()/outputs()` + `plugin_abi` → 3
+### Task 2: `module_base::inputs()/outputs()` + `work_status` из `iterate` + `plugin_abi` → 3
 
-Type-erased доступ к io-реестрам через базу — без него `group::connect` по именам невозможен. Ковариантный override в `module<>` — API авторов не меняется.
+Type-erased доступ к io-реестрам через базу — без него `group::connect` по именам невозможен. Ковариантный override в `module<>` — API авторов не меняется. Той же ABI-волной — контракт простоя: `iterate` возвращает `work_status` (busy/idle), по нему раннер (Task 8) сбавляет темп простаивающих потоков (спека `.superpowers/specs/2026-07-11-iterate-idle-design.md`).
 
 **Files:**
 - Modify: `include/atp/module_base.hpp`
 - Modify: `include/atp/module.hpp` (добавить `override` к `inputs()/outputs()`)
-- Modify: `include/atp/plugin.hpp` (`plugin_abi` 2 → 3)
-- Modify: `tests/module_registry_tests.cpp:31` (`handmade_module`), `tests/module_factory_tests.cpp:17` (`bare_module`) — реализовать новые виртуалы
+- Modify: `include/atp/plugin.hpp` (abi уже 3 после pull-модели — дополнить комментарий)
+- Modify: `tests/module_registry_tests.cpp:31` (`handmade_module`), `tests/module_factory_tests.cpp:17` (`bare_module`) — реализовать новые виртуалы, `iterate` → idle
+- Modify: `examples/plugin_demo/counter_modules.hpp` (`iterate` → busy: счётчик работает на каждом вызове)
 - Test: `tests/module_tests.cpp`
 
 **Interfaces:**
 - Produces: `virtual io::inputs& module_base::inputs() = 0;` + const-вариант; симметрично `outputs()`. `module<TInputs, TOutputs, ...>::inputs()` — ковариантный override, возвращает `TInputs&` как раньше.
+- Produces: алиас `atp::work_status` (`= io::work_status`, сам enum уже в `io/threading.hpp`) и `virtual work_status iterate(std::stop_token) = 0` — busy: на вызове была работа; idle: делать нечего. Дефолт в `module<>` — idle. Возврат намеренно не `[[nodiscard]]`: одиночный тик в plugin_demo-хостах легитимно игнорирует статус.
 
 - [ ] **Step 1: Написать падающий тест**
 
@@ -118,6 +121,12 @@ TEST(Module, IoRegistriesReachableThroughBase) {
     EXPECT_EQ(&base.inputs(), static_cast<atp::io::inputs*>(&m.inputs()));
     EXPECT_NE(base.inputs().find("number"), nullptr);
     EXPECT_EQ(base.outputs().list().size(), 0u);
+}
+
+TEST(Module, DefaultIterateReportsIdle) {
+    erased_probe m;
+    // Умолчание module<>: no-op-итерация и есть простой.
+    EXPECT_EQ(m.iterate(std::stop_token{}), atp::work_status::idle);
 }
 ```
 
@@ -147,6 +156,18 @@ class outputs;
     [[nodiscard]] virtual const io::outputs& outputs() const = 0;
 ```
 
+там же — контракт простоя: `work_status` уже объявлен в `<atp/io/threading.hpp>` (pull-модель входов), `module_base.hpp` добавляет `#include <atp/io/threading.hpp>` и поднимает имя:
+
+```cpp
+using work_status = io::work_status;  // сигнатура iterate пишется atp::work_status
+```
+
+и смена сигнатуры в классе:
+
+```cpp
+    virtual work_status iterate(std::stop_token stop_token) = 0;
+```
+
 `include/atp/module.hpp` — пометить существующие четыре метода `override`:
 
 ```cpp
@@ -164,11 +185,21 @@ class outputs;
     }
 ```
 
+там же — дефолт iterate:
+
+```cpp
+    work_status iterate(std::stop_token) override {
+        return work_status::idle;  // no-op-итерация и есть простой
+    }
+```
+
 `include/atp/plugin.hpp`:
 
 ```cpp
 // 2: initialize/start/stop принимают module_context&.
-// 3: module_base отдаёт io-реестры (inputs()/outputs()).
+// 3: pull-модель входов (io: -when/+take/watcher); module_base отдаёт
+//    io-реестры (inputs()/outputs()); iterate возвращает work_status
+//    (контракт простоя для раннера).
 inline constexpr unsigned plugin_abi = 3;
 ```
 
@@ -193,18 +224,18 @@ inline constexpr unsigned plugin_abi = 3;
     atp::io::outputs outputs_;
 ```
 
-(если в файле нет `#include <atp/io.hpp>` — добавить).
+(если в файле нет `#include <atp/io.hpp>` — добавить). Там же `iterate` меняет возврат: `atp::work_status iterate(std::stop_token) override { return atp::work_status::idle; }`. В `examples/plugin_demo/counter_modules.hpp` `iterate` возвращает `atp::work_status::busy` — счётчик работает на каждом вызове. Хосты `host_static.cpp`/`host_dynamic.cpp` не правятся: возврат не `[[nodiscard]]`.
 
 - [ ] **Step 4: Полный прогон**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
+cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
 ```
 Ожидание: 100% tests passed (тесты ABI-рукопожатия используют константу `plugin_abi` — перекомпилируются согласованно).
 
 - [ ] **Step 5: Предложить пользователю коммит**
 
-Сообщение: `expose io registries through module_base (plugin ABI 3)`
+Сообщение: `module_base: io registries + work_status iterate (plugin ABI 3)`
 
 ---
 
@@ -257,7 +288,7 @@ target_link_libraries(atp_host_dynamic PRIVATE atp_host ${CMAKE_DL_LIBS})
 - [ ] **Step 3: Полная сборка + все тесты**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
+cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
 ```
 Ожидание: конфигурация перезапустится (CONFIGURE_DEPENDS), 100% passed. Отдельно проверить, что `atp_demo_plugin` собрался без `src/` в include-путях (сборка это и докажет: цель не линкует `atp_host`).
 
@@ -467,7 +498,7 @@ class group {
 - [ ] **Step 4: Тесты зелёные**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug --target atp_tests; cmake-build-debug\tests\atp_tests.exe --gtest_filter='Group.*'
+cmake --build cmake-build-debug --target atp_tests; cmake-build-debug\tests\atp_tests.exe --gtest_filter='Group.*'
 ```
 Ожидание: `[  PASSED  ] 3 tests`.
 
@@ -924,7 +955,7 @@ class pipeline {
   - `void stop()` — идемпотентен, не бросает
   - `bool running() const`
   - (Task 9 добавит `wait()`, `error()`)
-- Семантика: невыделенная группа наследует поток ближайшего назначенного предка; корень без назначения → поток 0; поток без групп не создаётся; inline-подгруппа итерируется в позиции своего порядка вставки; назначенная подгруппа предком пропускается.
+- Семантика: невыделенная группа наследует поток ближайшего назначенного предка; корень без назначения → поток 0; поток без групп не создаётся; inline-подгруппа итерируется в позиции своего порядка вставки; назначенная подгруппа предком пропускается; поток, чей пасс целиком idle, сбавляет темп — yield, затем сон с удвоением 1 мс → 10 мс (прерываемый стоп-токеном), busy-пасс сбрасывает темп (спека `.superpowers/specs/2026-07-11-iterate-idle-design.md`).
 
 - [ ] **Step 1: Тестовая поддержка `tests/pipeline_test_support.hpp`**
 
@@ -1010,12 +1041,13 @@ class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
     void start(atp::module_context&) override {
         hit("start");
     }
-    void iterate(std::stop_token) override {
+    atp::work_status iterate(std::stop_token) override {
         if (first_iterate && !signaled_) {
             signaled_ = true;
             first_iterate->count_down();
         }
         hit("iterate");
+        return atp::work_status::busy;  // журнал пишется каждый вызов — это работа
     }
     void stop(atp::module_context&) override {
         hit("stop");
@@ -1042,6 +1074,8 @@ class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
 - [ ] **Step 2: Падающие тесты `tests/pipeline_runner_tests.cpp`**
 
 ```cpp
+#include <atomic>
+#include <chrono>
 #include <latch>
 #include <stdexcept>
 #include <thread>
@@ -1149,6 +1183,85 @@ TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnOneThread) {
     EXPECT_EQ(r.log.iterate_thread("d"), t);
 }
 
+TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
+    atp::pipeline pipe;
+    std::latch delivered(1);
+
+    struct feed_outputs : atp::io::outputs {
+        atp::io::output<int>& value = make<atp::io::output<int>>("value");
+    };
+    struct drain_inputs : atp::io::inputs {
+        atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
+    };
+    // Источник молчит до отмашки теста; потребитель считает свои пассы
+    // и сигналит о доставке.
+    class gated_source : public atp::module<atp::io::inputs, feed_outputs> {
+       public:
+        std::atomic<bool> go{false};
+        atp::work_status iterate(std::stop_token) override {
+            if (!go.exchange(false)) {
+                return atp::work_status::idle;
+            }
+            outputs().value(7);
+            return atp::work_status::busy;
+        }
+    };
+    class counting_sink : public atp::module<drain_inputs, atp::io::outputs> {
+       public:
+        std::latch* delivered = nullptr;
+        std::atomic<int> passes{0};
+        atp::work_status iterate(std::stop_token) override {
+            ++passes;
+            if (inputs().value.try_pop()) {
+                delivered->count_down();
+                return atp::work_status::busy;
+            }
+            return atp::work_status::idle;
+        }
+    };
+
+    atp::group& left = pipe.root().add_group("left");
+    gated_source& src = left.make<gated_source>("src");
+    left.expose_output("out", "src.value");
+    atp::group& right = pipe.root().add_group("right");
+    counting_sink& sink = right.make<counting_sink>("sink");
+    sink.delivered = &delivered;
+    right.expose_input("in", "sink.value");
+    pipe.root().connect("left.out", "right.in");
+
+    atp::pipeline_runner runner(2);
+    runner.assign(left, 0);
+    runner.assign(right, 1);
+    runner.start(pipe);
+
+    // Окно простоя: здесь sleep уместен — тест наблюдает именно темп
+    // простаивающего потока, будить его нечем и незачем.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const int idle_passes = sink.passes.load();
+    src.go = true;                       // источник оживает на своём потоке
+    delivered.wait();                    // спящий потребитель проснулся и получил данные
+    runner.stop();
+
+    // Busy-loop дал бы миллионы пассов за 100 мс; backoff — десятки.
+    EXPECT_LT(idle_passes, 1000);
+}
+
+TEST(PipelineRunner, StopInterruptsIdleSleep) {
+    atp::pipeline pipe;
+    class idler : public atp::module<atp::io::inputs, atp::io::outputs> {};  // iterate по умолчанию — idle
+    pipe.root().make<idler>("sleepy");
+
+    atp::pipeline_runner runner(1);
+    runner.start(pipe);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));  // поток дошёл до потолка сна
+    const auto begin = std::chrono::steady_clock::now();
+    runner.stop();                       // сон прерываем стоп-токеном — join не ждёт интервал
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    // Щедрая граница ловит только настоящее зависание (непрерываемое ожидание),
+    // а не шум планировщика.
+    EXPECT_LT(elapsed, std::chrono::seconds(1));
+}
+
 TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsBeforeCascades) {
     atp::pipeline pipe;
     event_log log;
@@ -1206,6 +1319,9 @@ TEST(PipelineRunner, ConfigurationErrors) {
 #ifndef ANITOOLSPLATFORM_PIPELINE_RUNNER_HPP
 #define ANITOOLSPLATFORM_PIPELINE_RUNNER_HPP
 
+#include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <exception>
 #include <mutex>
@@ -1223,9 +1339,10 @@ TEST(PipelineRunner, ConfigurationErrors) {
 namespace atp {
 
 // Исполнитель пайплайна: пул потоков + жизненный цикл. Владеет только
-// потоками и раскладкой; пайплайн — по ссылке на время работы. Управление
-// (start/stop/wait) — с одного потока-владельца: сам раннер потокобезопасен
-// только внутри циклов исполнения.
+// потоками и раскладкой; пайплайн — по ссылке на время работы. Все методы
+// управления (assign/start/stop/wait/running/error) — только с потока-владельца;
+// из потоков пула и кода модулей раннером управлять нельзя. Конкурентный
+// stop() во время wait() исключён контрактом, а не синхронизацией.
 class pipeline_runner {
    public:
     explicit pipeline_runner(std::size_t threads) : thread_count_(threads) {
@@ -1383,14 +1500,40 @@ class pipeline_runner {
         }
     }
 
+    // Темп простоя: первый простойный пасс — yield (дёшево пережить короткую
+    // паузу), дальше сон с удвоением до потолка; busy-пасс сбрасывает темп.
+    // Константы фиксированы: десятки мс латентности пробуждения — осознанный
+    // контракт платформы, не настройка развёртывания.
+    static constexpr auto idle_sleep_initial = std::chrono::milliseconds(1);
+    static constexpr auto idle_sleep_cap = std::chrono::milliseconds(10);
+
     void run_loop(const std::vector<const group*>& groups) {
         std::stop_token token = stop_source_.get_token();
+        // Сон прерываем стоп-токеном: request_stop (ошибка или stop()) будит
+        // мгновенно, спящий поток не оттягивает остановку.
+        std::mutex sleep_mutex;
+        std::condition_variable_any sleep_cv;
+        std::chrono::milliseconds delay{};  // 0 — ещё не спим, только yield
         try {
             while (!token.stop_requested()) {
+                work_status pass = work_status::idle;
                 for (const group* g : groups) {
-                    iterate_group(*g, token);
+                    if (iterate_group(*g, token) == work_status::busy) {
+                        pass = work_status::busy;
+                    }
                 }
-                std::this_thread::yield();  // чистый кооперативный цикл, без сна
+                if (pass == work_status::busy) {
+                    delay = {};
+                    continue;
+                }
+                if (delay == std::chrono::milliseconds{}) {
+                    std::this_thread::yield();
+                    delay = idle_sleep_initial;
+                    continue;
+                }
+                std::unique_lock lock(sleep_mutex);
+                sleep_cv.wait_for(lock, token, delay, [] { return false; });
+                delay = std::min(delay * 2, idle_sleep_cap);
             }
         } catch (...) {
             capture_error(std::current_exception());
@@ -1399,23 +1542,38 @@ class pipeline_runner {
 
     // Собственные модули группы + inline-поддеревья в позиции своего порядка
     // вставки; назначенные подгруппы пропускаются — у них свой поток.
-    void iterate_group(const group& g, const std::stop_token& token) {
+    // Возврат — статус пасса: busy побеждает, по нему run_loop держит темп.
+    work_status iterate_group(const group& g, const std::stop_token& token) {
+        work_status pass = work_status::idle;
         for (const group::element& e : g.elements()) {
             if (token.stop_requested()) {
-                return;
+                return pass;
             }
             if (e.module) {
-                e.module->iterate(token);
+                if (e.module->iterate(token) == work_status::busy) {
+                    pass = work_status::busy;
+                }
             } else if (!assigned_.contains(e.subgroup.get())) {
-                iterate_group(*e.subgroup, token);
+                if (iterate_group(*e.subgroup, token) == work_status::busy) {
+                    pass = work_status::busy;
+                }
             }
         }
+        return pass;
     }
 
     // Первая ошибка побеждает; остановка — общая на весь пайплайн.
+    // request_stop под замком: он входит в предикат wait(), изменение
+    // условия вне мьютекса — потерянное пробуждение.
     void capture_error(std::exception_ptr e) {
-        store_error(std::move(e));
-        stop_source_.request_stop();
+        {
+            std::lock_guard lock(error_mutex_);
+            if (!error_) {
+                error_ = std::move(e);
+            }
+            stop_source_.request_stop();
+        }
+        error_cv_.notify_all();
     }
 
     void store_error(std::exception_ptr e) {
@@ -1461,7 +1619,8 @@ class pipeline_runner {
     bool running_ = false;
 
     mutable std::mutex error_mutex_;
-    std::exception_ptr error_;  // первая ошибка исполнения; читается error()/wait() (Task 9)
+    std::condition_variable error_cv_;  // будит wait(); условия предиката меняются под error_mutex_
+    std::exception_ptr error_;          // первая ошибка исполнения; хранится до следующего start()
 };
 
 }  // namespace atp
@@ -1472,9 +1631,9 @@ class pipeline_runner {
 - [ ] **Step 5: Тесты зелёные**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug --target atp_tests; cmake-build-debug\tests\atp_tests.exe --gtest_filter='PipelineRunner.*'
+cmake --build cmake-build-debug --target atp_tests; cmake-build-debug\tests\atp_tests.exe --gtest_filter='PipelineRunner.*'
 ```
-Ожидание: `[  PASSED  ] 6 tests`. Затем полный `ctest --test-dir cmake-build-debug` — 100%.
+Ожидание: `[  PASSED  ] 8 tests`. Затем полный `ctest --test-dir cmake-build-debug` — 100%.
 
 - [ ] **Step 6: Предложить пользователю коммит**
 
@@ -1491,7 +1650,7 @@ $env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:
 **Interfaces:**
 - Consumes: `capture_error/store_error/shutdown` (Task 8).
 - Produces:
-  - `void wait()` — блокируется до завершения потоков (внешний `stop()` из другого потока или ошибка), выполняет остановку, **перебрасывает** первую ошибку
+  - `void wait()` — «работать до аварии»: блокируется до первой ошибки исполнения (у здорового пайплайна — бессрочно), выполняет остановку, **перебрасывает** первопричину; перебрасывает и на уже остановленном пайплайне, пока ошибка хранится (до следующего `start()`)
   - `std::exception_ptr error() const` — nullptr, если ошибок не было
 
 - [ ] **Step 1: Падающие тесты**
@@ -1537,6 +1696,36 @@ TEST(PipelineRunner, StopIsIdempotentAndErrorIsClean) {
     EXPECT_EQ(runner.error(), nullptr);
 }
 
+TEST(PipelineRunner, WaitAfterStopRethrowsPendingError) {
+    rig r;
+    std::latch reached(1);
+    r.a->first_iterate = &reached;   // зонд сигналит latch до броска (см. probe_module::iterate)
+    r.a->throw_in = "iterate";
+
+    atp::pipeline_runner runner(1);
+    runner.start(r.pipe);
+    reached.wait();
+    runner.stop();                                     // не бросает; после join ошибка захвачена
+    EXPECT_THROW(runner.wait(), std::runtime_error);   // stop() не съел первопричину
+    EXPECT_NE(runner.error(), nullptr);
+}
+
+TEST(PipelineRunner, WaitOnIdleRunnerIsNoOp) {
+    atp::pipeline_runner runner(1);
+    runner.wait();                                     // не стартовал, ошибки нет — сразу возврат
+    EXPECT_EQ(runner.error(), nullptr);
+}
+
+TEST(PipelineRunner, SecondWaitRethrowsSameError) {
+    rig r;
+    r.b->throw_in = "iterate";
+
+    atp::pipeline_runner runner(1);
+    runner.start(r.pipe);
+    EXPECT_THROW(runner.wait(), std::runtime_error);
+    EXPECT_THROW(runner.wait(), std::runtime_error);   // ошибка хранится до следующего start()
+}
+
 TEST(PipelineRunner, DestructorStopsRunningPipeline) {
     rig r;
     std::latch ticked(1);
@@ -1563,11 +1752,13 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
     // Производитель шлёт один раз; потребитель сигналит о доставке.
     class producer : public atp::module<atp::io::inputs, out_ports> {
        public:
-        void iterate(std::stop_token) override {
-            if (!sent_) {
-                sent_ = true;
-                outputs().value(42);
+        atp::work_status iterate(std::stop_token) override {
+            if (sent_) {
+                return atp::work_status::idle;
             }
+            sent_ = true;
+            outputs().value(42);
+            return atp::work_status::busy;
         }
 
        private:
@@ -1577,8 +1768,14 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
        public:
         std::latch* delivered = nullptr;
         void initialize(atp::module_context&) override {
-            inputs().value.when([this](const int&) { delivered->count_down(); });
+            watcher_.watch(inputs().value, [this](const int&) { delivered->count_down(); });
         }
+        atp::work_status iterate(std::stop_token) override {
+            return watcher_.poll();
+        }
+
+       private:
+        atp::io::watcher watcher_;
     };
 
     atp::group& left = pipe.root().add_group("left");
@@ -1606,14 +1803,22 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
 - [ ] **Step 3: Реализация** — в публичную часть `pipeline_runner`:
 
 ```cpp
-    // Блокируется до завершения потоков: наружный stop() (с другого потока)
-    // или ошибка исполнения. Затем обычная остановка и переброс первопричины —
-    // так владелец узнаёт, чем кончилась работа.
+    // Работать до аварии: блокируется до первой ошибки исполнения, затем
+    // обычная остановка и переброс первопричины. У здорового пайплайна
+    // блокируется бессрочно — остановить его может только владелец, а он
+    // здесь. Предикат сразу общий (ошибка ИЛИ запрошен стоп): будущая
+    // остановка по инициативе модулей добавит request_stop+notify под тем
+    // же замком, wait() не изменится. Переброс — и на уже остановленном
+    // пайплайне: порядок «stop(), потом wait()» не глотает первопричину.
     void wait() {
-        if (!running_) {
-            return;
+        if (running_) {
+            std::stop_token token = stop_source_.get_token();
+            {
+                std::unique_lock lock(error_mutex_);
+                error_cv_.wait(lock, [&] { return error_ != nullptr || token.stop_requested(); });
+            }
+            shutdown();
         }
-        shutdown();
         if (std::exception_ptr e = error()) {
             std::rethrow_exception(e);
         }
@@ -1634,7 +1839,7 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
         }
 ```
 
-- [ ] **Step 4: Тесты зелёные** (`PipelineRunner.*`, `[  PASSED  ] 11 tests`), затем полный `ctest` — 100%.
+- [ ] **Step 4: Тесты зелёные** (`PipelineRunner.*`, `[  PASSED  ] 16 tests`), затем полный `ctest` — 100%.
 
 - [ ] **Step 5: Предложить пользователю коммит**
 
@@ -1687,10 +1892,12 @@ struct sink_inputs : atp::io::inputs {
 // Источник: несколько значений и тишина — демо конечное.
 class source_module : public atp::module<atp::io::inputs, source_outputs, "source"> {
    public:
-    void iterate(std::stop_token) override {
-        if (next_ <= 3) {
-            outputs().number(next_++);
+    atp::work_status iterate(std::stop_token) override {
+        if (next_ > 3) {
+            return atp::work_status::idle;  // всё отправлено — потоку можно спать
         }
+        outputs().number(next_++);
+        return atp::work_status::busy;
     }
 
    private:
@@ -1702,13 +1909,19 @@ class sink_module : public atp::module<sink_inputs, atp::io::outputs, "sink"> {
     std::latch* done = nullptr;
 
     void initialize(atp::module_context&) override {
-        inputs().number.when([this](const int& value) {
+        watcher_.watch(inputs().number, [this](const int& value) {
             std::cout << "sink received: " << value << '\n';
             if (value == 3 && done) {
                 done->count_down();
             }
         });
     }
+    atp::work_status iterate(std::stop_token) override {
+        return watcher_.poll();
+    }
+
+   private:
+    atp::io::watcher watcher_;
 };
 
 }  // namespace
@@ -1751,14 +1964,14 @@ int main() {
 - [ ] **Step 3: Сборка и запуск демо**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug --target atp_demo; cmake-build-debug\examples\demo\atp_demo.exe
+cmake --build cmake-build-debug --target atp_demo; cmake-build-debug\examples\demo\atp_demo.exe
 ```
 Ожидание: строки `sink received: 1..3` (порядок значений строгий, чередование с историей — нет) и `queued history: 1 2 3`.
 
 - [ ] **Step 4: Полный прогон всех тестов**
 
 ```powershell
-$env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:PATH; cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
+cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
 ```
 Ожидание: 100% passed.
 
@@ -1770,6 +1983,6 @@ $env:PATH = "C:\Users\egora\AppData\Local\Programs\CLion\bin\mingw\bin;" + $env:
 
 ## Self-review плана
 
-- **Покрытие спеки:** thread_safe (T1); inputs()/outputs() через базу + ABI 3 (T2); src/-раскладка и atp_host + переезд module_loader (T3); группа: владение/имена/порядок (T4), экспорт с владельцами и ре-экспорт (T5), connect+replay+записи+авторазрыв (T6); pipeline (T7); раннер: пул/назначения/inline/наследование/корень→0/пустой поток не создаётся/валидация/каскады/fail-fast (T8); ошибки iterate/первая побеждает/wait/error/идемпотентный stop/деструктор/межпоточные данные (T9); демо (T10). Ограничения первой версии кода не требуют.
-- **Типы согласованы:** `element{name, module, subgroup}` (T4) используется раннером (T8); `connection{out, in, out_owner, in_owner}` (T6) — валидацией (T8); `probe_module(event_log&, std::string)` (T8) — тестами T8/T9; `make<M>(name, args...)` (T4) — вызовами `make<probe_module>("a", log, "a")`.
+- **Покрытие спеки:** thread_safe (T1); inputs()/outputs() через базу + `work_status` из iterate + ABI 3 (T2); src/-раскладка и atp_host + переезд module_loader (T3); группа: владение/имена/порядок (T4), экспорт с владельцами и ре-экспорт (T5), connect+replay+записи+авторазрыв (T6); pipeline (T7); раннер: пул/назначения/inline/наследование/корень→0/пустой поток не создаётся/валидация/каскады/fail-fast/backoff простоя с прерываемым сном и побудкой по данным (T8); ошибки iterate/первая побеждает/wait-на-CV «до аварии»/переброс после stop/повторный wait/wait без старта/error/идемпотентный stop/деструктор/межпоточные данные (T9); демо (T10). Контракт stop/wait — по спеке `.superpowers/specs/2026-07-11-runner-stop-wait-design.md`; контракт простоя iterate — по спеке `.superpowers/specs/2026-07-11-iterate-idle-design.md`. Ограничения первой версии кода не требуют.
+- **Типы согласованы:** `element{name, module, subgroup}` (T4) используется раннером (T8); `connection{out, in, out_owner, in_owner}` (T6) — валидацией (T8); `probe_module(event_log&, std::string)` (T8) — тестами T8/T9; `make<M>(name, args...)` (T4) — вызовами `make<probe_module>("a", log, "a")`; `work_status` (T2) — возвратами iterate в зондах/демо и агрегацией `iterate_group`/`run_loop` (T8/T10).
 - **Плейсхолдеров нет:** каждый шаг с полным кодом/командой.

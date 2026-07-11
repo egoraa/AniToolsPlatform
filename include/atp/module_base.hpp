@@ -8,31 +8,35 @@
 
 namespace atp {
 
-    // Type-erased база модуля — в одном ряду с io_base/input_base/output_base.
-    class module_base {
-    public:
-        virtual ~module_base() = default;
+// Type-erased база модуля — в одном ряду с io_base/input_base/output_base.
+class module_base {
+   public:
+    virtual ~module_base() = default;
 
-        virtual void initialize() = 0;
-        virtual void start() = 0;
-        virtual void iterate(std::stop_token stop_token) = 0;
-        virtual void stop() = 0;
+    virtual void initialize() = 0;
+    virtual void start() = 0;
+    virtual void iterate(std::stop_token stop_token) = 0;
+    virtual void stop() = 0;
 
-        // Версия модуля для рантайм-сравнения через type-erased ссылку.
-        // Наследник, не объявивший версию, отвечает default_version; сама
-        // версия объявляется один раз — NTTP-параметром module (module.hpp),
-        // здесь только точка доступа. Имя get_version, а не STL-шное
-        // version() — имя занято типом atp::version (тот же приём, что
-        // std::vector::get_allocator при занятом allocator).
-        [[nodiscard]] virtual version get_version() const noexcept { return default_version; }
+    // Версия модуля для рантайм-сравнения через type-erased ссылку.
+    // Наследник, не объявивший версию, отвечает default_version; сама
+    // версия объявляется один раз — NTTP-параметром module (module.hpp),
+    // здесь только точка доступа. Имя get_version, а не STL-шное
+    // version() — имя занято типом atp::version (тот же приём, что
+    // std::vector::get_allocator при занятом allocator).
+    [[nodiscard]] virtual version get_version() const noexcept {
+        return default_version;
+    }
 
-        // Имя модуля через type-erased ссылку — симметрично get_version.
-        // Модуль, не объявивший имени, — «аноним»: пустой string_view
-        // (аналог default_version у версии). Имя объявляется один раз —
-        // NTTP-параметром module (module.hpp), здесь только точка доступа.
-        [[nodiscard]] virtual std::string_view get_name() const noexcept { return {}; }
-    };
+    // Имя модуля через type-erased ссылку — симметрично get_version.
+    // Модуль, не объявивший имени, — «аноним»: пустой string_view
+    // (аналог default_version у версии). Имя объявляется один раз —
+    // NTTP-параметром module (module.hpp), здесь только точка доступа.
+    [[nodiscard]] virtual std::string_view get_name() const noexcept {
+        return {};
+    }
+};
 
-} // namespace atp
+}  // namespace atp
 
-#endif // ANITOOLSPLATFORM_MODULE_BASE_HPP
+#endif  // ANITOOLSPLATFORM_MODULE_BASE_HPP

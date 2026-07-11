@@ -14,17 +14,17 @@
 
 namespace {
 
-    struct test_inputs : atp::io::inputs {
-        atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
-        atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
-    };
+struct test_inputs : atp::io::inputs {
+    atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
+    atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
+};
 
-    struct test_outputs : atp::io::outputs {
-        atp::io::output<int>& out1 = make<atp::io::output<int>>("out1");
-        atp::io::output<std::string>& out2 = make<atp::io::output<std::string>>("out2");
-    };
+struct test_outputs : atp::io::outputs {
+    atp::io::output<int>& out1 = make<atp::io::output<int>>("out1");
+    atp::io::output<std::string>& out2 = make<atp::io::output<std::string>>("out2");
+};
 
-} // namespace
+}  // namespace
 
 TEST(Input, MetadataCarriesNameAndType) {
     atp::io::input<int> in{"in_int"};
@@ -50,7 +50,7 @@ TEST(Input, AcceptsLvalueWithoutMoving) {
     std::string hello = "Hello";
     in(hello);
     EXPECT_EQ(in.get(), "Hello");
-    EXPECT_EQ(hello, "Hello"); // lvalue не перемещён
+    EXPECT_EQ(hello, "Hello");  // lvalue не перемещён
 }
 
 TEST(Input, CallbackFiresAndValueSurvives) {
@@ -59,7 +59,7 @@ TEST(Input, CallbackFiresAndValueSurvives) {
     in.when([&](const int& v) { observed = v; });
     in(7);
     EXPECT_EQ(observed, 7);
-    EXPECT_EQ(in.get(), 7); // значение не «съедено» колбэком
+    EXPECT_EQ(in.get(), 7);  // значение не «съедено» колбэком
 }
 
 TEST(Input, ResetClearsValue) {
@@ -76,7 +76,7 @@ TEST(Input, ReentrantCallbackIsSafe) {
     in.when([&](const int& v) {
         if (!reentered) {
             reentered = true;
-            in(100); // реентерабельный вызов перезаписывает value_
+            in(100);  // реентерабельный вызов перезаписывает value_
             // v привязан к snapshot-копии внешнего вызова — не повис
             outer_value_after_reentry = v;
         }
@@ -178,7 +178,7 @@ TEST(QueuedInput, AcceptsLvalueWithoutMoving) {
     std::string hello = "Hello";
     in(hello);
     EXPECT_EQ(in.pop(), "Hello");
-    EXPECT_EQ(hello, "Hello"); // lvalue не перемещён
+    EXPECT_EQ(hello, "Hello");  // lvalue не перемещён
 }
 
 TEST(QueuedInput, MetadataMatchesSignature) {
@@ -296,8 +296,7 @@ TEST(Input, ConcurrentWritersDeliverEveryCallbackWithOwnValue) {
     EXPECT_EQ(calls.load(), kThreads * kPerThread);
     // Сумма сходится, только если каждый колбэк получил снапшот своего вызова,
     // а не «последнее на момент вызова» значение.
-    EXPECT_EQ(sum.load(),
-              static_cast<long long>(kThreads) * kPerThread * (kPerThread + 1) / 2);
+    EXPECT_EQ(sum.load(), static_cast<long long>(kThreads) * kPerThread * (kPerThread + 1) / 2);
     EXPECT_FALSE(in.empty());
 }
 
@@ -317,7 +316,7 @@ TEST(InputsRegistry, AtByNameReturnsMetadata) {
 TEST(InputsRegistry, GetInputAliasesField) {
     test_inputs ins;
     ins.get<atp::io::input<int>>("input1")(100);
-    EXPECT_EQ(ins.input1.get(), 100); // то же поле, не копия
+    EXPECT_EQ(ins.input1.get(), 100);  // то же поле, не копия
 }
 
 TEST(InputsRegistry, WrongTypeThrows) {
@@ -429,7 +428,7 @@ TEST(Output, AcceptsLvalueWithoutMoving) {
     std::string hello = "Hello";
     out(hello);
     EXPECT_EQ(out.get(), "Hello");
-    EXPECT_EQ(hello, "Hello"); // lvalue не перемещён
+    EXPECT_EQ(hello, "Hello");  // lvalue не перемещён
 }
 
 TEST(Output, DeliversToAllConnectedInputs) {
@@ -442,7 +441,7 @@ TEST(Output, DeliversToAllConnectedInputs) {
     out(7);
     EXPECT_EQ(a.get(), 7);
     EXPECT_EQ(b.get(), 7);
-    EXPECT_EQ(out.get(), 7); // кэш обновлён вместе с рассылкой
+    EXPECT_EQ(out.get(), 7);  // кэш обновлён вместе с рассылкой
 }
 
 TEST(Output, DeliversToQueuedInput) {
@@ -464,7 +463,7 @@ TEST(Output, ResetClearsCacheButKeepsConnections) {
     out.reset();
     EXPECT_TRUE(out.empty());
     EXPECT_EQ(out.connections(), 1u);
-    out(2); // соединение пережило reset — доставка работает
+    out(2);  // соединение пережило reset — доставка работает
     EXPECT_EQ(in.get(), 2);
 }
 
@@ -482,10 +481,10 @@ TEST(Output, DisconnectStopsDelivery) {
     out.connect(in);
     out(1);
     EXPECT_TRUE(out.disconnect(in));
-    EXPECT_FALSE(out.disconnect(in)); // повторный разрыв — уже не был подключён
+    EXPECT_FALSE(out.disconnect(in));  // повторный разрыв — уже не был подключён
     out(2);
-    EXPECT_EQ(in.get(), 1); // после разрыва доставки нет
-    EXPECT_EQ(out.get(), 2); // кэш при этом обновляется
+    EXPECT_EQ(in.get(), 1);   // после разрыва доставки нет
+    EXPECT_EQ(out.get(), 2);  // кэш при этом обновляется
 }
 
 TEST(Output, DisconnectAllDropsEveryConnection) {
@@ -528,7 +527,7 @@ TEST(Output, TypeErasedConnectChecksCompatibility) {
     test_outputs outs;
     test_inputs ins;
     atp::io::output_base& out = outs.at("out1");
-    out.connect(ins.at("input1")); // int → int: совместимо
+    out.connect(ins.at("input1"));  // int → int: совместимо
     outs.out1(5);
     EXPECT_EQ(ins.input1.get(), 5);
     // int → string: несовместимо, рантайм-проверка отклоняет
@@ -557,7 +556,7 @@ TEST(Output, TypeErasedConnectAcceptsAnyInput) {
 TEST(Output, TypedConnectAcceptsAnyInput) {
     atp::io::output<std::string> out{"out_str"};
     atp::io::input<std::any> any_in{"any_in"};
-    out.connect(any_in); // типизированная перегрузка, без type-erased пути
+    out.connect(any_in);  // типизированная перегрузка, без type-erased пути
     out(std::string("hello"));
     EXPECT_EQ(std::any_cast<std::string>(any_in.get()), "hello");
 }
@@ -584,7 +583,7 @@ TEST(Output, QueuedAnyInputAccumulatesFromTypedOutput) {
 TEST(Output, AnyOutputToAnyInputNoDoubleBoxing) {
     atp::io::output<std::any> out{"out_any"};
     atp::io::input<std::any> in{"in_any"};
-    out.connect(in); // при T == std::any работает обычная типизированная пара
+    out.connect(in);  // при T == std::any работает обычная типизированная пара
     out(std::any(42));
     EXPECT_EQ(in.get().type(), typeid(int));
     EXPECT_EQ(std::any_cast<int>(in.get()), 42);
@@ -623,7 +622,7 @@ TEST(Output, DisconnectAnyInputStopsDelivery) {
     out(1);
     EXPECT_TRUE(out.disconnect(any_in));
     out(2);
-    EXPECT_EQ(std::any_cast<int>(any_in.get()), 1); // после разрыва доставки нет
+    EXPECT_EQ(std::any_cast<int>(any_in.get()), 1);  // после разрыва доставки нет
     EXPECT_EQ(out.connections(), 0u);
 }
 
@@ -635,7 +634,7 @@ TEST(Output, ReentrantWriteBackIsSafe) {
     in.when([&](const int& v) {
         if (!reentered) {
             reentered = true;
-            out(v + 93); // колбэк входа пишет обратно в тот же выход — нет дедлока
+            out(v + 93);  // колбэк входа пишет обратно в тот же выход — нет дедлока
         }
     });
     out(7);
@@ -678,7 +677,7 @@ TEST(OutputsRegistry, TypedFieldAccess) {
     test_outputs outs;
     outs.out1(42);
     EXPECT_EQ(outs.out1.get(), 42);
-    EXPECT_EQ(outs.get<atp::io::output<int>>("out1").get(), 42); // то же поле, не копия
+    EXPECT_EQ(outs.get<atp::io::output<int>>("out1").get(), 42);  // то же поле, не копия
 }
 
 TEST(OutputsRegistry, AtByNameReturnsMetadata) {

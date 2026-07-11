@@ -9,28 +9,28 @@
 
 namespace {
 
-    struct test_inputs : atp::io::inputs {
-        atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
-        atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
-    };
+struct test_inputs : atp::io::inputs {
+    atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
+    atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
+};
 
-    class test_module : public atp::module<test_inputs, atp::io::outputs> {
-    public:
-        void initialize() override { initialized = true; }
-        bool initialized = false;
-    };
+class test_module : public atp::module<test_inputs, atp::io::outputs> {
+   public:
+    void initialize() override {
+        initialized = true;
+    }
+    bool initialized = false;
+};
 
-    class versioned_module
-        : public atp::module<test_inputs, atp::io::outputs, "", atp::version{1, 2, 3}> {};
+class versioned_module : public atp::module<test_inputs, atp::io::outputs, "", atp::version{1, 2, 3}> {};
 
-    // имя третьим NTTP-параметром; версия не указана — default_version
-    class named_module : public atp::module<test_inputs, atp::io::outputs, "named"> {};
+// имя третьим NTTP-параметром; версия не указана — default_version
+class named_module : public atp::module<test_inputs, atp::io::outputs, "named"> {};
 
-    // имя и версия вместе
-    class full_module
-        : public atp::module<test_inputs, atp::io::outputs, "full", atp::version{1, 2, 3}> {};
+// имя и версия вместе
+class full_module : public atp::module<test_inputs, atp::io::outputs, "full", atp::version{1, 2, 3}> {};
 
-} // namespace
+}  // namespace
 
 // Compile-time доступ к версии — прямо из типа модуля.
 static_assert(versioned_module::module_version == atp::version{1, 2, 3});
@@ -61,8 +61,7 @@ TEST(Module, InputsReturnsReference) {
 
 TEST(Module, NamedAccessThroughModule) {
     test_module module;
-    EXPECT_EQ(module.inputs().at("input1").type(),
-              std::type_index(typeid(int)));
+    EXPECT_EQ(module.inputs().at("input1").type(), std::type_index(typeid(int)));
     module.inputs().get<atp::io::input<int>>("input1")(7);
     EXPECT_EQ(module.inputs().input1.get(), 7);
 }

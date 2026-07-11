@@ -11,8 +11,7 @@ int main() {
 
     std::cout << "plugin " << plugin.path().string() << " modules:\n";
     for (const auto* factory : registry.list()) {
-        std::cout << "  '" << factory->name() << "' v"
-                  << factory->get_version().to_string() << '\n';
+        std::cout << "  '" << factory->name() << "' v" << factory->get_version().to_string() << '\n';
     }
 
     auto counter = registry.create("counter");

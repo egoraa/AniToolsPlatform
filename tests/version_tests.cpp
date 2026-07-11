@@ -32,7 +32,7 @@ TEST(Version, CountIsPreservedButIgnoredInComparison) {
     atp::version v{1, 2};
     EXPECT_EQ(v.count, 2u);
     EXPECT_EQ(atp::version(1, 2, 0).count, 3u);
-    EXPECT_EQ(v, atp::version(1, 2, 0)); // count различен, версии равны
+    EXPECT_EQ(v, atp::version(1, 2, 0));  // count различен, версии равны
 }
 
 TEST(Version, FourPartsSupported) {

@@ -8,22 +8,21 @@
 
 namespace {
 
-    class plain_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class plain_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
 
-    class versioned_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 1}> {};
+class versioned_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 1}> {};
 
-    // Модуль мимо шаблона module<> — без константы module_version:
-    // фабрика должна отвечать default_version (симметрия с module_base).
-    class bare_module : public atp::module_base {
-    public:
-        void initialize() override {}
-        void start() override {}
-        void iterate(std::stop_token) override {}
-        void stop() override {}
-    };
+// Модуль мимо шаблона module<> — без константы module_version:
+// фабрика должна отвечать default_version (симметрия с module_base).
+class bare_module : public atp::module_base {
+   public:
+    void initialize() override {}
+    void start() override {}
+    void iterate(std::stop_token) override {}
+    void stop() override {}
+};
 
-} // namespace
+}  // namespace
 
 TEST(ModuleFactory, NameIsStoredFromRegistration) {
     atp::module_factory<plain_module> factory{"plain"};

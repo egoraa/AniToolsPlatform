@@ -5,10 +5,9 @@
 // модуля из NTTP плюс алиас того же типа, версия модуля 2.0.
 namespace {
 
-    class plugin_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, "plugin_module", atp::ver<"2.0">> {};
+class plugin_module : public atp::module<atp::io::inputs, atp::io::outputs, "plugin_module", atp::ver<"2.0">> {};
 
-} // namespace
+}  // namespace
 
 ATP_PLUGIN_EXPORT unsigned atp_abi_version() {
     return atp::plugin_abi;

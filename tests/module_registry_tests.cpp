@@ -13,45 +13,40 @@
 
 namespace {
 
-    class alpha_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
+class alpha_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
 
-    class beta_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class beta_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
 
-    // вторая версия того же по смыслу модуля — для тестов мультиверсионности
-    class alpha_v2_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 0}> {};
+// вторая версия того же по смыслу модуля — для тестов мультиверсионности
+class alpha_v2_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 0}> {};
 
-    // второй безверсионный тип (default_version, как beta_module) — для
-    // проверки, что дубликат определяется парой (имя, версия), а не типом
-    class gamma_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+// второй безверсионный тип (default_version, как beta_module) — для
+// проверки, что дубликат определяется парой (имя, версия), а не типом
+class gamma_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
 
-    // модуль со встроенным именем — для add<M>() без аргумента
-    class named_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, "named", atp::version{1, 0}> {};
+// модуль со встроенным именем — для add<M>() без аргумента
+class named_module : public atp::module<atp::io::inputs, atp::io::outputs, "named", atp::version{1, 0}> {};
 
-    // модуль мимо шаблона module<>: контракт — статический член, не NTTP
-    class handmade_module : public atp::module_base {
-    public:
-        static constexpr std::string_view module_name = "handmade";
-        void initialize() override {}
-        void start() override {}
-        void iterate(std::stop_token) override {}
-        void stop() override {}
-    };
+// модуль мимо шаблона module<>: контракт — статический член, не NTTP
+class handmade_module : public atp::module_base {
+   public:
+    static constexpr std::string_view module_name = "handmade";
+    void initialize() override {}
+    void start() override {}
+    void iterate(std::stop_token) override {}
+    void stop() override {}
+};
 
-    // requires-выражение вне шаблона GCC проверяет жёстко (не SFINAE),
-    // поэтому невозможность вызова проверяется через концепты: подстановка
-    // параметра — уже immediate context, отказ разрешения даёт false.
-    template <typename M>
-    concept registry_adds_by_own_name =
-        requires(atp::module_registry r) { r.add<M>(); };
+// requires-выражение вне шаблона GCC проверяет жёстко (не SFINAE),
+// поэтому невозможность вызова проверяется через концепты: подстановка
+// параметра — уже immediate context, отказ разрешения даёт false.
+template <typename M>
+concept registry_adds_by_own_name = requires(atp::module_registry r) { r.add<M>(); };
 
-    template <typename M>
-    concept registrar_adds_by_own_name =
-        requires(atp::module_registrar r) { r.add<M>(); };
+template <typename M>
+concept registrar_adds_by_own_name = requires(atp::module_registrar r) { r.add<M>(); };
 
-} // namespace
+}  // namespace
 
 // Анонимный модуль (module_name пуст) не проходит constraint add<M>()
 // без аргумента — регистрация только под явным именем.
@@ -88,8 +83,7 @@ TEST(ModuleRegistry, DuplicateNameAndVersionThrows) {
         registry.add<alpha_module>("dup");  // та же версия 1.0
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
-        EXPECT_NE(std::string(error.what()).find("duplicate module 'dup' version '1.0'"),
-                  std::string::npos);
+        EXPECT_NE(std::string(error.what()).find("duplicate module 'dup' version '1.0'"), std::string::npos);
     }
     // неудачная регистрация не портит существующую
     EXPECT_EQ(registry.at("dup").get_version(), atp::version(1, 0));
@@ -142,8 +136,7 @@ TEST(ModuleRegistry, CreateMissingVersionThrows) {
         (void)registry.create("proc", atp::version(9, 9));
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
-        EXPECT_NE(std::string(error.what()).find("module 'proc' has no version '9.9'"),
-                  std::string::npos);
+        EXPECT_NE(std::string(error.what()).find("module 'proc' has no version '9.9'"), std::string::npos);
     }
 }
 
@@ -153,8 +146,7 @@ TEST(ModuleRegistry, CreateVersionOfUnknownNameThrows) {
         (void)registry.create("missing", atp::version(1, 0));
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
-        EXPECT_NE(std::string(error.what()).find("no module named 'missing'"),
-                  std::string::npos);
+        EXPECT_NE(std::string(error.what()).find("no module named 'missing'"), std::string::npos);
     }
 }
 
@@ -173,8 +165,7 @@ TEST(ModuleRegistry, VersionsSortedAscending) {
     atp::module_registry registry;
     registry.add<alpha_v2_module>("proc");  // регистрируем «не по порядку»
     registry.add<alpha_module>("proc");
-    EXPECT_EQ(registry.versions("proc"),
-              (std::vector<atp::version>{atp::version(1, 0), atp::version(2, 0)}));
+    EXPECT_EQ(registry.versions("proc"), (std::vector<atp::version>{atp::version(1, 0), atp::version(2, 0)}));
 }
 
 TEST(ModuleRegistry, VersionsUnknownNameEmpty) {
@@ -271,10 +262,8 @@ TEST(ModuleRegistrar, RecordsNameVersionPairs) {
     atp::module_registrar registrar{registry};
     registrar.add<alpha_module>("alpha");
     registrar.add<beta_module>("beta");
-    EXPECT_EQ(registrar.registered(),
-              (std::vector<std::pair<std::string, atp::version>>{
-                  {"alpha", atp::version(1, 0)},
-                  {"beta", atp::default_version}}));
+    EXPECT_EQ(registrar.registered(), (std::vector<std::pair<std::string, atp::version>>{
+                                          {"alpha", atp::version(1, 0)}, {"beta", atp::default_version}}));
 }
 
 TEST(ModuleRegistry, AddWithoutNameUsesModuleName) {
@@ -299,8 +288,7 @@ TEST(ModuleRegistrar, AddWithoutNameRecordsPair) {
     atp::module_registrar registrar{registry};
     registrar.add<named_module>();
     EXPECT_EQ(registrar.registered(),
-              (std::vector<std::pair<std::string, atp::version>>{
-                  {"named", atp::version(1, 0)}}));
+              (std::vector<std::pair<std::string, atp::version>>{{"named", atp::version(1, 0)}}));
 }
 
 TEST(ModuleRegistry, HandmadeModuleNameContract) {
@@ -317,7 +305,5 @@ TEST(ModuleRegistrar, FailedAddIsNotRecorded) {
     registrar.add<alpha_module>("dup");
     // тот же тип — та же версия 1.0, дубликат пары (имя, версия)
     EXPECT_THROW(registrar.add<alpha_module>("dup"), std::runtime_error);
-    EXPECT_EQ(registrar.registered(),
-              (std::vector<std::pair<std::string, atp::version>>{
-                  {"dup", atp::version(1, 0)}}));
+    EXPECT_EQ(registrar.registered(), (std::vector<std::pair<std::string, atp::version>>{{"dup", atp::version(1, 0)}}));
 }

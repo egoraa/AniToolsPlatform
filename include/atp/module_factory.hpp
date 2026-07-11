@@ -13,34 +13,45 @@
 
 namespace atp {
 
-    // Типизированная фабрика. Версию отдаёт статически из M::module_version —
-    // без создания экземпляра; модуль, написанный мимо шаблона module<> и не
-    // имеющий константы, получает default_version (та же семантика, что у
-    // module_base::get_version по умолчанию).
-    template <std::derived_from<module_base> M>
-        requires std::default_initializable<M>
-    class module_factory final : public module_factory_base {
-    public:
-        explicit module_factory(std::string name) : name_(std::move(name)) {}
+// Контракт «модуль объявляет версию»: статическая константа module_version,
+// конвертируемая в version. Именованный концепт вместо requires по месту —
+// читаемый однострочный if constexpr (clang-format безусловно разворачивает
+// compound requirement на несколько строк).
+template <typename T>
+concept has_module_version = requires {
+    { T::module_version } -> std::convertible_to<version>;
+};
 
-        [[nodiscard]] std::string_view name() const noexcept override { return name_; }
+// Типизированная фабрика. Версию отдаёт статически из M::module_version —
+// без создания экземпляра; модуль, написанный мимо шаблона module<> и не
+// имеющий константы, получает default_version (та же семантика, что у
+// module_base::get_version по умолчанию).
+template <std::derived_from<module_base> M>
+    requires std::default_initializable<M>
+class module_factory final : public module_factory_base {
+   public:
+    explicit module_factory(std::string name) : name_(std::move(name)) {}
 
-        [[nodiscard]] version get_version() const noexcept override {
-            if constexpr (requires { { M::module_version } -> std::convertible_to<version>; }) {
-                return M::module_version;
-            } else {
-                return default_version;
-            }
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return name_;
+    }
+
+    [[nodiscard]] version get_version() const noexcept override {
+        if constexpr (has_module_version<M>) {
+            return M::module_version;
+        } else {
+            return default_version;
         }
+    }
 
-        [[nodiscard]] std::unique_ptr<module_base> create() const override {
-            return std::make_unique<M>();
-        }
+    [[nodiscard]] std::unique_ptr<module_base> create() const override {
+        return std::make_unique<M>();
+    }
 
-    private:
-        std::string name_;
-    };
+   private:
+    std::string name_;
+};
 
-} // namespace atp
+}  // namespace atp
 
-#endif // ANITOOLSPLATFORM_MODULE_FACTORY_HPP
+#endif  // ANITOOLSPLATFORM_MODULE_FACTORY_HPP

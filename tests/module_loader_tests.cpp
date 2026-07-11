@@ -13,20 +13,17 @@
 
 namespace {
 
-    // Хостовая версия имени, которое регистрирует и тестовый плагин (2.0), —
-    // для проверки, что выгрузка плагина не задевает чужие версии.
-    class host_module
-        : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
+// Хостовая версия имени, которое регистрирует и тестовый плагин (2.0), —
+// для проверки, что выгрузка плагина не задевает чужие версии.
+class host_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
 
-} // namespace
+}  // namespace
 
 TEST(ModuleLoader, LoadsAndRegisters) {
     atp::module_registry registry;
     atp::module_loader loader{ATP_TEST_PLUGIN, registry};
-    EXPECT_EQ(loader.modules(),
-              (std::vector<std::pair<std::string, atp::version>>{
-                  {"plugin_module", atp::version(2, 0)},
-                  {"plugin_alias", atp::version(2, 0)}}));
+    EXPECT_EQ(loader.modules(), (std::vector<std::pair<std::string, atp::version>>{
+                                    {"plugin_module", atp::version(2, 0)}, {"plugin_alias", atp::version(2, 0)}}));
 
     auto module = registry.create("plugin_module");
     ASSERT_NE(module, nullptr);
@@ -67,8 +64,7 @@ TEST(ModuleLoader, UnloadKeepsHostVersionOfSameName) {
 
 TEST(ModuleLoader, MissingFileThrows) {
     atp::module_registry registry;
-    EXPECT_THROW((atp::module_loader{"no_such_plugin.dll", registry}),
-                 std::runtime_error);
+    EXPECT_THROW((atp::module_loader{"no_such_plugin.dll", registry}), std::runtime_error);
     EXPECT_TRUE(registry.list().empty());
 }
 
@@ -78,8 +74,7 @@ TEST(ModuleLoader, EmptyPluginReportsMissingSymbol) {
         atp::module_loader loader{ATP_TEST_PLUGIN_EMPTY, registry};
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
-        EXPECT_NE(std::string(error.what()).find("atp_abi_version"),
-                  std::string::npos);
+        EXPECT_NE(std::string(error.what()).find("atp_abi_version"), std::string::npos);
     }
     EXPECT_TRUE(registry.list().empty());
 }

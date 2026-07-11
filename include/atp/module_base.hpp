@@ -1,6 +1,7 @@
 #ifndef ANITOOLSPLATFORM_MODULE_BASE_HPP
 #define ANITOOLSPLATFORM_MODULE_BASE_HPP
 
+#include <memory>
 #include <stop_token>
 #include <string_view>
 
@@ -44,6 +45,20 @@ class module_base {
         return {};
     }
 };
+
+// Делетер модуля с пином: shared_ptr удерживает библиотеку плагина от
+// выгрузки, пока жив модуль, — его vtable и код деструктора лежат в ней.
+// У монолитных модулей пин пуст (обычный delete). Пин — член делетера,
+// а не контрол-блок shared_ptr: владение модулем остаётся уникальным.
+struct module_deleter {
+    std::shared_ptr<void> pin{};
+
+    void operator()(module_base* m) const noexcept {
+        delete m;  // пин ещё жив (член делетера) — код деструктора доступен
+    }
+};
+
+using module_ptr = std::unique_ptr<module_base, module_deleter>;
 
 }  // namespace atp
 

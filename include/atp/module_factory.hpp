@@ -44,8 +44,8 @@ class module_factory final : public module_factory_base {
         }
     }
 
-    [[nodiscard]] std::unique_ptr<module_base> create() const override {
-        return std::make_unique<M>();
+    [[nodiscard]] module_ptr create() const override {
+        return module_ptr(new M(), {});
     }
 
    private:

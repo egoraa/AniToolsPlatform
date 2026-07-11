@@ -41,7 +41,7 @@ TEST(ModuleFactory, VersionFallsBackToDefault) {
 
 TEST(ModuleFactory, CreateReturnsWorkingModule) {
     atp::module_factory<versioned_module> factory{"versioned"};
-    std::unique_ptr<atp::module_base> module = factory.create();
+    atp::module_ptr module = factory.create();
     ASSERT_NE(module, nullptr);
     EXPECT_EQ(module->get_version(), atp::version(2, 1));
     // каждый вызов create — новый экземпляр
@@ -53,4 +53,11 @@ TEST(ModuleFactory, TypeErasedThroughBase) {
     atp::module_factory_base& factory = typed;
     EXPECT_EQ(factory.name(), "plain");
     EXPECT_NE(factory.create(), nullptr);
+}
+
+TEST(ModuleFactory, CreateReturnsModulePtrWithEmptyPin) {
+    atp::module_factory<bare_module> factory{"bare"};
+    atp::module_ptr module = factory.create();
+    ASSERT_NE(module, nullptr);
+    EXPECT_EQ(module.get_deleter().pin, nullptr);  // монолит: пин пуст
 }

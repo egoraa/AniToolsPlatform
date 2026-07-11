@@ -10,9 +10,10 @@ namespace atp {
 // компилятора/рантайма — требование сборки плагинов: тот же тулчейн,
 // что у хоста (MSVC: общий CRT, /MD).
 // 2: initialize/start/stop принимают module_context&.
-// 3: pull-модель входов (io: -when/+take/watcher) — раскладка input<T>
-//    несовместима; той же волной войдут io-реестры через module_base и
-//    work_status из iterate (план платформы исполнения).
+// 3: pull-модель входов (io: -when/+take/watcher); create() возвращает
+//    module_ptr (пин библиотеки в делетере) — той же волной войдут
+//    io-реестры через module_base и work_status из iterate (план
+//    платформы исполнения).
 inline constexpr unsigned plugin_abi = 3;
 
 // Контракт плагина — два C-символа. Рукопожатие atp_abi_version —

@@ -1,5 +1,6 @@
 #include <memory>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,7 +29,7 @@ TEST(ModuleLoader, LoadsAndRegisters) {
     auto module = registry.create("plugin_module");
     ASSERT_NE(module, nullptr);
     EXPECT_EQ(module->get_version(), atp::version(2, 0));
-    module.reset();  // модуль умирает до загрузчика — контракт времени жизни
+    module.reset();  // порядок не обязателен (пин), но локальный объект чистим сами
 }
 
 TEST(ModuleLoader, VersionAvailableWithoutInstantiation) {
@@ -60,6 +61,31 @@ TEST(ModuleLoader, UnloadKeepsHostVersionOfSameName) {
     // выгрузка сняла только пару ("plugin_module", 2.0); хостовая 1.0 на месте
     ASSERT_NE(registry.find("plugin_module"), nullptr);
     EXPECT_EQ(registry.at("plugin_module").get_version(), atp::version(1, 0));
+}
+
+TEST(ModuleLoader, ModuleOutlivesLoader) {
+    atp::module_registry registry;
+    atp::module_ptr module;
+    {
+        atp::module_loader loader{ATP_TEST_PLUGIN, registry};
+        module = registry.create("plugin_module");
+    }
+    // Загрузчик мёртв, но модуль пинит библиотеку — код доступен.
+    ASSERT_NE(module, nullptr);
+    EXPECT_EQ(module->get_version(), atp::version(2, 0));
+    module->iterate(std::stop_token{});
+    module.reset();  // последний пин: здесь библиотека выгружается физически
+}
+
+TEST(ModuleLoader, FactoriesRemovedOnUnloadEvenWithLiveModule) {
+    atp::module_registry registry;
+    atp::module_ptr module;
+    {
+        atp::module_loader loader{ATP_TEST_PLUGIN, registry};
+        module = registry.create("plugin_module");
+    }
+    EXPECT_EQ(registry.find("plugin_module"), nullptr);  // фабрик уже нет
+    EXPECT_NE(module, nullptr);                          // а модуль жив
 }
 
 TEST(ModuleLoader, MissingFileThrows) {

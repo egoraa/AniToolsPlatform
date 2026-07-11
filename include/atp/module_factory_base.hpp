@@ -23,10 +23,10 @@ class module_factory_base {
     [[nodiscard]] virtual std::string_view name() const noexcept = 0;
     [[nodiscard]] virtual version get_version() const noexcept = 0;
 
-    // unique_ptr<module_base> безопасен и через границу плагина:
-    // виртуальный деструктор module_base ведёт в deleting destructor
-    // той библиотеки, где модуль создан, — память освобождает она же.
-    [[nodiscard]] virtual std::unique_ptr<module_base> create() const = 0;
+    // module_ptr безопасен и через границу плагина: деструктор модуля —
+    // код той библиотеки, где он создан, а пин в делетере не даёт ей
+    // выгрузиться, пока модуль жив.
+    [[nodiscard]] virtual module_ptr create() const = 0;
 
    protected:
     module_factory_base() = default;

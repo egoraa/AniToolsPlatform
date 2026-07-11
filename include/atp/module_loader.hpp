@@ -66,21 +66,43 @@ inline void close_library(void* handle) noexcept {
 }
 #endif
 
+// RAII-хэндл библиотеки: живёт в shared_ptr, копии которого («пины»)
+// держат загрузчик, обёртки фабрик и делетеры созданных модулей.
+// Физическая выгрузка — со смертью последнего пина.
+class plugin_library {
+   public:
+    explicit plugin_library(const std::filesystem::path& path) : handle_(open_library(path)) {}
+    ~plugin_library() {
+        close_library(handle_);
+    }
+
+    plugin_library(const plugin_library&) = delete;
+    plugin_library& operator=(const plugin_library&) = delete;
+
+    [[nodiscard]] void* find(const char* name) const noexcept {
+        return find_symbol(handle_, name);
+    }
+
+   private:
+    void* handle_;
+};
+
 }  // namespace detail
 
 // Загрузка плагина: открыть библиотеку → проверить ABI → зарегистрировать
 // модули в переданный реестр. Любой сбой — std::runtime_error, библиотека
 // при этом закрывается, частичная регистрация снимается.
 //
-// Время жизни (контракт на вызывающем, как у соединений io): реестр живёт
-// дольше загрузчика; модули, созданные фабриками плагина, разрушаются до
-// разрушения загрузчика — их код лежит в выгружаемой библиотеке.
+// Время жизни: реестр живёт дольше загрузчика. Модули, созданные фабриками
+// плагина, МОГУТ переживать загрузчик — каждый пинит свою библиотеку через
+// делетер module_ptr, физическая выгрузка происходит со смертью последнего
+// модуля.
 class module_loader {
    public:
     module_loader(const std::filesystem::path& library, module_registry& registry)
         : path_(library), registry_(&registry) {
-        handle_ = detail::open_library(path_);
-        module_registrar registrar{registry};
+        library_ = std::make_shared<detail::plugin_library>(path_);
+        module_registrar registrar{registry, library_};
         try {
             const auto abi = load_symbol<abi_version_fn>(abi_version_symbol);
             if (const unsigned plugin_version = abi(); plugin_version != plugin_abi) {
@@ -97,8 +119,7 @@ class module_loader {
             for (const auto& [name, ver] : registrar.registered()) {
                 registry.remove(name, ver);
             }
-            detail::close_library(handle_);
-            handle_ = nullptr;
+            library_.reset();
             throw;
         }
     }
@@ -113,7 +134,7 @@ class module_loader {
     module_loader(module_loader&& other) noexcept
         : path_(std::move(other.path_))
         , registry_(other.registry_)
-        , handle_(std::exchange(other.handle_, nullptr))
+        , library_(std::move(other.library_))
         , modules_(std::move(other.modules_)) {}
 
     module_loader& operator=(module_loader&& other) noexcept {
@@ -121,7 +142,7 @@ class module_loader {
             unload();
             path_ = std::move(other.path_);
             registry_ = other.registry_;
-            handle_ = std::exchange(other.handle_, nullptr);
+            library_ = std::move(other.library_);
             modules_ = std::move(other.modules_);
         }
         return *this;
@@ -138,7 +159,7 @@ class module_loader {
    private:
     template <typename TFn>
     TFn* load_symbol(const char* name) const {
-        void* symbol = detail::find_symbol(handle_, name);
+        void* symbol = library_->find(name);
         if (!symbol) {
             throw std::runtime_error("plugin '" + path_.string() + "' has no symbol '" + name + "'");
         }
@@ -146,7 +167,7 @@ class module_loader {
     }
 
     void unload() noexcept {
-        if (!handle_) {
+        if (!library_) {
             return;
         }
         // сначала фабрики — их vtable лежат в ещё загруженной библиотеке;
@@ -155,13 +176,14 @@ class module_loader {
             registry_->remove(name, ver);
         }
         modules_.clear();
-        detail::close_library(handle_);
-        handle_ = nullptr;
+        // отпускаем свой пин: физическая выгрузка — когда умрёт последний
+        // модуль этой библиотеки (или прямо сейчас, если их нет)
+        library_.reset();
     }
 
     std::filesystem::path path_;
     module_registry* registry_;
-    void* handle_ = nullptr;
+    std::shared_ptr<detail::plugin_library> library_;
     std::vector<std::pair<std::string, version>> modules_;
 };
 

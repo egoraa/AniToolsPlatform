@@ -147,7 +147,7 @@ class outputs;
 
 ```cpp
     // Type-erased доступ к io-реестрам: машинерия соединений (group)
-    // работает с модулем через unique_ptr<module_base> и без этих
+    // работает с модулем через module_ptr и без этих
     // аксессоров не видела бы портов. module<> реализует их ковариантным
     // override — авторам модулей ничего делать не нужно.
     [[nodiscard]] virtual io::inputs& inputs() = 0;
@@ -307,10 +307,10 @@ cmake --build cmake-build-debug; ctest --test-dir cmake-build-debug
 **Interfaces:**
 - Produces:
   - `explicit group(std::string name)`; `const std::string& name() const`
-  - `module_base& add(std::string name, std::unique_ptr<module_base>)` — бросает `std::invalid_argument` (null/пустое имя), `std::runtime_error` (дубликат)
+  - `module_base& add(std::string name, module_ptr)` — бросает `std::invalid_argument` (null/пустое имя), `std::runtime_error` (дубликат); `module_ptr` несёт пин библиотеки — модуль плагина в группе автоматически держит свою DLL
   - `template <M, TArgs...> M& make(std::string name, TArgs&&...)` и `template <M, TArgs...> M& make(TArgs&&...)` (имя из `M::module_name`, контракт `has_module_name`)
   - `group& add_group(std::string name)`
-  - `struct element { std::string name; std::unique_ptr<module_base> module; std::unique_ptr<group> subgroup; }` — ровно одно из двух ненулевое; `const std::vector<element>& elements() const` — порядок вставки
+  - `struct element { std::string name; module_ptr module; std::unique_ptr<group> subgroup; }` — ровно одно из двух ненулевое; `const std::vector<element>& elements() const` — порядок вставки
   - `module_base* find_module(const std::string&) const`, `group* find_group(const std::string&) const` — nullptr, если нет
 
 - [ ] **Step 1: Написать падающие тесты**
@@ -347,7 +347,7 @@ TEST(Group, OwnsModulesAndSubgroupsInInsertionOrder) {
 
 TEST(Group, AddAcceptsPrebuiltModule) {
     atp::group g("root");
-    atp::module_base& m = g.add("ready", std::make_unique<plain_module>());
+    atp::module_base& m = g.add("ready", atp::module_ptr{new plain_module});  // в т.ч. из module_registry::create()
     EXPECT_EQ(g.find_module("ready"), &m);
     EXPECT_EQ(g.find_module("missing"), nullptr);
     EXPECT_EQ(g.find_group("ready"), nullptr);    // это модуль, не группа
@@ -398,7 +398,7 @@ class group {
     // он должен быть сквозным, а не «сначала модули, потом группы».
     struct element {
         std::string name;
-        std::unique_ptr<module_base> module;
+        module_ptr module;  // пин библиотеки едет в делетере — модуль плагина держит свою DLL
         std::unique_ptr<group> subgroup;
     };
 
@@ -412,7 +412,7 @@ class group {
     }
 
     // Приём готового модуля — в т.ч. созданного module_registry::create().
-    module_base& add(std::string name, std::unique_ptr<module_base> module) {
+    module_base& add(std::string name, module_ptr module) {
         if (!module) {
             throw std::invalid_argument("null module for '" + name + "' in group '" + name_ + "'");
         }
@@ -427,8 +427,8 @@ class group {
     template <std::derived_from<module_base> M, typename... TArgs>
         requires std::constructible_from<M, TArgs...>
     M& make(std::string name, TArgs&&... args) {
-        auto module = std::make_unique<M>(std::forward<TArgs>(args)...);
-        M& ref = *module;
+        module_ptr module(new M(std::forward<TArgs>(args)...), {});  // монолит: пин пуст
+        M& ref = static_cast<M&>(*module);
         add(std::move(name), std::move(module));
         return ref;
     }
@@ -517,7 +517,7 @@ cmake --build cmake-build-debug --target atp_tests; cmake-build-debug\tests\atp_
 **Interfaces:**
 - Consumes: `module_base::inputs()/outputs()` (Task 2), `io::inputs::find/at` (реестр), состав group (Task 4).
 - Produces:
-  - `void expose_input(std::string alias, const std::string& path)` / `void expose_input(std::string alias, io::input_base& port)` — контракт ссылочной перегрузки: порт принадлежит модулю ЭТОЙ группы; симметрично `expose_output`
+  - `void expose_input(std::string alias, const std::string& path)`; симметрично `expose_output` — только путь `"<дитя>.<порт>"`: владелец порта восстанавливается из состава группы по построению. Перегрузки по ссылке нет намеренно: принадлежность порта группе непроверяема, ошибка вызывающего молча искажала бы владельца и валидацию межпоточности
   - `io::input_base& input_at(const std::string& alias) const` / `io::output_base& output_at(const std::string& alias) const` — бросают
   - внутренние структуры: `struct exported_input { io::input_base* port; const group* owner; }` (симметрично output), доступ подгруппам при разрешении путей
   - разрешение путей `"<дитя>.<порт>"`: `resolved_input resolve_input(const std::string& path) const` → `{port, owner}` (для порта модуля owner = сама группа, для алиаса подгруппы — владелец из её таблицы); симметрично `resolve_output`. Приватные, но описаны здесь: Task 6 строит на них `connect`.
@@ -539,9 +539,9 @@ class sink_module : public atp::module<number_inputs, atp::io::outputs> {};
 TEST(Group, ExposesModulePortsUnderAlias) {
     atp::group g("root");
     sink_module& sink = g.make<sink_module>("sink");
-    g.expose_input("in", "sink.number");                       // по пути
+    g.expose_input("in", "sink.number");
     source_module& src = g.make<source_module>("src");
-    g.expose_output("out", src.outputs().number);              // по ссылке
+    g.expose_output("out", "src.number");
 
     EXPECT_EQ(&g.input_at("in"), &sink.inputs().number);       // алиас — тот же объект
     EXPECT_EQ(&g.output_at("out"), &src.outputs().number);
@@ -579,26 +579,19 @@ TEST(Group, ExposeErrors) {
     // --- Экспорт портов: алиасы внутренних, граница только на этапе сборки ---
     // Владелец в записи — группа, чей модуль реально держит порт: по ней
     // раннер решает, пересекает ли соединение границу потоков. При
-    // ре-экспорте владелец переносится как есть.
+    // ре-экспорте владелец переносится как есть. Экспорт — только по пути
+    // «<дитя>.<порт>»: владелец восстанавливается из состава по построению;
+    // перегрузки по ссылке нет намеренно — принадлежность порта группе
+    // непроверяема, ошибка вызывающего молча искажала бы валидацию.
 
     void expose_input(std::string alias, const std::string& path) {
         resolved_input r = resolve_input(path);
         add_exported(exported_inputs_, std::move(alias), r.port, r.owner, "input");
     }
 
-    // Перегрузка по ссылке: контракт вызывающего — порт принадлежит модулю
-    // именно этой группы (по адресу владельца не восстановить).
-    void expose_input(std::string alias, io::input_base& port) {
-        add_exported(exported_inputs_, std::move(alias), &port, this, "input");
-    }
-
     void expose_output(std::string alias, const std::string& path) {
         resolved_output r = resolve_output(path);
         add_exported(exported_outputs_, std::move(alias), r.port, r.owner, "output");
-    }
-
-    void expose_output(std::string alias, io::output_base& port) {
-        add_exported(exported_outputs_, std::move(alias), &port, this, "output");
     }
 
     [[nodiscard]] io::input_base& input_at(const std::string& alias) const {

@@ -76,12 +76,12 @@ class module_registry {
     }
 
     // Без версии — последняя (наибольшая) зарегистрированная.
-    [[nodiscard]] std::unique_ptr<module_base> create(const std::string& name) const {
+    [[nodiscard]] module_ptr create(const std::string& name) const {
         return at(name).create();
     }
 
     // С версией — точное совпадение (1.2 == 1.2.0: дополнение нулями).
-    [[nodiscard]] std::unique_ptr<module_base> create(const std::string& name, const version& v) const {
+    [[nodiscard]] module_ptr create(const std::string& name, const version& v) const {
         return at(name, v).create();
     }
 
@@ -178,6 +178,35 @@ class module_registry {
     std::unordered_map<std::string, std::map<version, std::unique_ptr<module_factory_base>>> registry_;
 };
 
+namespace detail {
+
+// Обёртка фабрики плагина: create() пересаживает модуль на делетер с пином
+// библиотеки — модуль удерживает её от выгрузки. Порядок членов критичен:
+// pin_ объявлен раньше inner_, поэтому внутренняя фабрика (её vtable — в
+// плагине) разрушается раньше отпускания пина.
+class pinned_factory final : public module_factory_base {
+   public:
+    pinned_factory(std::unique_ptr<module_factory_base> inner, std::shared_ptr<void> pin)
+        : pin_(std::move(pin)), inner_(std::move(inner)) {}
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return inner_->name();
+    }
+    [[nodiscard]] version get_version() const noexcept override {
+        return inner_->get_version();
+    }
+    [[nodiscard]] module_ptr create() const override {
+        module_ptr m = inner_->create();
+        return module_ptr(m.release(), module_deleter{pin_});
+    }
+
+   private:
+    std::shared_ptr<void> pin_;
+    std::unique_ptr<module_factory_base> inner_;
+};
+
+}  // namespace detail
+
 // Тонкая обёртка «реестр + пары (имя, версия), зарегистрированные через
 // неё». Функции регистрации модулей принимают её, а не реестр напрямую, —
 // так module_loader знает, какие фабрики принесла его библиотека,
@@ -186,7 +215,11 @@ class module_registry {
 // инстанцируется в каждом участнике заново.
 class module_registrar {
    public:
-    explicit module_registrar(module_registry& registry) : registry_(&registry) {}
+    // Пин — библиотека плагина: фабрики заворачиваются так, что каждый
+    // созданный модуль удерживает её от выгрузки. Монолитная регистрация
+    // (без пина) не меняется.
+    explicit module_registrar(module_registry& registry, std::shared_ptr<void> pin = {})
+        : registry_(&registry), pin_(std::move(pin)) {}
 
     // имя из типа — тот же контракт has_module_name, что у module_registry
     template <std::derived_from<module_base> M>
@@ -202,6 +235,9 @@ class module_registrar {
     }
 
     module_factory_base& add(std::unique_ptr<module_factory_base> factory) {
+        if (pin_) {
+            factory = std::make_unique<detail::pinned_factory>(std::move(factory), pin_);
+        }
         // пара (имя, версия) запоминается только после успешной регистрации
         module_factory_base& ref = registry_->add(std::move(factory));
         registered_.emplace_back(std::string(ref.name()), ref.get_version());
@@ -214,6 +250,7 @@ class module_registrar {
 
    private:
     module_registry* registry_;
+    std::shared_ptr<void> pin_;
     std::vector<std::pair<std::string, version>> registered_;
 };
 

@@ -23,6 +23,7 @@ add_executable(atp_tests
         module_factory_tests.cpp
         module_loader_tests.cpp
         module_registry_tests.cpp
+        service_directory_tests.cpp
         version_tests.cpp)
 # CMAKE_DL_LIBS: на Linux dlopen может требовать -ldl, на Windows пусто.
 target_link_libraries(atp_tests PRIVATE atp_platform GTest::gtest_main ${CMAKE_DL_LIBS})

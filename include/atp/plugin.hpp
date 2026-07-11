@@ -9,7 +9,8 @@ namespace atp {
 // фабричных интерфейсов. Не защищает от чужого компилятора/рантайма —
 // требование сборки плагинов: тот же тулчейн, что у хоста (MSVC: общий
 // CRT, /MD).
-inline constexpr unsigned plugin_abi = 1;
+// 2: initialize/start/stop принимают module_context&.
+inline constexpr unsigned plugin_abi = 2;
 
 // Контракт плагина — два C-символа. Рукопожатие atp_abi_version —
 // единственный вызов, безопасный при любом рассогласовании: чистый C,

@@ -16,10 +16,10 @@ class versioned_module : public atp::module<atp::io::inputs, atp::io::outputs, "
 // фабрика должна отвечать default_version (симметрия с module_base).
 class bare_module : public atp::module_base {
    public:
-    void initialize() override {}
-    void start() override {}
+    void initialize(atp::module_context&) override {}
+    void start(atp::module_context&) override {}
     void iterate(std::stop_token) override {}
-    void stop() override {}
+    void stop(atp::module_context&) override {}
 };
 
 }  // namespace

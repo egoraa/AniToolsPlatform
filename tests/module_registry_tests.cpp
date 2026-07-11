@@ -31,10 +31,10 @@ class named_module : public atp::module<atp::io::inputs, atp::io::outputs, "name
 class handmade_module : public atp::module_base {
    public:
     static constexpr std::string_view module_name = "handmade";
-    void initialize() override {}
-    void start() override {}
+    void initialize(atp::module_context&) override {}
+    void start(atp::module_context&) override {}
     void iterate(std::stop_token) override {}
-    void stop() override {}
+    void stop(atp::module_context&) override {}
 };
 
 // requires-выражение вне шаблона GCC проверяет жёстко (не SFINAE),

@@ -14,11 +14,14 @@ int main() {
         std::cout << "  '" << factory->name() << "' v" << factory->get_version().to_string() << '\n';
     }
 
+    atp::service_directory services;
+    atp::module_context context{services};
+
     auto counter = registry.create("counter");
-    counter->initialize();
-    counter->start();
+    counter->initialize(context);
+    counter->start(context);
     counter->iterate(std::stop_token{});
-    counter->stop();
+    counter->stop(context);
     std::cout << "counter iterated once\n";
     return 0;
 }

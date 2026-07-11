@@ -32,10 +32,10 @@ class module : public module_base {
         return Version;
     }
 
-    void initialize() override {}
-    void start() override {}
+    void initialize(module_context&) override {}
+    void start(module_context&) override {}
     void iterate(std::stop_token) override {}
-    void stop() override {}
+    void stop(module_context&) override {}
 
     [[nodiscard]] TInputs& inputs() {
         return inputs_;

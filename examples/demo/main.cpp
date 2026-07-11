@@ -18,7 +18,7 @@ class source_module : public atp::module<atp::io::inputs, source_outputs> {};
 
 class sink_module : public atp::module<sink_inputs, atp::io::outputs> {
    public:
-    void initialize() override {
+    void initialize(atp::module_context&) override {
         inputs().number.when([](const int& value) { std::cout << "sink received: " << value << '\n'; });
     }
 };
@@ -26,10 +26,13 @@ class sink_module : public atp::module<sink_inputs, atp::io::outputs> {
 }  // namespace
 
 int main() {
+    atp::service_directory services;
+    atp::module_context context{services};
+
     source_module source;
     sink_module sink;
-    source.initialize();
-    sink.initialize();
+    source.initialize(context);
+    sink.initialize(context);
 
     // Соединение выход→вход: типизированное — прямо в коде,
     // type-erased по именам — путь будущей машинерии соединений.

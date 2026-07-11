@@ -16,7 +16,7 @@ struct test_inputs : atp::io::inputs {
 
 class test_module : public atp::module<test_inputs, atp::io::outputs> {
    public:
-    void initialize() override {
+    void initialize(atp::module_context&) override {
         initialized = true;
     }
     bool initialized = false;
@@ -44,8 +44,10 @@ static_assert(named_module::module_version == atp::default_version);
 static_assert(full_module::module_version == atp::version{1, 2, 3});
 
 TEST(Module, InitializeOverrideRuns) {
+    atp::service_directory services;
+    atp::module_context context{services};
     test_module module;
-    module.initialize();
+    module.initialize(context);
     EXPECT_TRUE(module.initialized);
 }
 

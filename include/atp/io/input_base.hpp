@@ -13,8 +13,7 @@ namespace atp::io {
 // принимает output_base::connect и хранит output<T> в списке рассылки.
 // Определяет протокол доставки: вход сам отвечает, значения каких типов он
 // принимает (accepts) и как принять type-erased значение (deliver) —
-// выходу не нужны касты иерархии (dynamic_cast запрещён стандартами уровня
-// AUTOSAR, правило A5-2-1).
+// выходу не нужны касты иерархии.
 class input_base : public io_base {
    public:
     using io_base::io_base;

@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 #include <atp/module_base.hpp>
@@ -26,11 +27,15 @@ concept has_module_version = requires {
 // без создания экземпляра; модуль, написанный мимо шаблона module<> и не
 // имеющий константы, получает default_version (та же семантика, что у
 // module_base::get_version по умолчанию).
-template <std::derived_from<module_base> M>
-    requires std::default_initializable<M>
+// Конфиг связывается при регистрации: фабрика хранит аргументы конструктора,
+// каждый create() строит экземпляр от них — все экземпляры фабрики
+// одинаковы, разные конфиги оформляются разными регистрациями (алиасами).
+template <std::derived_from<module_base> M, typename... TArgs>
+    requires std::constructible_from<M, const TArgs&...>
 class module_factory final : public module_factory_base {
    public:
-    explicit module_factory(std::string name) : name_(std::move(name)) {}
+    explicit module_factory(std::string name, TArgs... args)
+        : name_(std::move(name)), args_(std::move(args)...) {}
 
     [[nodiscard]] std::string_view name() const noexcept override {
         return name_;
@@ -45,11 +50,12 @@ class module_factory final : public module_factory_base {
     }
 
     [[nodiscard]] module_ptr create() const override {
-        return module_ptr(new M(), {});
+        return std::apply([](const TArgs&... args) { return module_ptr(new M(args...), {}); }, args_);
     }
 
    private:
     std::string name_;
+    std::tuple<TArgs...> args_;  // конфиг фабрики; create копирует его в экземпляр
 };
 
 }  // namespace atp

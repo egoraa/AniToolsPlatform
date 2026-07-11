@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -40,19 +41,21 @@ class module_registry {
 
     // Имя из самого модуля — контракт has_module_name.
     template <std::derived_from<module_base> M>
-        requires std::default_initializable<M> && has_module_name<M>
+        requires std::constructible_from<M> && has_module_name<M>
     module_factory_base& add() {
         // явный <M>: без него unqualified add(std::string) ушёл бы
         // в перегрузку add(unique_ptr) и не скомпилировался
         return add<M>(std::string{M::module_name});
     }
 
-    // Сахар: типовая фабрика по умолчанию. Имя задаётся здесь, в точке
-    // регистрации, — один тип можно зарегистрировать под алиасами.
-    template <std::derived_from<module_base> M>
-        requires std::default_initializable<M>
-    module_factory_base& add(std::string name) {
-        return add(std::make_unique<module_factory<M>>(std::move(name)));
+    // Сахар: типовая фабрика. Имя задаётся здесь, в точке регистрации, —
+    // один тип можно зарегистрировать под алиасами; args — конфиг
+    // конструктора модуля, связывается с фабрикой.
+    template <std::derived_from<module_base> M, typename... TArgs>
+        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
+    module_factory_base& add(std::string name, TArgs&&... args) {
+        return add(std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name),
+                                                                               std::forward<TArgs>(args)...));
     }
 
     // Общий путь — для нестандартных фабрик. Дубликат — совпадение
@@ -223,15 +226,16 @@ class module_registrar {
 
     // имя из типа — тот же контракт has_module_name, что у module_registry
     template <std::derived_from<module_base> M>
-        requires std::default_initializable<M> && has_module_name<M>
+        requires std::constructible_from<M> && has_module_name<M>
     module_factory_base& add() {
         return add<M>(std::string{M::module_name});
     }
 
-    template <std::derived_from<module_base> M>
-        requires std::default_initializable<M>
-    module_factory_base& add(std::string name) {
-        return add(std::make_unique<module_factory<M>>(std::move(name)));
+    template <std::derived_from<module_base> M, typename... TArgs>
+        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
+    module_factory_base& add(std::string name, TArgs&&... args) {
+        return add(std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name),
+                                                                               std::forward<TArgs>(args)...));
     }
 
     module_factory_base& add(std::unique_ptr<module_factory_base> factory) {

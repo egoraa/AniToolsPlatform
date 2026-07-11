@@ -22,6 +22,19 @@ class bare_module : public atp::module_base {
     void stop(atp::module_context&) override {}
 };
 
+// Модуль с конфигом в конструкторе — для тестов связывания аргументов фабрикой.
+class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+   public:
+    explicit configured_module(int value) : value_(value) {}
+
+    [[nodiscard]] int value() const {
+        return value_;
+    }
+
+   private:
+    int value_;
+};
+
 }  // namespace
 
 TEST(ModuleFactory, NameIsStoredFromRegistration) {
@@ -60,4 +73,15 @@ TEST(ModuleFactory, CreateReturnsModulePtrWithEmptyPin) {
     atp::module_ptr module = factory.create();
     ASSERT_NE(module, nullptr);
     EXPECT_EQ(module.get_deleter().pin, nullptr);  // монолит: пин пуст
+}
+
+TEST(ModuleFactory, CreateBindsConstructorArgs) {
+    atp::module_factory<configured_module, int> factory{"cfg", 42};
+    atp::module_ptr first = factory.create();
+    atp::module_ptr second = factory.create();
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_NE(first, second);  // независимые экземпляры от одного конфига
+    EXPECT_EQ(dynamic_cast<configured_module&>(*first).value(), 42);
+    EXPECT_EQ(dynamic_cast<configured_module&>(*second).value(), 42);
 }

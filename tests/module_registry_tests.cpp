@@ -37,6 +37,19 @@ class handmade_module : public atp::module_base {
     void stop(atp::module_context&) override {}
 };
 
+// Модуль с конфигом в конструкторе — для тестов вариадик-регистрации.
+class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+   public:
+    explicit configured_module(int value) : value_(value) {}
+
+    [[nodiscard]] int value() const {
+        return value_;
+    }
+
+   private:
+    int value_;
+};
+
 // requires-выражение вне шаблона GCC проверяет жёстко (не SFINAE),
 // поэтому невозможность вызова проверяется через концепты: подстановка
 // параметра — уже immediate context, отказ разрешения даёт false.
@@ -306,4 +319,20 @@ TEST(ModuleRegistrar, FailedAddIsNotRecorded) {
     // тот же тип — та же версия 1.0, дубликат пары (имя, версия)
     EXPECT_THROW(registrar.add<alpha_module>("dup"), std::runtime_error);
     EXPECT_EQ(registrar.registered(), (std::vector<std::pair<std::string, atp::version>>{{"dup", atp::version(1, 0)}}));
+}
+
+TEST(ModuleRegistry, AddBindsConstructorArgs) {
+    atp::module_registry registry;
+    registry.add<configured_module>("cfg", 7);
+    auto module = registry.create("cfg");
+    ASSERT_NE(module, nullptr);
+    EXPECT_EQ(dynamic_cast<configured_module&>(*module).value(), 7);
+}
+
+TEST(ModuleRegistry, SameTypeDifferentConfigsUnderAliases) {
+    atp::module_registry registry;
+    registry.add<configured_module>("slow", 10);
+    registry.add<configured_module>("fast", 90);
+    EXPECT_EQ(dynamic_cast<configured_module&>(*registry.create("slow")).value(), 10);
+    EXPECT_EQ(dynamic_cast<configured_module&>(*registry.create("fast")).value(), 90);
 }

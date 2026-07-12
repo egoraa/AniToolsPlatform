@@ -17,11 +17,11 @@ class versioned_module : public atp::module<atp::io::inputs, atp::io::outputs, "
 class bare_module : public atp::module_base {
    public:
     void initialize(atp::module_context&) override {}
-    void start(atp::module_context&) override {}
+    void start() override {}
     atp::work_status iterate(std::stop_token) override {
         return atp::work_status::idle;
     }
-    void stop(atp::module_context&) override {}
+    void stop() override {}
 
     atp::io::inputs& inputs() override {
         return inputs_;

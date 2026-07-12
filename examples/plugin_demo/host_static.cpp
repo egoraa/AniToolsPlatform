@@ -19,9 +19,9 @@ int main() {
 
     auto counter = registry.create("counter");
     counter->initialize(context);
-    counter->start(context);
+    counter->start();
     counter->iterate(std::stop_token{});
-    counter->stop(context);
+    counter->stop();
     std::cout << "counter iterated once\n";
     return 0;
 }

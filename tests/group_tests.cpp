@@ -85,9 +85,9 @@ TEST(Group, RejectsDuplicateAndEmptyNames) {
 TEST(Group, CascadesFollowInsertionOrderAndReverseOnStop) {
     rig r;
     r.root.initialize(r.ctx);
-    r.root.start(r.ctx);
+    r.root.start();
     (void)r.root.iterate(std::stop_token{});
-    r.root.stop(r.ctx);
+    r.root.stop();
 
     std::vector<std::string> expected{"a", "b", "c", "d"};
     EXPECT_EQ(r.log.order_of("initialize"), expected);
@@ -110,7 +110,7 @@ TEST(Group, StopContinuesAfterErrorAndRethrowsFirst) {
     rig r;
     r.root.initialize(r.ctx);
     r.b->throw_in = "stop";
-    EXPECT_THROW(r.root.stop(r.ctx), std::runtime_error);
+    EXPECT_THROW(r.root.stop(), std::runtime_error);
     // несмотря на бросок b, stop получили все — обратный порядок сохранён
     std::vector<std::string> reversed{"d", "c", "b", "a"};
     EXPECT_EQ(r.log.order_of("stop"), reversed);

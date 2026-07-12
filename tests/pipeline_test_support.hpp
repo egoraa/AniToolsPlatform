@@ -76,7 +76,7 @@ class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
     void initialize(atp::module_context&) override {
         hit("initialize");
     }
-    void start(atp::module_context&) override {
+    void start() override {
         hit("start");
     }
     atp::work_status iterate(std::stop_token) override {
@@ -87,7 +87,7 @@ class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
         hit("iterate");
         return atp::work_status::busy;  // журнал пишется каждый вызов — это работа
     }
-    void stop(atp::module_context&) override {
+    void stop() override {
         hit("stop");
     }
 

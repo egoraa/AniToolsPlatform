@@ -109,10 +109,10 @@ class pipeline_runner {
             // контракт module_base.
             p.root().initialize(p.context());
             try {
-                p.root().start(p.context());
+                p.root().start();
             } catch (...) {
                 try {
-                    p.root().stop(p.context());
+                    p.root().stop();
                 } catch (...) {  // NOLINT(bugprone-empty-catch)
                 }
                 throw;
@@ -382,7 +382,7 @@ class pipeline_runner {
         }
         threads_.clear();
         try {
-            pipeline_->root().stop(pipeline_->context());
+            pipeline_->root().stop();
         } catch (...) {
             store_error(std::current_exception());  // stop() не бросает — ошибка доступна через error()
         }

@@ -33,11 +33,11 @@ class module : public module_base {
     }
 
     void initialize(module_context&) override {}
-    void start(module_context&) override {}
+    void start() override {}
     work_status iterate(std::stop_token) override {
         return work_status::idle;  // no-op-итерация и есть простой
     }
-    void stop(module_context&) override {}
+    void stop() override {}
 
     [[nodiscard]] TInputs& inputs() override {
         return inputs_;

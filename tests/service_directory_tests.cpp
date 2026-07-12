@@ -43,26 +43,38 @@ struct both_impl : greeter, counter {
 };
 
 // Поставщик: публикует себя как интерфейс в initialize, снимает в stop.
+// Контекст даётся только в initialize — кому он нужен в stop, сохраняет ссылку.
 class greeter_module : public atp::module<atp::io::inputs, atp::io::outputs, "greeter">, public greeter {
    public:
     void initialize(atp::module_context& context) override {
+        context_ = &context;
         context.services.provide<greeter>(std::string{get_name()}, *this);
     }
-    void stop(atp::module_context& context) override {
-        context.services.remove(std::string{get_name()});
+    void stop() override {
+        context_->services.remove(std::string{get_name()});
     }
     std::string greet() const override {
         return "hello from module";
     }
+
+   private:
+    atp::module_context* context_ = nullptr;
 };
 
 // Потребитель: ищет соседа только в start — порядок initialize не важен.
+// Ссылку на контекст запоминает в initialize, ищет по ней в start.
 class consumer_module : public atp::module<atp::io::inputs, atp::io::outputs, "consumer"> {
    public:
-    void start(atp::module_context& context) override {
-        greeting = context.services.at<greeter>("greeter").greet();
+    void initialize(atp::module_context& context) override {
+        context_ = &context;
+    }
+    void start() override {
+        greeting = context_->services.at<greeter>("greeter").greet();
     }
     std::string greeting;
+
+   private:
+    atp::module_context* context_ = nullptr;
 };
 
 }  // namespace
@@ -170,11 +182,11 @@ TEST(ServiceDirectory, ModulePublishesInInitializeConsumerFindsInStart) {
     // publish/lookup делает порядок initialize неважным
     consumer.initialize(context);
     provider.initialize(context);
-    consumer.start(context);
-    provider.start(context);
+    consumer.start();
+    provider.start();
     EXPECT_EQ(consumer.greeting, "hello from module");
 
     // симметричное снятие публикаций в stop
-    provider.stop(context);
+    provider.stop();
     EXPECT_EQ(services.find<greeter>("greeter"), nullptr);
 }

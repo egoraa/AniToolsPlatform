@@ -14,7 +14,9 @@ namespace atp {
 //    module_ptr (пин библиотеки в делетере); module_base отдаёт io-реестры
 //    (inputs()/outputs()); iterate возвращает work_status (контракт
 //    простоя для исполнителя).
-inline constexpr unsigned plugin_abi = 3;
+// 4: start()/stop() без параметров — module_context& даётся только в
+//    initialize (кому нужен позже — сохраняет ссылку).
+inline constexpr unsigned plugin_abi = 4;
 
 // Контракт плагина — два C-символа. Рукопожатие atp_abi_version —
 // единственный вызов, безопасный при любом рассогласовании: чистый C,

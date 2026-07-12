@@ -181,7 +181,7 @@ class group : public module_base {
         } catch (...) {
             for (std::size_t i = done; i > 0; --i) {
                 try {
-                    children_[i - 1].module->stop(context);
+                    children_[i - 1].module->stop();
                 } catch (...) {  // NOLINT(bugprone-empty-catch)
                 }
             }
@@ -191,19 +191,19 @@ class group : public module_base {
 
     // Отката здесь нет: при ошибке раннер зовёт root.stop() — stop обязан
     // быть корректен после initialize без start (контракт module_base).
-    void start(module_context& context) override {
+    void start() override {
         for (child& c : children_) {
-            c.module->start(context);
+            c.module->start();
         }
     }
 
     // Обратный порядок; при ошибке ребёнка — продолжить остальных, первую
     // ошибку перебросить в конце: остановка важнее её диагностики.
-    void stop(module_context& context) override {
+    void stop() override {
         std::exception_ptr first;
         for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
             try {
-                it->module->stop(context);
+                it->module->stop();
             } catch (...) {
                 if (!first) {
                     first = std::current_exception();

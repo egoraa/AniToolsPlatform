@@ -34,19 +34,21 @@ class module : public module_base {
 
     void initialize(module_context&) override {}
     void start(module_context&) override {}
-    void iterate(std::stop_token) override {}
+    work_status iterate(std::stop_token) override {
+        return work_status::idle;  // no-op-итерация и есть простой
+    }
     void stop(module_context&) override {}
 
-    [[nodiscard]] TInputs& inputs() {
+    [[nodiscard]] TInputs& inputs() override {
         return inputs_;
     }
-    [[nodiscard]] const TInputs& inputs() const {
+    [[nodiscard]] const TInputs& inputs() const override {
         return inputs_;
     }
-    [[nodiscard]] TOutputs& outputs() {
+    [[nodiscard]] TOutputs& outputs() override {
         return outputs_;
     }
-    [[nodiscard]] const TOutputs& outputs() const {
+    [[nodiscard]] const TOutputs& outputs() const override {
         return outputs_;
     }
 

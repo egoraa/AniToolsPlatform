@@ -15,8 +15,9 @@ struct counter_outputs : atp::io::outputs {
 
 class counter_module : public atp::module<atp::io::inputs, counter_outputs, "counter", atp::ver<"1.0">> {
    public:
-    void iterate(std::stop_token) override {
+    atp::work_status iterate(std::stop_token) override {
         outputs().count(++value_);
+        return atp::work_status::busy;  // счётчик работает на каждом вызове
     }
 
    private:

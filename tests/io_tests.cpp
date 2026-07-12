@@ -716,3 +716,49 @@ TEST(OutputsRegistry, DynamicOutputCanBeRemoved) {
     EXPECT_THROW((void)outs.at("extra"), std::runtime_error);
     EXPECT_FALSE(outs.remove("extra"));
 }
+
+TEST(IoBase, ThreadSafeReflectsConstructionTag) {
+    atp::io::input<int> guarded("guarded");                       // safe — умолчание
+    atp::io::input<int> bare("bare", atp::io::unsafe);
+    atp::io::output<int> guarded_out("out");
+    EXPECT_TRUE(guarded.thread_safe());
+    EXPECT_FALSE(bare.thread_safe());
+    EXPECT_TRUE(guarded_out.thread_safe());
+}
+
+TEST(IoRegistry, AliasSharesForeignPort) {
+    atp::io::input<int> real{"real"};
+    atp::io::inputs regs;
+    regs.alias("mirror", real);
+    EXPECT_EQ(regs.find("mirror"), &real);           // тот же объект, не копия
+    real(7);
+    EXPECT_EQ(regs.get<atp::io::input<int>>("mirror").get(), 7);
+}
+
+TEST(IoRegistry, AliasRejectsDuplicateName) {
+    atp::io::inputs regs;
+    (void)regs.make<atp::io::input<int>>("port");
+    atp::io::input<int> foreign{"foreign"};
+    EXPECT_THROW(regs.alias("port", foreign), std::runtime_error);
+}
+
+TEST(IoRegistry, OwnedSkipsAliases) {
+    atp::io::inputs regs;
+    auto& own = regs.make<atp::io::input<int>>("own");
+    atp::io::input<int> foreign{"foreign"};
+    regs.alias("mirror", foreign);
+    auto owned = regs.owned();
+    ASSERT_EQ(owned.size(), 1u);
+    EXPECT_EQ(owned.front(), &own);
+    EXPECT_EQ(regs.list().size(), 2u);               // list видит оба вида записей
+}
+
+TEST(IoRegistry, DestructionLeavesAliasedPortAlive) {
+    atp::io::input<int> foreign{"foreign"};
+    {
+        atp::io::inputs regs;
+        regs.alias("mirror", foreign);
+    }                                                // реестр умер — алиас не владел
+    foreign(5);
+    EXPECT_EQ(foreign.get(), 5);
+}

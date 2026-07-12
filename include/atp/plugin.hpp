@@ -11,9 +11,9 @@ namespace atp {
 // что у хоста (MSVC: общий CRT, /MD).
 // 2: initialize/start/stop принимают module_context&.
 // 3: pull-модель входов (io: -when/+take/watcher); create() возвращает
-//    module_ptr (пин библиотеки в делетере) — той же волной войдут
-//    io-реестры через module_base и work_status из iterate (план
-//    платформы исполнения).
+//    module_ptr (пин библиотеки в делетере); module_base отдаёт io-реестры
+//    (inputs()/outputs()); iterate возвращает work_status (контракт
+//    простоя для исполнителя).
 inline constexpr unsigned plugin_abi = 3;
 
 // Контракт плагина — два C-символа. Рукопожатие atp_abi_version —

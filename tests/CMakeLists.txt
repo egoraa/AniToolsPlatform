@@ -18,15 +18,18 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(test_plugin)
 
 add_executable(atp_tests
+        group_tests.cpp
         io_tests.cpp
         module_tests.cpp
         module_factory_tests.cpp
         module_loader_tests.cpp
         module_registry_tests.cpp
+        pipeline_runner_tests.cpp
+        pipeline_tests.cpp
         service_directory_tests.cpp
         version_tests.cpp)
 # CMAKE_DL_LIBS: на Linux dlopen может требовать -ldl, на Windows пусто.
-target_link_libraries(atp_tests PRIVATE atp_platform GTest::gtest_main ${CMAKE_DL_LIBS})
+target_link_libraries(atp_tests PRIVATE atp_host GTest::gtest_main ${CMAKE_DL_LIBS})
 
 # Пути к тестовым плагинам — компилятору тестов; $<PATH:CMAKE_PATH,...>
 # нормализует разделители (обратные слэши Windows сломали бы строковый литерал).

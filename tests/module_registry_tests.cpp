@@ -33,8 +33,27 @@ class handmade_module : public atp::module_base {
     static constexpr std::string_view module_name = "handmade";
     void initialize(atp::module_context&) override {}
     void start(atp::module_context&) override {}
-    void iterate(std::stop_token) override {}
+    atp::work_status iterate(std::stop_token) override {
+        return atp::work_status::idle;
+    }
     void stop(atp::module_context&) override {}
+
+    atp::io::inputs& inputs() override {
+        return inputs_;
+    }
+    const atp::io::inputs& inputs() const override {
+        return inputs_;
+    }
+    atp::io::outputs& outputs() override {
+        return outputs_;
+    }
+    const atp::io::outputs& outputs() const override {
+        return outputs_;
+    }
+
+   private:
+    atp::io::inputs inputs_;
+    atp::io::outputs outputs_;
 };
 
 // Модуль с конфигом в конструкторе — для тестов вариадик-регистрации.

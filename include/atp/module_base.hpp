@@ -5,10 +5,18 @@
 #include <stop_token>
 #include <string_view>
 
+#include <atp/io/threading.hpp>
 #include <atp/module_context.hpp>
 #include <atp/version.hpp>
 
+namespace atp::io {
+class inputs;
+class outputs;
+}  // namespace atp::io
+
 namespace atp {
+
+using work_status = io::work_status;  // сигнатура iterate пишется atp::work_status
 
 // Type-erased база модуля — в одном ряду с io_base/input_base/output_base.
 class module_base {
@@ -24,7 +32,7 @@ class module_base {
     // горячий путь, службы фазы настройки ему не передаются.
     virtual void initialize(module_context& context) = 0;
     virtual void start(module_context& context) = 0;
-    virtual void iterate(std::stop_token stop_token) = 0;
+    virtual work_status iterate(std::stop_token stop_token) = 0;
     virtual void stop(module_context& context) = 0;
 
     // Версия модуля для рантайм-сравнения через type-erased ссылку.
@@ -36,6 +44,15 @@ class module_base {
     [[nodiscard]] virtual version get_version() const noexcept {
         return default_version;
     }
+
+    // Type-erased доступ к io-реестрам: машинерия соединений (group)
+    // работает с модулем через unique_ptr<module_base> и без этих
+    // аксессоров не видела бы портов. module<> реализует их ковариантным
+    // override — авторам модулей ничего делать не нужно.
+    [[nodiscard]] virtual io::inputs& inputs() = 0;
+    [[nodiscard]] virtual const io::inputs& inputs() const = 0;
+    [[nodiscard]] virtual io::outputs& outputs() = 0;
+    [[nodiscard]] virtual const io::outputs& outputs() const = 0;
 
     // Имя модуля через type-erased ссылку — симметрично get_version.
     // Модуль, не объявивший имени, — «аноним»: пустой string_view

@@ -1,3 +1,4 @@
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <typeindex>
@@ -102,4 +103,26 @@ TEST(Module, DeclaredNameThroughBase) {
     named_module module;
     atp::module_base& base = module;
     EXPECT_EQ(base.get_name(), "named");
+}
+
+namespace {
+struct erased_probe_inputs : atp::io::inputs {
+    atp::io::input<int>& number = make<atp::io::input<int>>("number");
+};
+class erased_probe : public atp::module<erased_probe_inputs, atp::io::outputs> {};
+}  // namespace
+
+TEST(Module, IoRegistriesReachableThroughBase) {
+    erased_probe m;
+    atp::module_base& base = m;
+    // Реестры через type-erased базу — те же объекты, что у конкретного типа.
+    EXPECT_EQ(&base.inputs(), static_cast<atp::io::inputs*>(&m.inputs()));
+    EXPECT_NE(base.inputs().find("number"), nullptr);
+    EXPECT_EQ(base.outputs().list().size(), 0u);
+}
+
+TEST(Module, DefaultIterateReportsIdle) {
+    erased_probe m;
+    // Умолчание module<>: no-op-итерация и есть простой.
+    EXPECT_EQ(m.iterate(std::stop_token{}), atp::work_status::idle);
 }

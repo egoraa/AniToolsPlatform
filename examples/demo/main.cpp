@@ -1,8 +1,12 @@
+#include <chrono>
 #include <iostream>
+#include <latch>
 #include <stop_token>
 #include <string>
 
 #include <atp/module.hpp>
+#include <atp/pipeline.hpp>
+#include <atp/pipeline_runner.hpp>
 
 namespace {
 
@@ -11,19 +15,39 @@ struct source_outputs : atp::io::outputs {
 };
 
 struct sink_inputs : atp::io::inputs {
-    atp::io::input<int>& number = make<atp::io::input<int>>("number");
+    atp::io::input<int>& number = make<atp::io::input<int>>("number");  // safe: границу потоков выбирает раскладка
     atp::io::queued_input<int>& history = make<atp::io::queued_input<int>>("history");
 };
 
-class source_module : public atp::module<atp::io::inputs, source_outputs> {};
-
-class sink_module : public atp::module<sink_inputs, atp::io::outputs> {
+// Источник: несколько значений и тишина — демо конечное.
+class source_module : public atp::module<atp::io::inputs, source_outputs, "source"> {
    public:
-    void initialize(atp::module_context&) override {
-        watcher_.watch(inputs().number, [](const int& value) { std::cout << "sink received: " << value << '\n'; });
+    atp::work_status iterate(std::stop_token) override {
+        if (next_ > 3) {
+            return atp::work_status::idle;  // всё отправлено — потоку можно спать
+        }
+        outputs().number(next_++);
+        return atp::work_status::busy;
     }
-    void iterate(std::stop_token) override {
-        (void)watcher_.poll();  // возврат нужен раннеру; демо тикает вручную
+
+   private:
+    int next_ = 1;
+};
+
+class sink_module : public atp::module<sink_inputs, atp::io::outputs, "sink"> {
+   public:
+    std::latch* done = nullptr;
+
+    void initialize(atp::module_context&) override {
+        watcher_.watch(inputs().number, [this](const int& value) {
+            std::cout << "sink received: " << value << '\n';
+            if (value == 3 && done) {
+                done->count_down();
+            }
+        });
+    }
+    atp::work_status iterate(std::stop_token) override {
+        return watcher_.poll();
     }
 
    private:
@@ -33,27 +57,37 @@ class sink_module : public atp::module<sink_inputs, atp::io::outputs> {
 }  // namespace
 
 int main() {
-    atp::service_directory services;
-    atp::module_context context{services};
+    atp::pipeline pipe;
+    std::latch done(1);
 
-    source_module source;
-    sink_module sink;
-    source.initialize(context);
-    sink.initialize(context);
+    // Вложенная группа с собственными портами: снаружи видны только алиасы.
+    atp::group& producers = pipe.root().add_group("producers");
+    producers.make<source_module>();
+    producers.expose_output("numbers", "source.number");
 
-    // Соединение выход→вход: типизированное — прямо в коде,
-    // type-erased по именам — путь будущей машинерии соединений.
-    source.outputs().number.connect(sink.inputs().number);
-    source.outputs().at("number").connect(sink.inputs().at("history"));
+    atp::group& consumers = pipe.root().add_group("consumers");
+    sink_module& sink = consumers.make<sink_module>();
+    sink.done = &done;
+    consumers.expose_input("numbers", "sink.number");
+    consumers.expose_input("log", "sink.history");
 
-    source.outputs().number(42);      // рассылка обоим входам + кэш
-    sink.iterate(std::stop_token{});  // опрос: обработчик печатает на потоке модуля
+    pipe.root().connect("producers.numbers", "consumers.numbers");
+    pipe.root().connect("producers.numbers", "consumers.log");
 
-    std::cout << "cached: " << source.outputs().number.get() << ", queued: " << sink.inputs().history.pop() << '\n';
+    // Раскладка развёртывания: именованные потоки с режимами.
+    atp::pipeline_runner runner;
+    runner.add_thread("producing");                                                     // on_demand
+    runner.add_thread("consuming", {atp::thread_mode::throttled, std::chrono::milliseconds(5)});
+    runner.assign(producers, "producing");
+    runner.assign(consumers, "consuming");
+    runner.start(pipe);
+    done.wait();
+    runner.stop();
 
-    std::cout << "declared outputs:\n";
-    for (const auto* info : source.outputs().list()) {
-        std::cout << "  '" << info->name() << "' (type hash " << info->type().hash_code() << ")\n";
+    std::cout << "queued history:";
+    while (!sink.inputs().history.empty()) {
+        std::cout << ' ' << sink.inputs().history.pop();
     }
+    std::cout << '\n';
     return 0;
 }

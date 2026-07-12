@@ -31,6 +31,12 @@ class io_base {
         return type_;
     }
 
+    // Потокобезопасность — свойство экземпляра (см. safety); раннер по ней
+    // валидирует соединения, пересекающие границу потоков.
+    [[nodiscard]] bool thread_safe() const noexcept {
+        return locking_;
+    }
+
     virtual void reset() = 0;
 
    protected:

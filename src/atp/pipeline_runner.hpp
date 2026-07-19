@@ -98,12 +98,12 @@ class pipeline_runner {
             error_ = nullptr;
         }
         pipeline_ = &p;
-        // Шаг 1: чистые проверки конфигурации — до каскадов, откатывать нечего.
-        build_thread_map(p.root());
-        map_ports(p.root());
-        validate_connections(p.root());
-        apply_detach(p.root());
         try {
+            // Шаг 1: чистые проверки конфигурации — до каскадов.
+            build_thread_map(p.root());
+            map_ports(p.root());
+            validate_connections(p.root());
+            apply_detach(p.root());
             // initialize при сбое откатывается сам (локальный fail-fast групп);
             // сбой start требует внешнего stop: прошедшие initialize без start —
             // контракт module_base.
@@ -118,6 +118,9 @@ class pipeline_runner {
                 throw;
             }
         } catch (...) {
+            // Единый откат для любого сбоя: висячий pipeline_ и полузаполненные
+            // карты не переживают неудачный start — инвариант «не running —
+            // состояние чистое». undo_detach на пустом списке — no-op.
             undo_detach();
             reset_state();
             throw;

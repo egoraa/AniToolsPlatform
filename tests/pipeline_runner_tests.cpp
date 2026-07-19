@@ -164,6 +164,44 @@ TEST(PipelineRunner, ConfigurationErrors) {
     EXPECT_THROW(runner.start(r.pipe), std::invalid_argument);                         // назначение вне дерева
 }
 
+// Сбой валидации не должен оставлять в раннере следов: переназначение
+// и повторный start обязаны работать (инвариант «не running — состояние
+// чистое», проверяемый снаружи через переиспользование).
+TEST(PipelineRunner, FailedValidationLeavesRunnerReusable) {
+    atp::pipeline pipe;
+
+    struct out_ports : atp::io::outputs {
+        atp::io::output<int>& value = make<atp::io::output<int>>("value");
+    };
+    struct in_ports : atp::io::inputs {
+        atp::io::input<int>& value = make<atp::io::input<int>>("value", atp::io::unsafe);
+    };
+    class producer : public atp::module<atp::io::inputs, out_ports> {};
+    class consumer : public atp::module<in_ports, atp::io::outputs> {};
+
+    atp::group& left = pipe.root().add_group("left");
+    left.make<producer>("p");
+    left.expose_output("out", "p.value");
+    atp::group& right = pipe.root().add_group("right");
+    right.make<consumer>("c");
+    right.expose_input("in", "c.value");
+    pipe.root().connect("left.out", "right.in");
+
+    atp::pipeline_runner runner;
+    runner.add_thread("producing");
+    runner.add_thread("consuming");
+    runner.assign(left, "producing");
+    runner.assign(right, "consuming");
+    EXPECT_THROW(runner.start(pipe), std::runtime_error);  // unsafe вход через границу потоков
+    EXPECT_FALSE(runner.running());
+
+    runner.assign(right, "producing");  // переназначение: обе группы на одном потоке — валидно
+    runner.start(pipe);
+    EXPECT_TRUE(runner.running());
+    runner.stop();
+    EXPECT_FALSE(runner.running());
+}
+
 TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
     atp::pipeline pipe;
     std::latch delivered(1);

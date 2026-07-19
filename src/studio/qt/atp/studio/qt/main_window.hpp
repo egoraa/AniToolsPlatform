@@ -18,6 +18,7 @@
 
 #include <atp/studio/qt/app_state.hpp>
 #include <atp/studio/qt/canvas_widget.hpp>
+#include <atp/studio/qt/inspector_widget.hpp>
 #include <atp/studio/qt/manager_widget.hpp>
 #include <atp/studio/qt/palette_widget.hpp>
 
@@ -33,7 +34,11 @@ class main_window final : public QMainWindow {
 
         callbacks_.document_changed = [this] { refresh_all(); };
         callbacks_.error = [this](const QString& text) { report(text); };
-        callbacks_.selection_changed = [this] { /* инспектор придёт задачей 4 */ };
+        callbacks_.selection_changed = [this] {
+            if (inspector_ != nullptr) {
+                inspector_->refresh();
+            }
+        };
 
         build_menus();
         build_errors_dock();
@@ -50,6 +55,11 @@ class main_window final : public QMainWindow {
 
         canvas_ = new canvas_widget(state_, callbacks_, this);
         setCentralWidget(canvas_);
+
+        auto* inspector_dock = new QDockWidget("Inspector", this);
+        inspector_ = new inspector_widget(state_, callbacks_, inspector_dock);
+        inspector_dock->setWidget(inspector_);
+        addDockWidget(Qt::RightDockWidgetArea, inspector_dock);
 
         // 10 Гц: опрос ошибок исполнения и статистики (наполняется задачей 5)
         auto* timer = new QTimer(this);
@@ -68,7 +78,8 @@ class main_window final : public QMainWindow {
         manager_->refresh();
         palette_->refresh();
         canvas_->refresh();
-        // задачи 4-5 дополняют: инспектор, runtime
+        inspector_->refresh();
+        // задача 5 дополняет: runtime
     }
 
     void report(const QString& text) {
@@ -172,6 +183,7 @@ class main_window final : public QMainWindow {
     manager_widget* manager_ = nullptr;
     palette_widget* palette_ = nullptr;
     canvas_widget* canvas_ = nullptr;
+    inspector_widget* inspector_ = nullptr;
     QListWidget* errors_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;

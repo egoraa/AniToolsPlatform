@@ -112,15 +112,24 @@ class module_loader {
             const auto register_modules = load_symbol<register_modules_fn>(register_modules_symbol);
             register_modules(registrar);
             modules_ = registrar.registered();
-        } catch (...) {
-            // частичная регистрация не должна пережить закрытие библиотеки;
-            // снимаются только свои пары (имя, версия) — чужие версии
-            // тех же имён не задеваются
+        } catch (const std::exception& e) {
+            // Исключение могло родиться в коде плагина (инлайны registrar
+            // инстанцируются в DLL): его нельзя ни перебрасывать, ни
+            // разрушать после выгрузки библиотеки. Текст копируется в
+            // хост-исключение, пока DLL жива; плагинное исключение умирает
+            // на выходе из catch, и только затем раскрутка конструктора
+            // (член library_) выгружает библиотеку. Частичная регистрация
+            // снимается: только свои пары (имя, версия) — чужие версии тех
+            // же имён не задеваются.
             for (const auto& [name, ver] : registrar.registered()) {
                 registry.remove(name, ver);
             }
-            library_.reset();
-            throw;
+            throw std::runtime_error(e.what());
+        } catch (...) {
+            for (const auto& [name, ver] : registrar.registered()) {
+                registry.remove(name, ver);
+            }
+            throw std::runtime_error("plugin '" + path_.string() + "' registration failed");
         }
     }
 

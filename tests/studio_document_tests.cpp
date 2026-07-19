@@ -1,3 +1,4 @@
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -99,6 +100,109 @@ TEST_F(DocumentFiles, SaveWritesValidConfigAndLayoutSidecar) {
     ASSERT_TRUE(reopened.position("left.src").has_value());
     EXPECT_EQ(*reopened.position("left.src"), (atp::studio::node_position{30.0f, 40.0f}));
     EXPECT_EQ(reopened.position("ghost"), std::nullopt);
+}
+
+TEST(DocumentEdit, BuildsPipelineThroughOperations) {
+    atp::studio::document doc = atp::studio::document::create();
+    doc.add_group("", "left");
+    doc.add_module("left", "counter", "ticks", atp::version{1, 0}, R"({"rate":10})");
+    doc.set_expose_output("left", "out", "ticks.count");
+    doc.add_group("", "right");
+    doc.add_module("right", "printer");  // имя по умолчанию — имя фабрики
+    doc.set_expose_input("right", "in", "printer.value");
+    doc.connect("", "left.out", "right.in", true);
+    doc.add_thread("main_loop", atp::thread_mode::throttled, std::chrono::milliseconds(5));
+    doc.set_assignment("left", "main_loop");
+    doc.add_plugin("libdemo.dll");
+    doc.add_plugin("libdemo.dll");  // дедуп: не операция, undo не растёт
+
+    const atp::app::config& cfg = doc.config();
+    ASSERT_EQ(cfg.pipeline.children.size(), 2u);
+    EXPECT_EQ(cfg.pipeline.children[1].group->children[0].module->name, "printer");
+    ASSERT_EQ(cfg.pipeline.connections.size(), 1u);
+    EXPECT_TRUE(cfg.pipeline.connections[0].replay);
+    ASSERT_EQ(cfg.threads.size(), 1u);
+    ASSERT_EQ(cfg.assignments.size(), 1u);
+    ASSERT_EQ(cfg.plugins.size(), 1u);
+    // построенное операциями проходит полный validate — инварианты те же
+    EXPECT_TRUE(atp::app::validate(atp::app::encode(cfg)).empty());
+}
+
+TEST(DocumentEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
+    atp::studio::document doc = atp::studio::document::create();
+    doc.add_group("", "g");
+    doc.add_module("g", "counter");
+
+    EXPECT_THROW(doc.add_module("g", "counter"), atp::app::config_error);      // дубликат имени
+    EXPECT_THROW(doc.add_module("ghost", "counter"), atp::app::config_error);  // нет группы
+    EXPECT_THROW(doc.add_group("g", "bad.name"), atp::app::config_error);      // точка в имени
+    EXPECT_THROW(doc.connect("g", "no_dot", "counter.in"), atp::app::config_error);
+    EXPECT_THROW(doc.connect("g", "ghost.out", "counter.in"), atp::app::config_error);  // нет ребёнка
+    EXPECT_THROW(doc.set_params("g", "ghost", "{}"), atp::app::config_error);
+    EXPECT_THROW(doc.set_params("g", "counter", "{broken"), atp::app::config_error);         // не-JSON
+    EXPECT_THROW(doc.add_thread("t", atp::thread_mode::throttled), atp::app::config_error);  // период
+    EXPECT_THROW(doc.set_assignment("g", "nowhere"), atp::app::config_error);                // нет потока
+
+    // после отказов откатываются ровно две успешные операции — и всё
+    EXPECT_TRUE(doc.undo());
+    EXPECT_TRUE(doc.undo());
+    EXPECT_FALSE(doc.can_undo());
+    EXPECT_TRUE(doc.config().pipeline.children.empty());
+}
+
+TEST(DocumentEdit, RemoveChildCleansReferences) {
+    atp::studio::document doc = atp::studio::document::create();
+    doc.add_group("", "g");
+    doc.add_module("g", "a");
+    doc.add_module("g", "b");
+    doc.connect("g", "a.out", "b.in");
+    doc.set_expose_output("g", "alias", "a.out");
+    doc.add_thread("t", atp::thread_mode::on_demand);
+    doc.set_assignment("g", "t");
+    doc.set_position("g.a", {1.0f, 2.0f});
+
+    doc.remove_child("g", "a");
+    EXPECT_TRUE(doc.group_at("g")->connections.empty());     // связь с "a." умерла
+    EXPECT_TRUE(doc.group_at("g")->expose_outputs.empty());  // и экспорт
+    EXPECT_EQ(doc.position("g.a"), std::nullopt);
+
+    doc.remove_child("", "g");                      // подгруппа целиком
+    EXPECT_TRUE(doc.config().assignments.empty());  // раскладка не осиротела
+}
+
+TEST(DocumentEdit, RenameChildRewritesReferences) {
+    atp::studio::document doc = atp::studio::document::create();
+    doc.add_group("", "g");
+    doc.add_module("g", "a");
+    doc.add_module("g", "b");
+    doc.connect("g", "a.out", "b.in");
+    doc.set_expose_output("g", "alias", "a.out");
+    doc.set_position("g.a", {1.0f, 2.0f});
+
+    doc.rename_child("g", "a", "producer");
+    EXPECT_EQ(doc.group_at("g")->connections[0].from, "producer.out");
+    EXPECT_EQ(doc.group_at("g")->expose_outputs[0].second, "producer.out");
+    EXPECT_EQ(doc.position("g.producer"), (atp::studio::node_position{1.0f, 2.0f}));
+    EXPECT_EQ(doc.position("g.a"), std::nullopt);
+
+    doc.add_thread("t", atp::thread_mode::on_demand);
+    doc.set_assignment("g", "t");
+    doc.rename_child("", "g", "stage");  // и путь в раскладке
+    EXPECT_EQ(doc.config().assignments[0].first, "stage");
+}
+
+TEST(DocumentEdit, UndoRedoWalkHistory) {
+    atp::studio::document doc = atp::studio::document::create();
+    EXPECT_FALSE(doc.can_undo());
+    doc.add_group("", "g");
+    doc.add_module("g", "m");
+    EXPECT_TRUE(doc.undo());  // откатили модуль
+    EXPECT_TRUE(doc.group_at("g")->children.empty());
+    EXPECT_TRUE(doc.redo());  // вернули
+    EXPECT_EQ(doc.group_at("g")->children.size(), 1u);
+    EXPECT_TRUE(doc.undo());
+    doc.add_module("g", "other");  // новая ветка истории
+    EXPECT_FALSE(doc.can_redo());  // redo сброшен
 }
 
 }  // namespace

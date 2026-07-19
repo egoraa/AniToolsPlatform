@@ -1,7 +1,10 @@
 #ifndef ANITOOLSPLATFORM_IO_OUTPUT_BASE_HPP
 #define ANITOOLSPLATFORM_IO_OUTPUT_BASE_HPP
 
+#include <any>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 
 #include <atp/io/input_base.hpp>
 #include <atp/io/io_base.hpp>
@@ -38,6 +41,14 @@ class output_base : public io_base {
     virtual void disconnect_all() = 0;
 
     [[nodiscard]] virtual std::size_t connections() const = 0;
+
+    // Наблюдение для инструментов (мониторинг studio): type-erased снимок
+    // кэша и поколение записи (по изменению между опросами подсвечивается
+    // активность связи). Наблюдаемы только safe-экземпляры — чтение идёт
+    // под замком выхода; у unsafe чтение снаружи было бы гонкой, поэтому
+    // ответ — «ненаблюдаем»: peek() — nullopt, write_count() — 0.
+    [[nodiscard]] virtual std::optional<std::any> peek() const = 0;
+    [[nodiscard]] virtual std::uint64_t write_count() const = 0;
 
    private:
     // Единственная точка подключения: наследник проверяет совместимость

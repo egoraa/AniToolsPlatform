@@ -20,7 +20,9 @@ namespace atp {
 //    input_base — пробуждение потока-потребителя исполнителем.
 // 6: фабрики — create(config): параметры экземпляра строкой конфига
 //    (module_config).
-inline constexpr unsigned plugin_abi = 6;
+// 7: наблюдение выходов — peek()/write_count() у output_base (снимок кэша
+//    и поколение записи для мониторинга; safe-экземпляры только).
+inline constexpr unsigned plugin_abi = 7;
 
 // Контракт плагина — два C-символа. Рукопожатие atp_abi_version —
 // единственный вызов, безопасный при любом рассогласовании: чистый C,

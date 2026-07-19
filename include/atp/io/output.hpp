@@ -5,6 +5,7 @@
 #include <any>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -51,6 +52,7 @@ class output : public output_base {
             auto guard = lock();
             targets = targets_;
             value_ = incoming;
+            ++writes_;
         }
         for (input_base* in : targets) {
             in->deliver(&incoming, input_base::erased_of<T>());
@@ -114,6 +116,25 @@ class output : public output_base {
         return *value_;
     }
 
+    [[nodiscard]] std::optional<std::any> peek() const override {
+        if (!thread_safe()) {
+            return std::nullopt;  // контракт наблюдаемости — см. output_base
+        }
+        auto guard = lock();
+        if (!value_) {
+            return std::nullopt;
+        }
+        return std::any(*value_);
+    }
+
+    [[nodiscard]] std::uint64_t write_count() const override {
+        if (!thread_safe()) {
+            return 0;
+        }
+        auto guard = lock();
+        return writes_;
+    }
+
     // Чистит только кэш: соединения остаются, для их разрыва —
     // disconnect_all().
     void reset() override {
@@ -155,6 +176,7 @@ class output : public output_base {
 
     std::vector<input_base*> targets_;
     std::optional<T> value_;
+    std::uint64_t writes_ = 0;
 };
 
 }  // namespace atp::io

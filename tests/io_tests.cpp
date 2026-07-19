@@ -171,6 +171,37 @@ TEST(InputNotifier, DirectWriteDoesNotNotify) {
     EXPECT_EQ(n.count, 0);
 }
 
+TEST(OutputPeek, SafeOutputExposesCacheAndGeneration) {
+    atp::io::output<int> out("out");
+    atp::io::output_base& base = out;  // мониторинг работает через type-erased базу
+    EXPECT_EQ(base.peek(), std::nullopt);
+    EXPECT_EQ(base.write_count(), 0u);
+
+    out(41);
+    out(42);
+    const std::optional<std::any> snapshot = base.peek();
+    ASSERT_TRUE(snapshot.has_value());
+    EXPECT_EQ(std::any_cast<int>(*snapshot), 42);  // кэш — последнее значение
+    EXPECT_EQ(base.write_count(), 2u);
+}
+
+TEST(OutputPeek, ResetClearsCacheButKeepsGeneration) {
+    atp::io::output<int> out("out");
+    out(7);
+    out.reset();
+    EXPECT_EQ(out.peek(), std::nullopt);
+    EXPECT_EQ(out.write_count(), 1u);  // поколение — счётчик записей, не наличие кэша
+}
+
+TEST(OutputPeek, UnsafeOutputIsNotObservable) {
+    atp::io::output<int> out("out", atp::io::unsafe);
+    out(7);
+    // Контракт наблюдаемости: unsafe снаружи не читается — гонка. Ответ
+    // «ненаблюдаем», а не рискованное значение.
+    EXPECT_EQ(out.peek(), std::nullopt);
+    EXPECT_EQ(out.write_count(), 0u);
+}
+
 TEST(UnsafeInput, BehavesLikeInput) {
     atp::io::input<int> in{"in_int", atp::io::unsafe};
     in(7);

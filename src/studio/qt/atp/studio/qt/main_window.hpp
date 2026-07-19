@@ -17,6 +17,7 @@
 #include <QVBoxLayout>
 
 #include <atp/studio/qt/app_state.hpp>
+#include <atp/studio/qt/canvas_widget.hpp>
 #include <atp/studio/qt/manager_widget.hpp>
 #include <atp/studio/qt/palette_widget.hpp>
 
@@ -47,7 +48,8 @@ class main_window final : public QMainWindow {
         palette_dock->setWidget(palette_);
         addDockWidget(Qt::LeftDockWidgetArea, palette_dock);
 
-        setCentralWidget(new QLabel("canvas here", this));  // заменит задача 3
+        canvas_ = new canvas_widget(state_, callbacks_, this);
+        setCentralWidget(canvas_);
 
         // 10 Гц: опрос ошибок исполнения и статистики (наполняется задачей 5)
         auto* timer = new QTimer(this);
@@ -65,7 +67,8 @@ class main_window final : public QMainWindow {
         save_as_action_->setEnabled(!locked);
         manager_->refresh();
         palette_->refresh();
-        // задачи 3-5 дополняют: канвас, инспектор, runtime
+        canvas_->refresh();
+        // задачи 4-5 дополняют: инспектор, runtime
     }
 
     void report(const QString& text) {
@@ -168,6 +171,7 @@ class main_window final : public QMainWindow {
     ui_callbacks callbacks_;
     manager_widget* manager_ = nullptr;
     palette_widget* palette_ = nullptr;
+    canvas_widget* canvas_ = nullptr;
     QListWidget* errors_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;

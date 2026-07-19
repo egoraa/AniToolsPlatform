@@ -7,6 +7,7 @@
 #include <concepts>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -77,10 +78,11 @@ struct fixed_string {
     }
 };
 
-// Разбор "1.2.3" на этапе компиляции. Любая ошибка формата — throw:
-// в consteval-контексте это ошибка компиляции, компилятор цитирует
-// строку с текстом сообщения.
-consteval version parse_version(std::string_view text) {
+// Разбор "1.2.3". Любая ошибка формата — throw: разбор работает и в
+// рантайме (см. try_parse_version), а в constant-evaluation (ver<"...">)
+// бросок остаётся ошибкой компиляции — компилятор цитирует строку с
+// текстом сообщения.
+constexpr version parse_version(std::string_view text) {
     version result;
     unsigned part = 0;
     bool has_digit = false;
@@ -122,6 +124,16 @@ consteval version parse_version(std::string_view text) {
 // что atp::version{1, 2, 3}, но формат проверяется на компиляции.
 template <detail::fixed_string Text>
 inline constexpr version ver = detail::parse_version(Text.view());
+
+// Рантайм-пара к ver<"...">: та же грамматика, но вместо исключения —
+// nullopt: вызывающий (валидатор конфига) сам решает, как сообщить об ошибке.
+[[nodiscard]] inline std::optional<version> try_parse_version(std::string_view text) noexcept {
+    try {
+        return detail::parse_version(text);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
 
 }  // namespace atp
 

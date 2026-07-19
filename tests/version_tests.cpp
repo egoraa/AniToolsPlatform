@@ -15,6 +15,20 @@ static_assert(atp::ver<"0.0.1"> == atp::default_version);
 static_assert(atp::ver<"10.20.30.40"> == atp::version{10, 20, 30, 40});
 static_assert(atp::ver<"7">.count == 1);
 
+TEST(Version, TryParseValidStrings) {
+    EXPECT_EQ(atp::try_parse_version("1.2.3"), (atp::version{1, 2, 3}));
+    EXPECT_EQ(atp::try_parse_version("1.0"), (atp::version{1, 0}));
+    EXPECT_EQ(atp::try_parse_version("7"), (atp::version{7}));
+}
+
+TEST(Version, TryParseRejectsBadStrings) {
+    EXPECT_EQ(atp::try_parse_version(""), std::nullopt);
+    EXPECT_EQ(atp::try_parse_version("1..2"), std::nullopt);
+    EXPECT_EQ(atp::try_parse_version("1.2.3.4.5"), std::nullopt);
+    EXPECT_EQ(atp::try_parse_version("1.x"), std::nullopt);
+    EXPECT_EQ(atp::try_parse_version("v1"), std::nullopt);
+}
+
 TEST(Version, SemverOrdering) {
     EXPECT_LT(atp::version(1, 2, 3), atp::version(1, 2, 4));
     EXPECT_LT(atp::version(1, 2, 3), atp::version(1, 10, 0));

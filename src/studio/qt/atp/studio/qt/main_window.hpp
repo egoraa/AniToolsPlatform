@@ -17,6 +17,8 @@
 #include <QVBoxLayout>
 
 #include <atp/studio/qt/app_state.hpp>
+#include <atp/studio/qt/manager_widget.hpp>
+#include <atp/studio/qt/palette_widget.hpp>
 
 namespace atp::studio::qt {
 
@@ -34,6 +36,17 @@ class main_window final : public QMainWindow {
 
         build_menus();
         build_errors_dock();
+
+        auto* manager_dock = new QDockWidget("Modules", this);
+        manager_ = new manager_widget(state_, callbacks_, manager_dock);
+        manager_dock->setWidget(manager_);
+        addDockWidget(Qt::LeftDockWidgetArea, manager_dock);
+
+        auto* palette_dock = new QDockWidget("Palette", this);
+        palette_ = new palette_widget(state_, callbacks_, palette_dock);
+        palette_dock->setWidget(palette_);
+        addDockWidget(Qt::LeftDockWidgetArea, palette_dock);
+
         setCentralWidget(new QLabel("canvas here", this));  // заменит задача 3
 
         // 10 Гц: опрос ошибок исполнения и статистики (наполняется задачей 5)
@@ -50,7 +63,9 @@ class main_window final : public QMainWindow {
         redo_action_->setEnabled(!locked && state_.doc.can_redo());
         save_action_->setEnabled(!locked);
         save_as_action_->setEnabled(!locked);
-        // задачи 2-5 дополняют: палитра, менеджер, канвас, инспектор, runtime
+        manager_->refresh();
+        palette_->refresh();
+        // задачи 3-5 дополняют: канвас, инспектор, runtime
     }
 
     void report(const QString& text) {
@@ -151,6 +166,8 @@ class main_window final : public QMainWindow {
 
     app_state& state_;
     ui_callbacks callbacks_;
+    manager_widget* manager_ = nullptr;
+    palette_widget* palette_ = nullptr;
     QListWidget* errors_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;

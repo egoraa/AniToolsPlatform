@@ -74,11 +74,6 @@ class input : public input_base {
         value_.reset();
     }
 
-    // Протокол доставки (см. input_base). Типизированный вход принимает
-    // ровно свой T; input<std::any> универсален — принимает всё и
-    // упаковывает значение через meta.box. Обе ветки решаются на этапе
-    // компиляции, полной специализации для std::any не требуется;
-    // queued_input наследует протокол как есть.
     [[nodiscard]] bool accepts(std::type_index produced) const override {
         if constexpr (std::same_as<T, std::any>) {
             return true;
@@ -87,7 +82,20 @@ class input : public input_base {
         }
     }
 
-    void deliver(const void* value, const erased_type& meta) override {
+   protected:
+    // Точка расширения: куда положить принятое значение. По умолчанию —
+    // «последнее значение побеждает». Вызывается под замком.
+    virtual void store(T&& value) {
+        value_.emplace(std::move(value));
+    }
+
+   private:
+    // Протокол доставки (см. input_base). Типизированный вход принимает
+    // ровно свой T; input<std::any> универсален — принимает всё и
+    // упаковывает значение через meta.box. Обе ветки решаются на этапе
+    // компиляции, полной специализации для std::any не требуется;
+    // queued_input наследует протокол как есть.
+    void do_deliver(const void* value, const erased_type& meta) override {
         if constexpr (std::same_as<T, std::any>) {
             // any→any — без двойной упаковки
             if (meta.type == typeid(std::any)) {
@@ -101,14 +109,6 @@ class input : public input_base {
         }
     }
 
-   protected:
-    // Точка расширения: куда положить принятое значение. По умолчанию —
-    // «последнее значение побеждает». Вызывается под замком.
-    virtual void store(T&& value) {
-        value_.emplace(std::move(value));
-    }
-
-   private:
     std::optional<T> value_;
 };
 

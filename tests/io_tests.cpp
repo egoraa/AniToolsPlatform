@@ -123,6 +123,54 @@ TEST(InputDeliverProtocol, QueuedAnyInputAccumulatesMixedTypes) {
     EXPECT_EQ(std::any_cast<std::string>(q.pop()), "two");
 }
 
+namespace {
+
+struct counting_notifier final : atp::io::notifier_base {
+    int count = 0;
+    void notify() noexcept override {
+        ++count;
+    }
+};
+
+}  // namespace
+
+TEST(InputNotifier, DeliveryNotifies) {
+    atp::io::output<int> out("out");
+    atp::io::input<int> in("in");
+    counting_notifier n;
+    in.set_notifier(&n);
+    out.connect(in);
+
+    out(7);
+    EXPECT_EQ(n.count, 1);
+    EXPECT_EQ(in.get(), 7);
+
+    in.set_notifier(nullptr);  // снятый уведомитель молчит
+    out(8);
+    EXPECT_EQ(n.count, 1);
+}
+
+TEST(InputNotifier, ReplayDeliveryNotifiesLateSubscriber) {
+    atp::io::output<int> out("out");
+    out(5);
+
+    atp::io::input<int> in("in");
+    counting_notifier n;
+    in.set_notifier(&n);
+    out.connect(in, atp::io::replay);  // доставка кэша — тоже доставка
+
+    EXPECT_EQ(n.count, 1);
+    EXPECT_EQ(in.get(), 5);
+}
+
+TEST(InputNotifier, DirectWriteDoesNotNotify) {
+    atp::io::input<int> in("in");
+    counting_notifier n;
+    in.set_notifier(&n);
+    in(3);  // прямая запись — не доставка от выхода, сигналить нечего
+    EXPECT_EQ(n.count, 0);
+}
+
 TEST(UnsafeInput, BehavesLikeInput) {
     atp::io::input<int> in{"in_int", atp::io::unsafe};
     in(7);

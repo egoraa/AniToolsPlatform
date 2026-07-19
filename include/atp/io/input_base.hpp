@@ -9,6 +9,19 @@
 
 namespace atp::io {
 
+// Приёмник уведомления «входу что-то доставили». Вешается исполнителем на
+// вход (set_notifier), чтобы будить спящий поток-потребитель, не нарушая
+// pull-only чтения: это не колбэк с данными, а голый сигнал. notify()
+// зовётся на потоке пишущего после приёма — обязан быть быстрым, не бросать
+// и не исполнять пользовательский код.
+class notifier_base {
+   public:
+    virtual void notify() noexcept = 0;
+
+   protected:
+    ~notifier_base() = default;  // владение всегда снаружи — у исполнителя
+};
+
 // Type-erased база входа: именно её указатели хранит реестр inputs, её же
 // принимает output_base::connect и хранит output<T> в списке рассылки.
 // Определяет протокол доставки: вход сам отвечает, значения каких типов он
@@ -41,8 +54,30 @@ class input_base : public io_base {
 
     // Доставка значения: value указывает на объект типа meta.type.
     // Корректность пары (value, meta) — протокольная гарантия выхода,
-    // подкреплённая проверкой accepts при подключении.
-    virtual void deliver(const void* value, const erased_type& meta) = 0;
+    // подкреплённая проверкой accepts при подключении. NVI: приём — у
+    // наследника (do_deliver), уведомление — здесь, одно на любую доставку.
+    void deliver(const void* value, const erased_type& meta) {
+        do_deliver(value, meta);
+        if (notifier_ != nullptr) {
+            notifier_->notify();
+        }
+    }
+
+    // Установка/снятие — фаза настройки исполнителя: строго до запуска
+    // потоков и после их join; конкурентно с доставкой — гонка. Прямая
+    // запись в вход (operator()) уведомителя не трогает: сигнал — про
+    // доставку от выходов.
+    void set_notifier(notifier_base* notifier) noexcept {
+        notifier_ = notifier;
+    }
+    [[nodiscard]] notifier_base* notifier() const noexcept {
+        return notifier_;
+    }
+
+   private:
+    virtual void do_deliver(const void* value, const erased_type& meta) = 0;
+
+    notifier_base* notifier_ = nullptr;
 };
 
 }  // namespace atp::io

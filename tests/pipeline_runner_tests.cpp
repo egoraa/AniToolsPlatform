@@ -267,6 +267,78 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
     EXPECT_LT(idle_passes, 1000);
 }
 
+TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
+    atp::pipeline pipe;
+
+    struct feed_outputs : atp::io::outputs {
+        atp::io::output<int>& value = make<atp::io::output<int>>("value");
+    };
+    struct drain_inputs : atp::io::inputs {
+        atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
+    };
+    // Источник спинится и стреляет по отмашке — его собственная латентность
+    // из замера исключена, меряется только пробуждение потребителя.
+    class gated_source : public atp::module<atp::io::inputs, feed_outputs> {
+       public:
+        std::atomic<bool> go{false};
+        atp::work_status iterate(std::stop_token) override {
+            if (!go.exchange(false)) {
+                return atp::work_status::idle;
+            }
+            outputs().value(1);
+            return atp::work_status::busy;
+        }
+    };
+    class counting_sink : public atp::module<drain_inputs, atp::io::outputs> {
+       public:
+        std::atomic<int> received{0};
+        atp::work_status iterate(std::stop_token) override {
+            if (inputs().value.try_pop()) {
+                received.fetch_add(1);
+                received.notify_all();
+                return atp::work_status::busy;
+            }
+            return atp::work_status::idle;
+        }
+    };
+
+    atp::group& left = pipe.root().add_group("left");
+    gated_source& src = left.make<gated_source>("src");
+    left.expose_output("out", "src.value");
+    atp::group& right = pipe.root().add_group("right");
+    counting_sink& sink = right.make<counting_sink>("sink");
+    right.expose_input("in", "sink.value");
+    pipe.root().connect("left.out", "right.in");
+
+    atp::pipeline_runner runner;
+    runner.add_thread("producing", {atp::thread_mode::spinning});
+    runner.add_thread("consuming");  // on_demand — его и будим
+    runner.assign(left, "producing");
+    runner.assign(right, "consuming");
+    runner.start(pipe);
+
+    // Раунд: дать потребителю уйти в глубокий backoff (потолок 10 мс), затем
+    // доставить и померить, когда заметил. Без пробуждения средний раунд —
+    // ~5-10 мс, сумма ~100-200 мс; с пробуждением — единицы мс на все раунды.
+    // Порог посередине: границы щедрые — ловим порядок величины, не шум.
+    constexpr int rounds = 20;
+    std::chrono::steady_clock::duration total{};
+    for (int i = 0; i < rounds; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        const auto sent = std::chrono::steady_clock::now();
+        src.go = true;
+        int seen = sink.received.load();
+        while (seen < i + 1) {
+            sink.received.wait(seen);
+            seen = sink.received.load();
+        }
+        total += std::chrono::steady_clock::now() - sent;
+    }
+    runner.stop();
+
+    EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(total).count(), 60);
+}
+
 TEST(PipelineRunner, ThrottledPacesIterations) {
     atp::pipeline pipe;
     class counting_module : public atp::module<atp::io::inputs, atp::io::outputs> {

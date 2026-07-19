@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -119,10 +120,15 @@ class pipeline_runner {
                 }
                 throw;
             }
+            // Уведомители — только на готовый к запуску пайплайн: кэш-replay
+            // фазы сборки их не видел, а первый пасс каждого потока и так
+            // случается сразу после запуска.
+            install_notifiers();
         } catch (...) {
             // Единый откат для любого сбоя: висячий pipeline_ и полузаполненные
             // карты не переживают неудачный start — инвариант «не running —
             // состояние чистое». undo_detach на пустом списке — no-op.
+            uninstall_notifiers();
             undo_detach();
             reset_state();
             throw;
@@ -273,6 +279,56 @@ class pipeline_runner {
         detached_.clear();
     }
 
+    // Сигнал потока: на его cv поток спит в run_loop, notify() приходит от
+    // доставки в его входы. signaled — под mutex: исключает потерянное
+    // пробуждение в зазоре между пассом и засыпанием.
+    struct thread_signal final : io::notifier_base {
+        std::mutex mutex;
+        std::condition_variable_any cv;
+        bool signaled = false;
+
+        void notify() noexcept override {
+            {
+                std::lock_guard lock(mutex);
+                signaled = true;
+            }
+            cv.notify_one();
+        }
+    };
+
+    // Будить есть смысл только on_demand-поток и только доставкой из чужого
+    // потока: свой при доставке и так не спит, throttled держит темп, spinning
+    // не спит вовсе. Повторная установка того же сигнала (вход с несколькими
+    // межпоточными источниками) безвредна.
+    void install_notifiers() {
+        signals_.clear();
+        signals_.reserve(threads_config_.size());
+        for (std::size_t i = 0; i < threads_config_.size(); ++i) {
+            signals_.push_back(std::make_unique<thread_signal>());
+        }
+        for (const group_node& n : groups_) {
+            for (const group::connection& c : n.node->connections()) {
+                const std::size_t in_thread = port_thread_.at(c.in);
+                if (port_thread_.at(c.out) == in_thread) {
+                    continue;
+                }
+                if (threads_config_[in_thread].options.mode != thread_mode::on_demand) {
+                    continue;
+                }
+                c.in->set_notifier(signals_[in_thread].get());
+                notified_inputs_.push_back(c.in);
+            }
+        }
+    }
+
+    void uninstall_notifiers() {
+        for (io::input_base* in : notified_inputs_) {
+            in->set_notifier(nullptr);
+        }
+        notified_inputs_.clear();
+        signals_.clear();
+    }
+
     void launch_threads() {
         stop_source_ = {};  // свежий источник: раннер мог уже отработать цикл
         std::vector<std::vector<group*>> per_thread(threads_config_.size());
@@ -288,9 +344,9 @@ class pipeline_runner {
                 continue;  // пустому потоку нечего делать — не создаём
             }
             const thread_config& config = threads_config_[i];
-            threads_.emplace_back([this, config, units = std::move(per_thread[i])] {
+            threads_.emplace_back([this, config, signal = signals_[i].get(), units = std::move(per_thread[i])] {
                 detail::set_current_thread_name(config.name);
-                run_loop(units, config.options);
+                run_loop(units, config.options, *signal);
             });
         }
     }
@@ -305,12 +361,10 @@ class pipeline_runner {
         return pass;
     }
 
-    void run_loop(const std::vector<group*>& units, const thread_options& options) {
+    void run_loop(const std::vector<group*>& units, const thread_options& options, thread_signal& signal) {
         std::stop_token token = stop_source_.get_token();
-        // Сон прерываем стоп-токеном: request_stop (ошибка или stop()) будит
-        // мгновенно, спящий поток не оттягивает остановку.
-        std::mutex sleep_mutex;
-        std::condition_variable_any sleep_cv;
+        // Сон прерываем стоп-токеном (request_stop будит мгновенно) и
+        // уведомлением о доставке (см. thread_signal).
         std::chrono::milliseconds delay{};  // on_demand: 0 — ещё не спим, только yield
         try {
             while (!token.stop_requested()) {
@@ -320,10 +374,11 @@ class pipeline_runner {
                         std::this_thread::yield();
                         break;
                     case thread_mode::throttled: {
-                        // скольжение: пропущенные тики не навёрстываем — темп ровный
+                        // скольжение: пропущенные тики не навёрстываем — темп ровный;
+                        // доставка throttled-поток не будит (уведомители не ставятся)
                         const auto next = std::chrono::steady_clock::now() + options.period;
-                        std::unique_lock lock(sleep_mutex);
-                        sleep_cv.wait_until(lock, token, next, [] { return false; });
+                        std::unique_lock lock(signal.mutex);
+                        signal.cv.wait_until(lock, token, next, [] { return false; });
                         break;
                     }
                     case thread_mode::on_demand:
@@ -337,8 +392,14 @@ class pipeline_runner {
                             break;
                         }
                         {
-                            std::unique_lock lock(sleep_mutex);
-                            sleep_cv.wait_for(lock, token, delay, [] { return false; });
+                            std::unique_lock lock(signal.mutex);
+                            const bool woken =
+                                signal.cv.wait_for(lock, token, delay, [&] { return signal.signaled; });
+                            signal.signaled = false;
+                            if (woken) {
+                                delay = {};  // данные пришли — следующий пасс по горячему пути
+                                break;
+                            }
                         }
                         delay = std::min(delay * 2, idle_sleep_cap);
                         break;
@@ -379,6 +440,9 @@ class pipeline_runner {
             }
         }
         threads_.clear();
+        // Потоки соединены, доставок больше нет; писать выходы из stop()
+        // можно — будить уже некого.
+        uninstall_notifiers();
         try {
             pipeline_->root().stop();
         } catch (...) {
@@ -403,6 +467,8 @@ class pipeline_runner {
     std::unordered_map<const io::io_base*, std::size_t> port_thread_;
     std::vector<std::pair<group*, group*>> detached_;  // (родитель, подгруппа) — для отката
     std::vector<std::jthread> threads_;
+    std::vector<std::unique_ptr<thread_signal>> signals_;  // по индексу потока; адреса стабильны
+    std::vector<io::input_base*> notified_inputs_;         // для снятия при остановке
     std::stop_source stop_source_;
     pipeline* pipeline_ = nullptr;
     bool running_ = false;

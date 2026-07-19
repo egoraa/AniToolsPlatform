@@ -1,0 +1,24 @@
+{
+    "version": "1.0",
+    "plugins": ["libatp_demo_plugin.dll"],
+    "pipeline": {
+        "children": [
+            {
+                "group": "producers",
+                "children": [
+                    { "module": "counter", "name": "ticks", "version": "1.0" }
+                ],
+                "expose": { "outputs": { "numbers": "ticks.count" } }
+            },
+            { "$include": "demo_consumers.json" }
+        ],
+        "connections": [
+            { "from": "producers.numbers", "to": "consumers.numbers" }
+        ]
+    },
+    "threads": [
+        { "name": "producing", "mode": "throttled", "period_ms": 500 },
+        { "name": "consuming", "mode": "on_demand" }
+    ],
+    "assign": { "producers": "producing", "consumers": "consuming" }
+}

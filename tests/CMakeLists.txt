@@ -15,10 +15,38 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
+add_subdirectory(test_plugin)
+
 add_executable(atp_tests
+        app_config_loader_tests.cpp
+        app_config_model_tests.cpp
+        app_config_validator_tests.cpp
+        app_pipeline_builder_tests.cpp
+        group_tests.cpp
         io_tests.cpp
-        module_tests.cpp)
-target_link_libraries(atp_tests PRIVATE atp_platform GTest::gtest_main)
+        module_tests.cpp
+        module_factory_tests.cpp
+        module_loader_tests.cpp
+        module_registry_tests.cpp
+        pipeline_runner_tests.cpp
+        pipeline_tests.cpp
+        service_directory_tests.cpp
+        studio_document_tests.cpp
+        studio_layout_tests.cpp
+        studio_module_manager_tests.cpp
+        studio_session_tests.cpp
+        studio_settings_tests.cpp
+        version_tests.cpp)
+# CMAKE_DL_LIBS: на Linux dlopen может требовать -ldl, на Windows пусто.
+target_link_libraries(atp_tests PRIVATE atp_host atp_app_lib atp_studio_lib GTest::gtest_main ${CMAKE_DL_LIBS})
+
+# Пути к тестовым плагинам — компилятору тестов; $<PATH:CMAKE_PATH,...>
+# нормализует разделители (обратные слэши Windows сломали бы строковый литерал).
+add_dependencies(atp_tests test_plugin test_plugin_bad_abi test_plugin_empty)
+target_compile_definitions(atp_tests PRIVATE
+        ATP_TEST_PLUGIN="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin>>"
+        ATP_TEST_PLUGIN_BAD_ABI="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_bad_abi>>"
+        ATP_TEST_PLUGIN_EMPTY="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_empty>>")
 
 include(GoogleTest)
 gtest_discover_tests(atp_tests)

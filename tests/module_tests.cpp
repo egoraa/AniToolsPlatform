@@ -1,53 +1,128 @@
+#include <stop_token>
 #include <string>
-#include <tuple>
+#include <string_view>
+#include <typeindex>
 #include <typeinfo>
 
 #include <gtest/gtest.h>
 
-#include "platform/module.hpp"
+#include <atp/module.hpp>
 
 namespace {
 
-    struct test_inputs : atp::io::inputs {
-        atp::io::inputs::input<int> input1{*this, "input1"};
-        atp::io::inputs::input<std::string> input2{*this, "input2"};
-    };
+struct test_inputs : atp::io::inputs {
+    atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
+    atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
+};
 
-    class TestModule : public atp::Module<test_inputs, atp::io::outputs> {
-    public:
-        void initialize() override { initialized = true; }
-        bool initialized = false;
-    };
+class test_module : public atp::module<test_inputs, atp::io::outputs> {
+   public:
+    void initialize(atp::module_context&) override {
+        initialized = true;
+    }
+    bool initialized = false;
+};
 
-} // namespace
+class versioned_module : public atp::module<test_inputs, atp::io::outputs, "", atp::version{1, 2, 3}> {};
+
+// имя третьим NTTP-параметром; версия не указана — default_version
+class named_module : public atp::module<test_inputs, atp::io::outputs, "named"> {};
+
+// имя и версия вместе
+class full_module : public atp::module<test_inputs, atp::io::outputs, "full", atp::version{1, 2, 3}> {};
+
+}  // namespace
+
+// Compile-time доступ к версии — прямо из типа модуля.
+static_assert(versioned_module::module_version == atp::version{1, 2, 3});
+static_assert(test_module::module_version == atp::default_version);
+
+// Compile-time доступ к имени — прямо из типа модуля.
+static_assert(test_module::module_name.empty());
+static_assert(named_module::module_name == "named");
+static_assert(full_module::module_name == "full");
+static_assert(named_module::module_version == atp::default_version);
+static_assert(full_module::module_version == atp::version{1, 2, 3});
 
 TEST(Module, InitializeOverrideRuns) {
-    TestModule module;
-    module.initialize();
+    atp::service_directory services;
+    atp::module_context context{services};
+    test_module module;
+    module.initialize(context);
     EXPECT_TRUE(module.initialized);
 }
 
 TEST(Module, InputsReturnsReference) {
-    TestModule module;
+    test_module module;
     module.inputs().input1(42);
     std::string world = "World";
     module.inputs().input2(world);
     // записи не пропадают во временной копии — inputs() отдаёт ссылку на член
-    EXPECT_EQ(std::get<0>(module.inputs().input1.get()), 42);
-    EXPECT_EQ(std::get<0>(module.inputs().input2.get()), "World");
+    EXPECT_EQ(module.inputs().input1.get(), 42);
+    EXPECT_EQ(module.inputs().input2.get(), "World");
 }
 
 TEST(Module, NamedAccessThroughModule) {
-    TestModule module;
-    EXPECT_EQ(module.inputs().get_input_info("input1").type_hash,
-              typeid(std::tuple<int>).hash_code());
-    module.inputs().get_input<int>("input1")(7);
-    EXPECT_EQ(std::get<0>(module.inputs().input1.get()), 7);
+    test_module module;
+    EXPECT_EQ(module.inputs().at("input1").type(), std::type_index(typeid(int)));
+    module.inputs().get<atp::io::input<int>>("input1")(7);
+    EXPECT_EQ(module.inputs().input1.get(), 7);
 }
 
 TEST(Module, ConstAccess) {
-    TestModule module;
+    test_module module;
     module.inputs().input1(1);
-    const TestModule& cmodule = module;
-    EXPECT_TRUE(cmodule.inputs().input1.has_value());
+    const test_module& cmodule = module;
+    EXPECT_FALSE(cmodule.inputs().input1.empty());
+}
+
+TEST(Module, DefaultVersionThroughBase) {
+    test_module module;
+    atp::module_base& base = module;
+    // Модуль, не объявивший версию, отвечает 0.0.1
+    EXPECT_EQ(base.get_version(), atp::default_version);
+    EXPECT_EQ(base.get_version(), atp::version(0, 0, 1));
+}
+
+TEST(Module, DeclaredVersionThroughBase) {
+    versioned_module module;
+    atp::module_base& base = module;
+    EXPECT_EQ(base.get_version(), atp::version(1, 2, 3));
+    // Сравнение с версией другой длины: 1.2 == 1.2.0 < 1.2.3
+    EXPECT_GT(base.get_version(), atp::version(1, 2));
+}
+
+TEST(Module, DefaultNameThroughBaseIsEmpty) {
+    test_module module;
+    atp::module_base& base = module;
+    // Модуль, не объявивший имени, — «аноним»: пустой string_view
+    EXPECT_EQ(base.get_name(), std::string_view{});
+}
+
+TEST(Module, DeclaredNameThroughBase) {
+    named_module module;
+    atp::module_base& base = module;
+    EXPECT_EQ(base.get_name(), "named");
+}
+
+namespace {
+struct erased_probe_inputs : atp::io::inputs {
+    atp::io::input<int>& number = make<atp::io::input<int>>("number");
+};
+class erased_probe : public atp::module<erased_probe_inputs, atp::io::outputs> {};
+}  // namespace
+
+TEST(Module, IoRegistriesReachableThroughBase) {
+    erased_probe m;
+    atp::module_base& base = m;
+    // Реестры через type-erased базу — те же объекты, что у конкретного типа.
+    EXPECT_EQ(&base.inputs(), static_cast<atp::io::inputs*>(&m.inputs()));
+    EXPECT_NE(base.inputs().find("number"), nullptr);
+    EXPECT_EQ(base.outputs().list().size(), 0u);
+}
+
+TEST(Module, DefaultIterateReportsIdle) {
+    erased_probe m;
+    // Умолчание module<>: no-op-итерация и есть простой.
+    EXPECT_EQ(m.iterate(std::stop_token{}), atp::work_status::idle);
 }

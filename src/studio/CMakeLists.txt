@@ -19,6 +19,18 @@ if (Qt6_FOUND)
     file(GLOB_RECURSE ATP_STUDIO_QT_HEADERS CONFIGURE_DEPENDS
             ${CMAKE_CURRENT_SOURCE_DIR}/qt/atp/studio/qt/*.hpp)
     target_sources(atp_studio_qt PRIVATE ${ATP_STUDIO_QT_HEADERS})
+
+    # windeployqt кладёт Qt-DLL рядом с бинарём: запуск из проводника/IDE
+    # работает без ручного PATH на каталог Qt.
+    if (WIN32)
+        find_program(ATP_WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin")
+        if (ATP_WINDEPLOYQT)
+            add_custom_command(TARGET atp_studio_qt POST_BUILD
+                    COMMAND "${ATP_WINDEPLOYQT}" --no-translations --no-compiler-runtime
+                            "$<TARGET_FILE:atp_studio_qt>"
+                    COMMENT "windeployqt: Qt runtime next to atp_studio_qt")
+        endif ()
+    endif ()
 else ()
     message(STATUS "Qt6 not found — atp_studio_qt is skipped")
 endif ()

@@ -340,6 +340,55 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
     EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(total).count(), 60);
 }
 
+TEST(PipelineRunner, StatsCountPassesPerThread) {
+    atp::pipeline pipe;
+    std::latch ticked(2);
+
+    // Первый пасс каждого потока гарантируется латчем: без него праздный
+    // поток мог бы не успеть до stop() и его passes были бы нулевыми.
+    class counting_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+       public:
+        std::latch* first = nullptr;
+        atp::work_status status = atp::work_status::idle;
+        atp::work_status iterate(std::stop_token) override {
+            if (first != nullptr) {
+                first->count_down();
+                first = nullptr;
+            }
+            return status;
+        }
+    };
+
+    atp::group& left = pipe.root().add_group("left");
+    counting_module& busy = left.make<counting_module>("busy");
+    busy.status = atp::work_status::busy;
+    busy.first = &ticked;
+    atp::group& right = pipe.root().add_group("right");
+    counting_module& idle = right.make<counting_module>("idle");
+    idle.first = &ticked;
+
+    atp::pipeline_runner runner;
+    EXPECT_TRUE(runner.stats().empty());  // до первого запуска счётчиков нет
+
+    runner.add_thread("working");
+    runner.add_thread("idling");
+    runner.assign(left, "working");
+    runner.assign(right, "idling");
+    runner.start(pipe);
+    ticked.wait();
+    runner.stop();
+
+    const auto stats = runner.stats();
+    ASSERT_EQ(stats.size(), 2u);
+    EXPECT_EQ(stats[0].name, "working");
+    EXPECT_EQ(stats[1].name, "idling");
+    EXPECT_GE(stats[0].passes, 1u);
+    EXPECT_GE(stats[0].busy_passes, 1u);
+    EXPECT_LE(stats[0].busy_passes, stats[0].passes);
+    EXPECT_GE(stats[1].passes, 1u);
+    EXPECT_EQ(stats[1].busy_passes, 0u);  // праздный поток busy не репортит
+}
+
 TEST(PipelineRunner, ThrottledPacesIterations) {
     atp::pipeline pipe;
     class counting_module : public atp::module<atp::io::inputs, atp::io::outputs> {

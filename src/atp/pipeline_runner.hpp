@@ -2,9 +2,11 @@
 #define ANITOOLSPLATFORM_PIPELINE_RUNNER_HPP
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <mutex>
@@ -176,6 +178,26 @@ class pipeline_runner {
         return running_;
     }
 
+    // Диагностика темпа: снимок счётчиков пассов по потокам (порядок
+    // объявления). Пусто до первого start(); после stop() доступен до
+    // следующего start(). Чтение допустимо во время работы: счётчики
+    // атомарные, relaxed — мониторингу точность кадра не нужна.
+    struct thread_stats {
+        std::string name;
+        std::uint64_t passes = 0;
+        std::uint64_t busy_passes = 0;
+    };
+
+    [[nodiscard]] std::vector<thread_stats> stats() const {
+        std::vector<thread_stats> out;
+        out.reserve(counters_.size());
+        for (std::size_t i = 0; i < counters_.size(); ++i) {
+            out.push_back({threads_config_[i].name, counters_[i]->passes.load(std::memory_order_relaxed),
+                           counters_[i]->busy.load(std::memory_order_relaxed)});
+        }
+        return out;
+    }
+
    private:
     struct thread_config {
         std::string name;
@@ -329,8 +351,18 @@ class pipeline_runner {
         signals_.clear();
     }
 
+    // Счётчики пассов потока; unique_ptr — стабильные адреса для циклов.
+    struct pass_counters {
+        std::atomic<std::uint64_t> passes{0};
+        std::atomic<std::uint64_t> busy{0};
+    };
+
     void launch_threads() {
         stop_source_ = {};  // свежий источник: раннер мог уже отработать цикл
+        counters_.clear();
+        for (std::size_t i = 0; i < threads_config_.size(); ++i) {
+            counters_.push_back(std::make_unique<pass_counters>());
+        }
         std::vector<std::vector<group*>> per_thread(threads_config_.size());
         // Единицы исполнения: корень (умолчание — первый объявленный поток) +
         // явно назначенные группы, в DFS-порядке снимка.
@@ -344,9 +376,10 @@ class pipeline_runner {
                 continue;  // пустому потоку нечего делать — не создаём
             }
             const thread_config& config = threads_config_[i];
-            threads_.emplace_back([this, config, signal = signals_[i].get(), units = std::move(per_thread[i])] {
+            threads_.emplace_back([this, config, signal = signals_[i].get(), counter = counters_[i].get(),
+                                   units = std::move(per_thread[i])] {
                 detail::set_current_thread_name(config.name);
-                run_loop(units, config.options, *signal);
+                run_loop(units, config.options, *signal, *counter);
             });
         }
     }
@@ -361,7 +394,10 @@ class pipeline_runner {
         return pass;
     }
 
-    void run_loop(const std::vector<group*>& units, const thread_options& options, thread_signal& signal) {
+    void run_loop(const std::vector<group*>& units,
+                  const thread_options& options,
+                  thread_signal& signal,
+                  pass_counters& counter) {
         std::stop_token token = stop_source_.get_token();
         // Сон прерываем стоп-токеном (request_stop будит мгновенно) и
         // уведомлением о доставке (см. thread_signal).
@@ -369,6 +405,10 @@ class pipeline_runner {
         try {
             while (!token.stop_requested()) {
                 const work_status pass = iterate_units(units, token);
+                counter.passes.fetch_add(1, std::memory_order_relaxed);
+                if (pass == work_status::busy) {
+                    counter.busy.fetch_add(1, std::memory_order_relaxed);
+                }
                 switch (options.mode) {
                     case thread_mode::spinning:
                         std::this_thread::yield();
@@ -466,8 +506,9 @@ class pipeline_runner {
     std::unordered_map<const io::io_base*, std::size_t> port_thread_;
     std::vector<std::pair<group*, group*>> detached_;  // (родитель, подгруппа) — для отката
     std::vector<std::jthread> threads_;
-    std::vector<std::unique_ptr<thread_signal>> signals_;  // по индексу потока; адреса стабильны
-    std::vector<io::input_base*> notified_inputs_;         // для снятия при остановке
+    std::vector<std::unique_ptr<thread_signal>> signals_;   // по индексу потока; адреса стабильны
+    std::vector<io::input_base*> notified_inputs_;          // для снятия при остановке
+    std::vector<std::unique_ptr<pass_counters>> counters_;  // по индексу потока; живут до следующего start()
     std::stop_source stop_source_;
     pipeline* pipeline_ = nullptr;
     bool running_ = false;

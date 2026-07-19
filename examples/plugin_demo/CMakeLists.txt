@@ -2,9 +2,13 @@
 # в монолитный хост и собран плагином для динамического хоста.
 add_library(atp_demo_plugin SHARED plugin.cpp)
 target_link_libraries(atp_demo_plugin PRIVATE atp_platform)
+# PREFIX ""/OUTPUT_NAME: имя файла не зависит от тулчейна — конфиги
+# ссылаются на одно имя под MinGW, MSVC и Linux.
 set_target_properties(atp_demo_plugin PROPERTIES
         CXX_VISIBILITY_PRESET hidden
-        VISIBILITY_INLINES_HIDDEN ON)
+        VISIBILITY_INLINES_HIDDEN ON
+        PREFIX ""
+        OUTPUT_NAME "atp_demo_plugin")
 
 add_executable(atp_host_static host_static.cpp)
 target_link_libraries(atp_host_static PRIVATE atp_platform)

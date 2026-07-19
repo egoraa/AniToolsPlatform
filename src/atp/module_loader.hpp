@@ -27,6 +27,21 @@ namespace atp {
 
 namespace detail {
 
+// Путь без расширения — кросс-платформенная запись конфига: платформенное
+// расширение достраивается здесь, в единственной точке открытия библиотек.
+// Явно, а не через причуду LoadLibrary (та дописывает ".dll" сама, но
+// ломается на точке в имени каталога, а dlopen не дописывает ничего).
+[[nodiscard]] inline std::filesystem::path with_plugin_extension(std::filesystem::path path) {
+    if (!path.has_extension()) {
+#if defined(_WIN32)
+        path += ".dll";
+#else
+        path += ".so";
+#endif
+    }
+    return path;
+}
+
 // Платформенные обёртки над dlopen/LoadLibrary. Хэндл — void*,
 // ветвление только здесь; текст системной ошибки уходит в исключение.
 #if defined(_WIN32)
@@ -100,7 +115,7 @@ class plugin_library {
 class module_loader {
    public:
     module_loader(const std::filesystem::path& library, module_registry& registry)
-        : path_(library), registry_(&registry) {
+        : path_(detail::with_plugin_extension(library)), registry_(&registry) {
         library_ = std::make_shared<detail::plugin_library>(path_);
         module_registrar registrar{registry, library_};
         try {

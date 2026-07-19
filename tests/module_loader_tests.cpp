@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <stop_token>
@@ -86,6 +87,14 @@ TEST(ModuleLoader, FactoriesRemovedOnUnloadEvenWithLiveModule) {
     }
     EXPECT_EQ(registry.find("plugin_module"), nullptr);  // фабрик уже нет
     EXPECT_NE(module, nullptr);                          // а модуль жив
+}
+
+TEST(ModuleLoader, LoadsPathWithoutExtensionAppendingPlatformOne) {
+    atp::module_registry registry;
+    std::filesystem::path bare(ATP_TEST_PLUGIN);
+    bare.replace_extension();  // "…/test_plugin" — кросс-платформенная запись конфига
+    atp::module_loader loader(bare, registry);
+    EXPECT_NE(registry.find("plugin_module"), nullptr);
 }
 
 TEST(ModuleLoader, MissingFileThrows) {

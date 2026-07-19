@@ -1,6 +1,6 @@
 {
     "version": "1.0",
-    "plugins": ["libatp_demo_plugin.dll"],
+    "plugins": ["atp_demo_plugin"],
     "pipeline": {
         "children": [
             {

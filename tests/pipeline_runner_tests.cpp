@@ -72,10 +72,11 @@ TEST(PipelineRunner, StartFailureStopsInitializedInReverse) {
 
 TEST(PipelineRunner, AssignmentsPlaceGroupsOnNamedThreads) {
     rig r;
-    std::latch ticked(3);
+    std::latch ticked(4);
     r.a->first_iterate = &ticked;   // root → первый объявленный поток
     r.b->first_iterate = &ticked;   // stage → "aux" (явно)
     r.c->first_iterate = &ticked;   // deep не назначен → inline у stage
+    r.d->first_iterate = &ticked;   // ждём всех: stop() между a и d срезал бы пасс корня
 
     atp::pipeline_runner runner;
     runner.add_thread("main");

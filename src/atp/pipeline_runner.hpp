@@ -99,11 +99,13 @@ class pipeline_runner {
         }
         pipeline_ = &p;
         try {
-            // Шаг 1: чистые проверки конфигурации — до каскадов.
-            build_thread_map(p.root());
-            map_ports(p.root());
-            validate_connections(p.root());
-            apply_detach(p.root());
+            // Шаг 1: снимок дерева и чистые проверки конфигурации — до каскадов.
+            groups_.clear();
+            collect_groups(p.root(), nullptr);
+            build_thread_map();
+            map_ports();
+            validate_connections();
+            apply_detach();
             // initialize при сбое откатывается сам (локальный fail-fast групп);
             // сбой start требует внешнего stop: прошедшие initialize без start —
             // контракт module_base.
@@ -183,10 +185,36 @@ class pipeline_runner {
         return std::nullopt;
     }
 
-    void build_thread_map(const group& root) {
+    // Снимок дерева групп на время start(): DFS pre-order, корень первым
+    // (parent == nullptr). Единственное место распознавания подгруппы
+    // (dynamic_cast); все фазы старта — плоские циклы по снимку.
+    struct group_node {
+        group* parent;
+        group* node;
+    };
+
+    void collect_groups(group& g, group* parent) {
+        groups_.push_back({parent, &g});
+        for (const group::child& c : g.children()) {
+            if (auto* sub = dynamic_cast<group*>(c.module.get())) {
+                collect_groups(*sub, &g);
+            }
+        }
+    }
+
+    void build_thread_map() {
         thread_of_.clear();
         std::size_t matched = 0;
-        map_group(root, 0, matched);
+        for (const group_node& n : groups_) {
+            // pre-order: родитель уже в карте — наследование потока тривиально
+            std::size_t index = n.parent != nullptr ? thread_of_.at(n.parent) : 0;
+            auto it = assigned_.find(n.node);
+            if (it != assigned_.end()) {
+                index = it->second;
+                ++matched;
+            }
+            thread_of_[n.node] = index;
+        }
         // Каждое назначение обязано найтись в дереве: молча проигнорированная
         // «чужая» группа — незамеченная ошибка конфигурации.
         if (matched != assigned_.size()) {
@@ -194,71 +222,46 @@ class pipeline_runner {
         }
     }
 
-    void map_group(const group& g, std::size_t inherited, std::size_t& matched) {
-        auto it = assigned_.find(&g);
-        std::size_t index = inherited;
-        if (it != assigned_.end()) {
-            index = it->second;
-            ++matched;
-        }
-        thread_of_[&g] = index;
-        for (const group::child& c : g.children()) {
-            if (auto* sub = dynamic_cast<group*>(c.module.get())) {
-                map_group(*sub, index, matched);
-            }
-        }
-    }
-
     // Карта «порт → поток»: владеемые порты каждого модуля получают поток
-    // его исполняющей группы; реестры групп содержат одни алиасы и
-    // выпадают сами.
-    void map_ports(const group& g) {
-        if (&g == &pipeline_->root()) {
-            port_thread_.clear();
-        }
-        const std::size_t index = thread_of_.at(&g);
-        for (const group::child& c : g.children()) {
-            if (auto* sub = dynamic_cast<group*>(c.module.get())) {
-                map_ports(*sub);
-                continue;
-            }
-            for (io::input_base* port : c.module->inputs().owned()) {
-                port_thread_[port] = index;
-            }
-            for (io::output_base* port : c.module->outputs().owned()) {
-                port_thread_[port] = index;
+    // его исполняющей группы. Ребёнку-подгруппе отдельная ветка не нужна:
+    // реестры групп держат одни алиасы, owned() у них пуст.
+    void map_ports() {
+        port_thread_.clear();
+        for (const group_node& n : groups_) {
+            const std::size_t index = thread_of_.at(n.node);
+            for (const group::child& c : n.node->children()) {
+                for (io::input_base* port : c.module->inputs().owned()) {
+                    port_thread_[port] = index;
+                }
+                for (io::output_base* port : c.module->outputs().owned()) {
+                    port_thread_[port] = index;
+                }
             }
         }
     }
 
     // Критерий — граница потоков, не групп: соседям по потоку safe не нужен.
-    void validate_connections(const group& g) const {
-        for (const group::connection& c : g.connections()) {
-            const std::size_t out_thread = port_thread_.at(c.out);
-            const std::size_t in_thread = port_thread_.at(c.in);
-            if (out_thread != in_thread && !c.in->thread_safe()) {
-                throw std::runtime_error("cross-thread connection into unsafe input '" + c.in->name() +
-                                         "' between threads '" + threads_config_[out_thread].name + "' and '" +
-                                         threads_config_[in_thread].name + "'");
-            }
-        }
-        for (const group::child& c : g.children()) {
-            if (const auto* sub = dynamic_cast<const group*>(c.module.get())) {
-                validate_connections(*sub);
+    void validate_connections() const {
+        for (const group_node& n : groups_) {
+            for (const group::connection& c : n.node->connections()) {
+                const std::size_t out_thread = port_thread_.at(c.out);
+                const std::size_t in_thread = port_thread_.at(c.in);
+                if (out_thread != in_thread && !c.in->thread_safe()) {
+                    throw std::runtime_error("cross-thread connection into unsafe input '" + c.in->name() +
+                                             "' between threads '" + threads_config_[out_thread].name + "' and '" +
+                                             threads_config_[in_thread].name + "'");
+                }
             }
         }
     }
 
     // Назначенные подгруппы исполняются своими потоками — из iterate
     // родителей они исключаются на время работы.
-    void apply_detach(group& g) {
-        for (const group::child& c : g.children()) {
-            if (auto* sub = dynamic_cast<group*>(c.module.get())) {
-                if (assigned_.contains(sub)) {
-                    g.set_detached(*sub, true);
-                    detached_.push_back({&g, sub});
-                }
-                apply_detach(*sub);
+    void apply_detach() {
+        for (const group_node& n : groups_) {
+            if (n.parent != nullptr && assigned_.contains(n.node)) {
+                n.parent->set_detached(*n.node, true);
+                detached_.push_back({n.parent, n.node});
             }
         }
     }
@@ -270,24 +273,16 @@ class pipeline_runner {
         detached_.clear();
     }
 
-    // Единицы исполнения потока: корень (его умолчание — первый объявленный
-    // поток) + явно назначенные группы этого потока, в DFS-порядке.
-    // Неконстантные указатели: циклы потоков зовут iterate — модули мутируют.
-    void collect_units(group& g, std::vector<std::vector<group*>>& per_thread) {
-        if (&g == &pipeline_->root() || assigned_.contains(&g)) {
-            per_thread[thread_of_.at(&g)].push_back(&g);
-        }
-        for (const group::child& c : g.children()) {
-            if (auto* sub = dynamic_cast<group*>(c.module.get())) {
-                collect_units(*sub, per_thread);
-            }
-        }
-    }
-
     void launch_threads() {
         stop_source_ = {};  // свежий источник: раннер мог уже отработать цикл
         std::vector<std::vector<group*>> per_thread(threads_config_.size());
-        collect_units(pipeline_->root(), per_thread);
+        // Единицы исполнения: корень (умолчание — первый объявленный поток) +
+        // явно назначенные группы, в DFS-порядке снимка.
+        for (const group_node& n : groups_) {
+            if (n.parent == nullptr || assigned_.contains(n.node)) {
+                per_thread[thread_of_.at(n.node)].push_back(n.node);
+            }
+        }
         for (std::size_t i = 0; i < threads_config_.size(); ++i) {
             if (per_thread[i].empty()) {
                 continue;  // пустому потоку нечего делать — не создаём
@@ -394,6 +389,7 @@ class pipeline_runner {
     }
 
     void reset_state() {
+        groups_.clear();
         thread_of_.clear();
         port_thread_.clear();
         pipeline_ = nullptr;
@@ -403,6 +399,7 @@ class pipeline_runner {
     std::vector<thread_config> threads_config_;
     std::unordered_map<const group*, std::size_t> assigned_;
     std::unordered_map<const group*, std::size_t> thread_of_;
+    std::vector<group_node> groups_;
     std::unordered_map<const io::io_base*, std::size_t> port_thread_;
     std::vector<std::pair<group*, group*>> detached_;  // (родитель, подгруппа) — для отката
     std::vector<std::jthread> threads_;

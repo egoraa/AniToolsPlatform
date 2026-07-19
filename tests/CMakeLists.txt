@@ -18,6 +18,7 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(test_plugin)
 
 add_executable(atp_tests
+        app_config_loader_tests.cpp
         group_tests.cpp
         io_tests.cpp
         module_tests.cpp

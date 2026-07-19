@@ -26,6 +26,7 @@ file(GLOB_RECURSE ATP_HOST_HEADERS CONFIGURE_DEPENDS
 add_subdirectory(examples/demo)
 add_subdirectory(examples/plugin_demo)
 add_subdirectory(src/app)
+add_subdirectory(src/studio)
 
 enable_testing()
 add_subdirectory(tests)

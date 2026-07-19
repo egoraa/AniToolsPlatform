@@ -6,3 +6,19 @@ target_link_libraries(atp_studio_lib INTERFACE atp_app_lib)
 
 file(GLOB_RECURSE ATP_STUDIO_HEADERS CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/atp/studio/*.hpp)
+
+# --- GUI на Qt: собирается только при найденном Qt6 — конфигурация без
+# Qt (например, Linux до установки qt6-base-dev) остаётся рабочей.
+find_package(Qt6 COMPONENTS Widgets)
+if (Qt6_FOUND)
+    qt_standard_project_setup()
+    qt_add_executable(atp_studio_qt qt/main.cpp)
+    target_include_directories(atp_studio_qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/qt)
+    target_link_libraries(atp_studio_qt PRIVATE atp_studio_lib Qt6::Widgets ${CMAKE_DL_LIBS})
+    # заголовки — в целях видимости IDE, как GLOB'ы остального проекта
+    file(GLOB_RECURSE ATP_STUDIO_QT_HEADERS CONFIGURE_DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/qt/atp/studio/qt/*.hpp)
+    target_sources(atp_studio_qt PRIVATE ${ATP_STUDIO_QT_HEADERS})
+else ()
+    message(STATUS "Qt6 not found — atp_studio_qt is skipped")
+endif ()

@@ -160,7 +160,7 @@ TEST(ModuleFactory, ParameterlessModuleRejectsNonEmptyConfig) {
     registry.add<named_plain_module>();
 
     EXPECT_EQ(static_cast<params_module&>(*registry.create("configured", R"("x")")).raw(), R"("x")");
-    EXPECT_NO_THROW((void)registry.create("plain"));            // пустой конфиг — норма
+    EXPECT_NO_THROW((void)registry.create("plain"));  // пустой конфиг — норма
     EXPECT_NO_THROW((void)registry.create("plain", ""));
     EXPECT_THROW((void)registry.create("plain", "{}"), std::runtime_error);  // параметры некому принять
 }

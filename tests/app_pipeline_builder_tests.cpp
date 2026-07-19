@@ -45,8 +45,8 @@ class recording_sink : public atp::module<drain_inputs, atp::io::outputs, "recor
         last_params = config_.raw;
     }
 
-    static inline std::latch* delivered = nullptr;      // тест ставит перед стартом
-    static inline std::string last_params;              // фабрика создаёт модуль внутри build
+    static inline std::latch* delivered = nullptr;  // тест ставит перед стартом
+    static inline std::string last_params;          // фабрика создаёт модуль внутри build
 
     atp::work_status iterate(std::stop_token) override {
         if (inputs().value.try_pop()) {

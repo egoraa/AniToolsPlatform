@@ -77,8 +77,8 @@ inline void build_group(group& g, const group_node& node, module_registry& regis
                 g.connect(c.from, c.to);
             }
         } catch (const std::exception& e) {
-            throw config_error("connection '" + c.from + "' -> '" + c.to + "' in group '" +
-                               std::string(g.get_name()) + "': " + e.what());
+            throw config_error("connection '" + c.from + "' -> '" + c.to + "' in group '" + std::string(g.get_name()) +
+                               "': " + e.what());
         }
     }
 }

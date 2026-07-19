@@ -766,7 +766,7 @@ TEST(OutputsRegistry, DynamicOutputCanBeRemoved) {
 }
 
 TEST(IoBase, ThreadSafeReflectsConstructionTag) {
-    atp::io::input<int> guarded("guarded");                       // safe — умолчание
+    atp::io::input<int> guarded("guarded");  // safe — умолчание
     atp::io::input<int> bare("bare", atp::io::unsafe);
     atp::io::output<int> guarded_out("out");
     EXPECT_TRUE(guarded.thread_safe());
@@ -778,7 +778,7 @@ TEST(IoRegistry, AliasSharesForeignPort) {
     atp::io::input<int> real{"real"};
     atp::io::inputs regs;
     regs.alias("mirror", real);
-    EXPECT_EQ(regs.find("mirror"), &real);           // тот же объект, не копия
+    EXPECT_EQ(regs.find("mirror"), &real);  // тот же объект, не копия
     real(7);
     EXPECT_EQ(regs.get<atp::io::input<int>>("mirror").get(), 7);
 }
@@ -798,7 +798,7 @@ TEST(IoRegistry, OwnedSkipsAliases) {
     auto owned = regs.owned();
     ASSERT_EQ(owned.size(), 1u);
     EXPECT_EQ(owned.front(), &own);
-    EXPECT_EQ(regs.list().size(), 2u);               // list видит оба вида записей
+    EXPECT_EQ(regs.list().size(), 2u);  // list видит оба вида записей
 }
 
 TEST(IoRegistry, DestructionLeavesAliasedPortAlive) {
@@ -806,7 +806,7 @@ TEST(IoRegistry, DestructionLeavesAliasedPortAlive) {
     {
         atp::io::inputs regs;
         regs.alias("mirror", foreign);
-    }                                                // реестр умер — алиас не владел
+    }  // реестр умер — алиас не владел
     foreign(5);
     EXPECT_EQ(foreign.get(), 5);
 }

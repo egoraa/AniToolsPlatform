@@ -41,8 +41,7 @@ class module_registry {
 
     // Имя из самого модуля — контракт has_module_name.
     template <std::derived_from<module_base> M>
-        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) &&
-                has_module_name<M>
+        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) && has_module_name<M>
     module_factory_base& add() {
         // явный <M>: без него unqualified add(std::string) ушёл бы
         // в перегрузку add(unique_ptr) и не скомпилировался
@@ -56,8 +55,8 @@ class module_registry {
         requires std::constructible_from<M, const std::decay_t<TArgs>&...> ||
                  std::constructible_from<M, const module_config&, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
-        return add(std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name),
-                                                                               std::forward<TArgs>(args)...));
+        return add(
+            std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name), std::forward<TArgs>(args)...));
     }
 
     // Общий путь — для нестандартных фабрик. Дубликат — совпадение
@@ -237,8 +236,7 @@ class module_registrar {
 
     // имя из типа — тот же контракт has_module_name, что у module_registry
     template <std::derived_from<module_base> M>
-        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) &&
-                has_module_name<M>
+        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) && has_module_name<M>
     module_factory_base& add() {
         return add<M>(std::string{M::module_name});
     }
@@ -247,8 +245,8 @@ class module_registrar {
         requires std::constructible_from<M, const std::decay_t<TArgs>&...> ||
                  std::constructible_from<M, const module_config&, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
-        return add(std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name),
-                                                                               std::forward<TArgs>(args)...));
+        return add(
+            std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name), std::forward<TArgs>(args)...));
     }
 
     module_factory_base& add(std::unique_ptr<module_factory_base> factory) {

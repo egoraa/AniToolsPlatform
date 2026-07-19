@@ -393,8 +393,7 @@ class pipeline_runner {
                         }
                         {
                             std::unique_lock lock(signal.mutex);
-                            const bool woken =
-                                signal.cv.wait_for(lock, token, delay, [&] { return signal.signaled; });
+                            const bool woken = signal.cv.wait_for(lock, token, delay, [&] { return signal.signaled; });
                             signal.signaled = false;
                             if (woken) {
                                 delay = {};  // данные пришли — следующий пасс по горячему пути

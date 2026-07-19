@@ -29,8 +29,7 @@ class validator {
 
     // Неизвестный ключ — почти всегда опечатка; молчание здесь стоило бы
     // пользователю молча пропавшей настройки.
-    void check_keys(const nlohmann::json& node, const std::string& path,
-                    std::initializer_list<const char*> allowed) {
+    void check_keys(const nlohmann::json& node, const std::string& path, std::initializer_list<const char*> allowed) {
         const std::unordered_set<std::string> allowed_set(allowed.begin(), allowed.end());
         for (const auto& [key, value] : node.items()) {
             if (!allowed_set.contains(key)) {
@@ -179,8 +178,7 @@ class validator {
                 child_name = node.at("name").get<std::string>();
             }
             if (node.contains("version")) {
-                if (!node.at("version").is_string() ||
-                    !try_parse_version(node.at("version").get<std::string>())) {
+                if (!node.at("version").is_string() || !try_parse_version(node.at("version").get<std::string>())) {
                     error(path + ".version", "invalid version");
                 }
             }
@@ -293,8 +291,7 @@ class validator {
                 if (mode == "throttled") {
                     // те же контракты, что у pipeline_runner::add_thread —
                     // но с путём конфига вместо исключения на пол-дороге
-                    if (!has_period || !t.at("period_ms").is_number_integer() ||
-                        t.at("period_ms").get<int>() <= 0) {
+                    if (!has_period || !t.at("period_ms").is_number_integer() || t.at("period_ms").get<int>() <= 0) {
                         v.error(tpath, "throttled thread requires a positive integer 'period_ms'");
                     }
                 } else if (has_period) {

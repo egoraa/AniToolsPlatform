@@ -122,8 +122,8 @@ inline group_node decode_group(std::string name, const nlohmann::json& j) {
         }
     }
     for (const nlohmann::json& c : j.value("connections", nlohmann::json::array())) {
-        g.connections.push_back({c.at("from").get<std::string>(), c.at("to").get<std::string>(),
-                                 c.value("replay", false)});
+        g.connections.push_back(
+            {c.at("from").get<std::string>(), c.at("to").get<std::string>(), c.value("replay", false)});
     }
     return g;
 }

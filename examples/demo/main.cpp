@@ -76,7 +76,7 @@ int main() {
 
     // Раскладка развёртывания: именованные потоки с режимами.
     atp::pipeline_runner runner;
-    runner.add_thread("producing");                                                     // on_demand
+    runner.add_thread("producing");  // on_demand
     runner.add_thread("consuming", {atp::thread_mode::throttled, std::chrono::milliseconds(5)});
     runner.assign(producers, "producing");
     runner.assign(consumers, "consuming");

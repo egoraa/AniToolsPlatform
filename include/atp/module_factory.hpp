@@ -37,8 +37,7 @@ template <std::derived_from<module_base> M, typename... TArgs>
              std::constructible_from<M, const module_config&, const TArgs&...>
 class module_factory final : public module_factory_base {
    public:
-    explicit module_factory(std::string name, TArgs... args)
-        : name_(std::move(name)), args_(std::move(args)...) {}
+    explicit module_factory(std::string name, TArgs... args) : name_(std::move(name)), args_(std::move(args)...) {}
 
     [[nodiscard]] std::string_view name() const noexcept override {
         return name_;

@@ -67,16 +67,16 @@ TEST(PipelineRunner, StartFailureStopsInitializedInReverse) {
     // в обратном порядке (stop корректен после initialize без start)
     std::vector<std::string> reversed{"d", "c", "b", "a"};
     EXPECT_EQ(r.log.order_of("stop"), reversed);
-    EXPECT_TRUE(r.log.order_of("iterate").empty());   // потоки не создавались
+    EXPECT_TRUE(r.log.order_of("iterate").empty());  // потоки не создавались
 }
 
 TEST(PipelineRunner, AssignmentsPlaceGroupsOnNamedThreads) {
     rig r;
     std::latch ticked(4);
-    r.a->first_iterate = &ticked;   // root → первый объявленный поток
-    r.b->first_iterate = &ticked;   // stage → "aux" (явно)
-    r.c->first_iterate = &ticked;   // deep не назначен → inline у stage
-    r.d->first_iterate = &ticked;   // ждём всех: stop() между a и d срезал бы пасс корня
+    r.a->first_iterate = &ticked;  // root → первый объявленный поток
+    r.b->first_iterate = &ticked;  // stage → "aux" (явно)
+    r.c->first_iterate = &ticked;  // deep не назначен → inline у stage
+    r.d->first_iterate = &ticked;  // ждём всех: stop() между a и d срезал бы пасс корня
 
     atp::pipeline_runner runner;
     runner.add_thread("main");
@@ -90,8 +90,8 @@ TEST(PipelineRunner, AssignmentsPlaceGroupsOnNamedThreads) {
     auto stage_thread = r.log.iterate_thread("b");
     EXPECT_NE(root_thread, std::thread::id{});
     EXPECT_NE(stage_thread, std::thread::id{});
-    EXPECT_NE(root_thread, stage_thread);                       // разные потоки
-    EXPECT_EQ(r.log.iterate_thread("c"), stage_thread);         // inline наследует поток stage
+    EXPECT_NE(root_thread, stage_thread);                // разные потоки
+    EXPECT_EQ(r.log.iterate_thread("c"), stage_thread);  // inline наследует поток stage
     EXPECT_EQ(r.log.iterate_thread("d"), root_thread);
 }
 
@@ -100,7 +100,7 @@ TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnImplicitMain) {
     std::latch ticked(1);
     r.c->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;                                 // ни одного add_thread
+    atp::pipeline_runner runner;  // ни одного add_thread
     runner.start(r.pipe);
     ticked.wait();
     runner.stop();
@@ -140,12 +140,12 @@ TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsWithThreadNames) {
         split.start(pipe);
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
-        const std::string what = error.what();                   // имена потоков — в диагностике
+        const std::string what = error.what();  // имена потоков — в диагностике
         EXPECT_NE(what.find("producing"), std::string::npos);
         EXPECT_NE(what.find("consuming"), std::string::npos);
     }
 
-    atp::pipeline_runner together;                               // те же группы на одном потоке — ок
+    atp::pipeline_runner together;  // те же группы на одном потоке — ок
     together.start(pipe);
     together.stop();
 }
@@ -154,15 +154,16 @@ TEST(PipelineRunner, ConfigurationErrors) {
     rig r;
     atp::pipeline_runner runner;
     runner.add_thread("main");
-    EXPECT_THROW(runner.add_thread("main"), std::runtime_error);                       // дубликат имени
-    EXPECT_THROW(runner.add_thread("t", {atp::thread_mode::throttled, {}}), std::invalid_argument);  // период обязателен
+    EXPECT_THROW(runner.add_thread("main"), std::runtime_error);  // дубликат имени
+    EXPECT_THROW(runner.add_thread("t", {atp::thread_mode::throttled, {}}),
+                 std::invalid_argument);  // период обязателен
     EXPECT_THROW(runner.add_thread("s", {atp::thread_mode::on_demand, std::chrono::milliseconds(5)}),
-                 std::invalid_argument);                                               // период запрещён
-    EXPECT_THROW(runner.assign(*r.stage, "nowhere"), std::invalid_argument);           // неизвестное имя — сразу
+                 std::invalid_argument);                                      // период запрещён
+    EXPECT_THROW(runner.assign(*r.stage, "nowhere"), std::invalid_argument);  // неизвестное имя — сразу
 
     atp::group stranger("stranger");
     runner.assign(stranger, "main");
-    EXPECT_THROW(runner.start(r.pipe), std::invalid_argument);                         // назначение вне дерева
+    EXPECT_THROW(runner.start(r.pipe), std::invalid_argument);  // назначение вне дерева
 }
 
 // Сбой валидации не должен оставлять в раннере следов: переназначение
@@ -396,7 +397,7 @@ TEST(PipelineRunner, IterateFailureStopsPipelineAndWaitRethrows) {
     runner.add_thread("aux");
     runner.assign(*r.stage, "aux");
     runner.start(r.pipe);
-    EXPECT_THROW(runner.wait(), std::runtime_error);   // первопричина — из b
+    EXPECT_THROW(runner.wait(), std::runtime_error);  // первопричина — из b
     EXPECT_FALSE(runner.running());
     EXPECT_NE(runner.error(), nullptr);
     // каскад stop прошёл всем в обратном порядке, несмотря на ошибку
@@ -406,7 +407,7 @@ TEST(PipelineRunner, IterateFailureStopsPipelineAndWaitRethrows) {
 
 TEST(PipelineRunner, FirstErrorWins) {
     rig r;
-    r.a->throw_in = "iterate";   // оба бросают; ошибка ровно одна — первая
+    r.a->throw_in = "iterate";  // оба бросают; ошибка ровно одна — первая
     r.b->throw_in = "iterate";
 
     atp::pipeline_runner runner;
@@ -415,7 +416,7 @@ TEST(PipelineRunner, FirstErrorWins) {
     runner.assign(*r.stage, "aux");
     runner.start(r.pipe);
     EXPECT_THROW(runner.wait(), std::runtime_error);
-    EXPECT_NE(runner.error(), nullptr);                // слот заполнен один раз
+    EXPECT_NE(runner.error(), nullptr);  // слот заполнен один раз
 }
 
 TEST(PipelineRunner, StopIsIdempotentAndErrorIsClean) {
@@ -427,27 +428,27 @@ TEST(PipelineRunner, StopIsIdempotentAndErrorIsClean) {
     runner.start(r.pipe);
     ticked.wait();
     runner.stop();
-    runner.stop();                                     // второй вызов — no-op
+    runner.stop();  // второй вызов — no-op
     EXPECT_EQ(runner.error(), nullptr);
 }
 
 TEST(PipelineRunner, WaitAfterStopRethrowsPendingError) {
     rig r;
     std::latch reached(1);
-    r.a->first_iterate = &reached;   // зонд сигналит latch до броска (см. probe_module)
+    r.a->first_iterate = &reached;  // зонд сигналит latch до броска (см. probe_module)
     r.a->throw_in = "iterate";
 
     atp::pipeline_runner runner;
     runner.start(r.pipe);
     reached.wait();
-    runner.stop();                                     // не бросает; после join ошибка захвачена
-    EXPECT_THROW(runner.wait(), std::runtime_error);   // stop() не съел первопричину
+    runner.stop();                                    // не бросает; после join ошибка захвачена
+    EXPECT_THROW(runner.wait(), std::runtime_error);  // stop() не съел первопричину
     EXPECT_NE(runner.error(), nullptr);
 }
 
 TEST(PipelineRunner, WaitOnIdleRunnerIsNoOp) {
     atp::pipeline_runner runner;
-    runner.wait();                                     // не стартовал, ошибки нет — сразу возврат
+    runner.wait();  // не стартовал, ошибки нет — сразу возврат
     EXPECT_EQ(runner.error(), nullptr);
 }
 
@@ -458,7 +459,7 @@ TEST(PipelineRunner, SecondWaitRethrowsSameError) {
     atp::pipeline_runner runner;
     runner.start(r.pipe);
     EXPECT_THROW(runner.wait(), std::runtime_error);
-    EXPECT_THROW(runner.wait(), std::runtime_error);   // ошибка хранится до следующего start()
+    EXPECT_THROW(runner.wait(), std::runtime_error);  // ошибка хранится до следующего start()
 }
 
 TEST(PipelineRunner, DestructorStopsRunningPipeline) {
@@ -469,7 +470,7 @@ TEST(PipelineRunner, DestructorStopsRunningPipeline) {
         atp::pipeline_runner runner;
         runner.start(r.pipe);
         ticked.wait();
-    }                                                  // ~pipeline_runner → stop()
+    }  // ~pipeline_runner → stop()
     std::vector<std::string> reversed{"d", "c", "b", "a"};
     EXPECT_EQ(r.log.order_of("stop"), reversed);
 }
@@ -482,7 +483,7 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
     };
     struct in_ports : atp::io::inputs {
-        atp::io::input<int>& value = make<atp::io::input<int>>("value");   // safe — умолчание
+        atp::io::input<int>& value = make<atp::io::input<int>>("value");  // safe — умолчание
     };
     class producer : public atp::module<atp::io::inputs, out_ports> {
        public:

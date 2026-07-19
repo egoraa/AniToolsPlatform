@@ -65,7 +65,7 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
     EXPECT_TRUE(cfg.plugins.empty());
     EXPECT_TRUE(cfg.threads.empty());
     ASSERT_EQ(cfg.pipeline.children.size(), 1u);
-    EXPECT_EQ(cfg.pipeline.children[0].module->name, "counter");   // дефолт — имя фабрики
+    EXPECT_EQ(cfg.pipeline.children[0].module->name, "counter");  // дефолт — имя фабрики
     EXPECT_EQ(cfg.pipeline.children[0].module->factory_version, std::nullopt);
     EXPECT_TRUE(cfg.pipeline.children[0].module->params.empty());
 }

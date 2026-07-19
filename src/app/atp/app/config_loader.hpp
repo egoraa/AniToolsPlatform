@@ -33,7 +33,8 @@ inline nlohmann::json read_json(const std::filesystem::path& path) {
     }
 }
 
-inline void expand_includes(nlohmann::json& node, const std::filesystem::path& dir,
+inline void expand_includes(nlohmann::json& node,
+                            const std::filesystem::path& dir,
                             std::vector<std::filesystem::path>& stack);
 
 // Стек путей — и детект циклов, и текст цепочки для диагностики.
@@ -47,8 +48,8 @@ inline nlohmann::json load_fragment(const std::filesystem::path& path, std::vect
         throw config_error("include cycle: " + chain + canonical.string());
     }
     if (stack.size() >= max_include_depth) {
-        throw config_error("include depth exceeds " + std::to_string(max_include_depth) + " at '" +
-                           canonical.string() + "'");
+        throw config_error("include depth exceeds " + std::to_string(max_include_depth) + " at '" + canonical.string() +
+                           "'");
     }
     stack.push_back(canonical);
     nlohmann::json fragment = read_json(canonical);
@@ -57,7 +58,8 @@ inline nlohmann::json load_fragment(const std::filesystem::path& path, std::vect
     return fragment;
 }
 
-inline void expand_includes(nlohmann::json& node, const std::filesystem::path& dir,
+inline void expand_includes(nlohmann::json& node,
+                            const std::filesystem::path& dir,
                             std::vector<std::filesystem::path>& stack) {
     if (node.is_object()) {
         if (node.contains("$include")) {

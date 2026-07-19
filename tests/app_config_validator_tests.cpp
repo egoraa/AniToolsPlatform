@@ -46,10 +46,10 @@ TEST(ConfigValidator, VersionRules) {
     EXPECT_FALSE(check(doc).empty());  // обязательное поле
 
     doc = valid_config();
-    doc["version"] = "2.0";            // чужой мажор
+    doc["version"] = "2.0";  // чужой мажор
     EXPECT_FALSE(check(doc).empty());
 
-    doc["version"] = "1.99";           // минор из будущего
+    doc["version"] = "1.99";  // минор из будущего
     EXPECT_FALSE(check(doc).empty());
 
     doc["version"] = "not-a-version";
@@ -92,29 +92,29 @@ TEST(ConfigValidator, PathSyntax) {
 
 TEST(ConfigValidator, ThreadRules) {
     json doc = valid_config();
-    doc["threads"][1].erase("period_ms");           // throttled без периода
+    doc["threads"][1].erase("period_ms");  // throttled без периода
     EXPECT_FALSE(check(doc).empty());
 
     doc = valid_config();
-    doc["threads"][0]["period_ms"] = 5;             // период вне throttled
+    doc["threads"][0]["period_ms"] = 5;  // период вне throttled
     EXPECT_FALSE(check(doc).empty());
 
     doc = valid_config();
-    doc["threads"][1]["name"] = "a";                // дубликат имени
+    doc["threads"][1]["name"] = "a";  // дубликат имени
     EXPECT_FALSE(check(doc).empty());
 
     doc = valid_config();
-    doc["threads"][0]["mode"] = "warp";             // неизвестный режим
+    doc["threads"][0]["mode"] = "warp";  // неизвестный режим
     EXPECT_FALSE(check(doc).empty());
 }
 
 TEST(ConfigValidator, AssignRules) {
     json doc = valid_config();
-    doc["assign"]["left"] = "nowhere";              // неизвестный поток
+    doc["assign"]["left"] = "nowhere";  // неизвестный поток
     EXPECT_FALSE(check(doc).empty());
 
     doc = valid_config();
-    doc["assign"]["ghost"] = "a";                   // путь не ведёт к группе
+    doc["assign"]["ghost"] = "a";  // путь не ведёт к группе
     EXPECT_FALSE(check(doc).empty());
 }
 

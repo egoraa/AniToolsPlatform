@@ -165,7 +165,8 @@ Header-only C++23 платформа модульных пайплайнов: м
 - Компоненты (`src/app/atp/app/`, инклюд `<atp/app/...>`):
   `config_loader` (чтение + `$include`), `config_validator` (все ошибки за
   один проход, каждая с JSON-путём), `config_model` (типизированная модель +
-  `decode`), `pipeline_builder` (`application` + `build`).
+  `decode`), `pipeline_builder` (`application`; `build` — плагины + сборка,
+  `build_pipeline` — сборка в уже наполненный реестр, путь studio).
 - **Схема 1.0** (`config_schema_version`): мажор конфига обязан совпадать,
   минор — не превышать наш («поля из будущего» отклоняются, не игнорируются).
   Корневые ключи: `version` (только в корневом документе), `plugins` (пути

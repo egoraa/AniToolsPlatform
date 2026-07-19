@@ -137,4 +137,24 @@ TEST(PipelineBuilder, UnknownAssignPathIsConfigError) {
     EXPECT_THROW(atp::app::build(app, cfg, "."), atp::app::config_error);
 }
 
+// Путь studio: реестр живёт на уровне сессии, пайплайн пересоздаётся на
+// каждый запуск — сборка не должна требовать application и загрузку плагинов.
+TEST(PipelineBuilder, BuildsIntoPrefilledRegistry) {
+    const atp::app::config cfg = make_config(R"({
+        "version": "1.0",
+        "pipeline": {"children": [{"module": "one_shot"}]},
+        "threads": [{"name": "t"}]
+    })");
+
+    atp::module_registry registry;
+    registry.add<one_shot_source>();
+    atp::pipeline pipe;
+    atp::pipeline_runner runner;
+    atp::app::build_pipeline(pipe, runner, cfg, registry);
+
+    EXPECT_NE(pipe.root().find_module("one_shot"), nullptr);
+    runner.start(pipe);  // потоки и раскладка тоже собраны
+    runner.stop();
+}
+
 }  // namespace

@@ -103,6 +103,18 @@ inline group& resolve_group(group& root, const std::string& path) {
 
 }  // namespace detail
 
+// Сборка дерева, потоков и раскладки в уже наполненный реестр — путь
+// studio: плагины живут на уровне сессии, пайплайн пересоздаётся на запуск.
+inline void build_pipeline(pipeline& pipe, pipeline_runner& runner, const config& cfg, module_registry& registry) {
+    detail::build_group(pipe.root(), cfg.pipeline, registry);
+    for (const thread_node& t : cfg.threads) {
+        runner.add_thread(t.name, {t.mode, t.period});
+    }
+    for (const auto& [path, thread] : cfg.assignments) {
+        runner.assign(detail::resolve_group(pipe.root(), path), thread);
+    }
+}
+
 // Сборка по модели: плагины → дерево групп и модулей → потоки → раскладка.
 // Раннер НЕ запускается — start/остановка остаются за вызывающим (main).
 // base_dir — каталог корневого конфига: пути плагинов считаются от него.
@@ -110,13 +122,7 @@ inline void build(application& app, const config& cfg, const std::filesystem::pa
     for (const std::string& p : cfg.plugins) {
         app.plugins.emplace_back(base_dir / p, app.registry);  // сбой загрузки — runtime_error с путём
     }
-    detail::build_group(app.pipe.root(), cfg.pipeline, app.registry);
-    for (const thread_node& t : cfg.threads) {
-        app.runner.add_thread(t.name, {t.mode, t.period});
-    }
-    for (const auto& [path, thread] : cfg.assignments) {
-        app.runner.assign(detail::resolve_group(app.pipe.root(), path), thread);
-    }
+    build_pipeline(app.pipe, app.runner, cfg, app.registry);
 }
 
 }  // namespace atp::app

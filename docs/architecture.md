@@ -148,6 +148,37 @@ Header-only C++23 платформа модульных пайплайнов: м
   раннером — только с потока-владельца** (гонка stop/wait исключена
   контрактом, не синхронизацией).
 
+## Приложение atp_app (`src/app/`)
+
+- Хост по JSON-конфигу: `atp_app <config.json>` — загрузка, валидация,
+  сборка `pipeline` + `pipeline_runner`, работа до Ctrl+C или аварии.
+  Логика — header-only `atp_app_lib` (INTERFACE: `atp_host` +
+  nlohmann/json), `main.cpp` тонкий; тесты линкуют `atp_app_lib` напрямую.
+- Компоненты (`src/app/atp/app/`, инклюд `<atp/app/...>`):
+  `config_loader` (чтение + `$include`), `config_validator` (все ошибки за
+  один проход, каждая с JSON-путём), `config_model` (типизированная модель +
+  `decode`), `pipeline_builder` (`application` + `build`).
+- **Схема 1.0** (`config_schema_version`): мажор конфига обязан совпадать,
+  минор — не превышать наш («поля из будущего» отклоняются, не игнорируются).
+  Корневые ключи: `version` (только в корневом документе), `plugins` (пути
+  DLL от каталога конфига), `pipeline` (дерево `children` из
+  `{module,name,version,params}` | `{group,children,expose,connections}`,
+  `expose.inputs/outputs` — алиас → «дитя.порт», `connections` —
+  `{from,to,replay}`), `threads` (`{name,mode,period_ms}`), `assign`
+  (путь группы → имя потока). Неизвестный ключ — ошибка (опечатки не
+  пропадают молча).
+- **`$include`**: `{"$include": "path.json"}` в любом узле замещается
+  содержимым файла (пути — от включающего файла; соседние ключи запрещены;
+  циклы и глубина > 16 — ошибка; `version` во фрагменте запрещён).
+- Ошибки сборки платформы оборачиваются контекстом конфига (`config_error`:
+  какой модуль/группа/соединение). Коды возврата: 0 — штатно (Ctrl+C),
+  1 — авария пайплайна/сборки, 2 — usage или невалидный конфиг.
+- `params` модуля — любой JSON-узел; в модель попадает компактным дампом и
+  уходит в `module_registry::create(name[, ver], config)` (см. фабрики).
+- Демо: `src/app/config/demo.json` (+ `demo_consumers.json` через
+  `$include`) — counter (throttled 500 мс) → printer из `atp_demo_plugin`;
+  custom-цель копирует конфиги и DLL к бинарю каждой сборкой.
+
 ## Сквозные конвенции
 
 - Два стиля проверки типов намеренно: реестры — точный `typeid`, соединения —

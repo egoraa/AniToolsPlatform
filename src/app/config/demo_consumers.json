@@ -1,0 +1,7 @@
+{
+    "group": "consumers",
+    "children": [
+        { "module": "printer", "params": { "label": "count" } }
+    ],
+    "expose": { "inputs": { "numbers": "printer.value" } }
+}

@@ -70,4 +70,47 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
     EXPECT_TRUE(cfg.pipeline.children[0].module->params.empty());
 }
 
+TEST(ConfigEncode, RoundTripsCanonicalDocument) {
+    // Канон: дефолты опущены, mode указан явно, алиасы expose в алфавитном
+    // порядке (JSON-объект их сортирует) — encode выдаёт ровно этот документ.
+    const nlohmann::json doc = nlohmann::json::parse(R"({
+        "version": "1.0",
+        "plugins": ["p.dll"],
+        "pipeline": {
+            "children": [
+                {"module": "counter", "name": "ticks", "version": "1.0", "params": {"rate": 10}},
+                {"group": "sub", "children": [{"module": "printer"}],
+                 "expose": {"inputs": {"in": "printer.value"}}}
+            ],
+            "connections": [{"from": "ticks.count", "to": "sub.in", "replay": true}]
+        },
+        "threads": [{"name": "t", "mode": "throttled", "period_ms": 5}],
+        "assign": {"sub": "t"}
+    })");
+    ASSERT_TRUE(atp::app::validate(doc).empty());
+    EXPECT_EQ(atp::app::encode(atp::app::decode(doc)), doc);
+}
+
+TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
+    const nlohmann::json doc = nlohmann::json::parse(R"({
+        "version": "1.0",
+        "pipeline": {
+            "children": [
+                {"module": "counter", "name": "counter"},
+                {"group": "g", "children": [], "connections": []}
+            ]
+        },
+        "threads": [{"name": "t"}]
+    })");
+    ASSERT_TRUE(atp::app::validate(doc).empty());
+
+    const nlohmann::json out = atp::app::encode(atp::app::decode(doc));
+    // канонизация: имя == фабрике опущено, пустые разделы исчезли, mode явный
+    EXPECT_FALSE(out.at("pipeline").at("children").at(0).contains("name"));
+    EXPECT_FALSE(out.at("pipeline").at("children").at(1).contains("children"));
+    EXPECT_FALSE(out.at("pipeline").at("children").at(1).contains("connections"));
+    EXPECT_EQ(out.at("threads").at(0).at("mode"), "on_demand");
+    EXPECT_TRUE(atp::app::validate(out).empty());  // encode выдаёт валидный конфиг
+}
+
 }  // namespace

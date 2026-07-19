@@ -128,6 +128,71 @@ inline group_node decode_group(std::string name, const nlohmann::json& j) {
     return g;
 }
 
+// Encode пишет каноничную форму: дефолты опускаются — файл после studio
+// не обрастает шумом, диффы конфигов остаются читаемыми.
+
+inline nlohmann::json encode_group_body(const group_node& g);
+
+inline nlohmann::json encode_child(const child_node& c) {
+    if (c.module) {
+        nlohmann::json j{{"module", c.module->factory}};
+        if (c.module->name != c.module->factory) {
+            j["name"] = c.module->name;
+        }
+        if (c.module->factory_version) {
+            j["version"] = c.module->factory_version->to_string();
+        }
+        if (!c.module->params.empty()) {
+            j["params"] = nlohmann::json::parse(c.module->params);  // params — JSON-узел, не строка
+        }
+        return j;
+    }
+    nlohmann::json j = encode_group_body(*c.group);
+    j["group"] = c.group->name;
+    return j;
+}
+
+inline nlohmann::json encode_group_body(const group_node& g) {
+    nlohmann::json j = nlohmann::json::object();
+    if (!g.children.empty()) {
+        nlohmann::json children = nlohmann::json::array();
+        for (const child_node& c : g.children) {
+            children.push_back(encode_child(c));
+        }
+        j["children"] = std::move(children);
+    }
+    if (!g.expose_inputs.empty() || !g.expose_outputs.empty()) {
+        nlohmann::json expose = nlohmann::json::object();
+        if (!g.expose_inputs.empty()) {
+            nlohmann::json inputs = nlohmann::json::object();
+            for (const auto& [alias, path] : g.expose_inputs) {
+                inputs[alias] = path;
+            }
+            expose["inputs"] = std::move(inputs);
+        }
+        if (!g.expose_outputs.empty()) {
+            nlohmann::json outputs = nlohmann::json::object();
+            for (const auto& [alias, path] : g.expose_outputs) {
+                outputs[alias] = path;
+            }
+            expose["outputs"] = std::move(outputs);
+        }
+        j["expose"] = std::move(expose);
+    }
+    if (!g.connections.empty()) {
+        nlohmann::json connections = nlohmann::json::array();
+        for (const connection_node& c : g.connections) {
+            nlohmann::json cj{{"from", c.from}, {"to", c.to}};
+            if (c.replay) {
+                cj["replay"] = true;
+            }
+            connections.push_back(std::move(cj));
+        }
+        j["connections"] = std::move(connections);
+    }
+    return j;
+}
+
 }  // namespace detail
 
 // JSON → типизированная модель. Контракт: документ уже прошёл validate.
@@ -158,6 +223,48 @@ inline group_node decode_group(std::string name, const nlohmann::json& j) {
         cfg.assignments.emplace_back(group_path, thread.get<std::string>());
     }
     return cfg;
+}
+
+// Модель → JSON, обратный к decode. Каноничная форма (дефолты опущены,
+// mode потока явный, params — узлом); инварианты: validate(encode(cfg))
+// пуст, encode(decode(doc)) == doc для каноничного документа. Порядок
+// алиасов expose при round-trip не сохраняется — JSON-объект сортирует
+// ключи; на смысл конфига это не влияет.
+[[nodiscard]] inline nlohmann::json encode(const config& cfg) {
+    nlohmann::json doc = nlohmann::json::object();
+    doc["version"] = cfg.schema.to_string();
+    if (!cfg.plugins.empty()) {
+        doc["plugins"] = cfg.plugins;
+    }
+    doc["pipeline"] = detail::encode_group_body(cfg.pipeline);
+    if (!cfg.threads.empty()) {
+        nlohmann::json threads = nlohmann::json::array();
+        for (const thread_node& t : cfg.threads) {
+            nlohmann::json tj{{"name", t.name}};
+            switch (t.mode) {
+                case thread_mode::on_demand:
+                    tj["mode"] = "on_demand";
+                    break;
+                case thread_mode::throttled:
+                    tj["mode"] = "throttled";
+                    tj["period_ms"] = static_cast<int>(t.period.count());
+                    break;
+                case thread_mode::spinning:
+                    tj["mode"] = "spinning";
+                    break;
+            }
+            threads.push_back(std::move(tj));
+        }
+        doc["threads"] = std::move(threads);
+    }
+    if (!cfg.assignments.empty()) {
+        nlohmann::json assign = nlohmann::json::object();
+        for (const auto& [path, thread] : cfg.assignments) {
+            assign[path] = thread;
+        }
+        doc["assign"] = std::move(assign);
+    }
+    return doc;
 }
 
 }  // namespace atp::app

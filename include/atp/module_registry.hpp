@@ -41,7 +41,8 @@ class module_registry {
 
     // Имя из самого модуля — контракт has_module_name.
     template <std::derived_from<module_base> M>
-        requires std::constructible_from<M> && has_module_name<M>
+        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) &&
+                has_module_name<M>
     module_factory_base& add() {
         // явный <M>: без него unqualified add(std::string) ушёл бы
         // в перегрузку add(unique_ptr) и не скомпилировался
@@ -52,7 +53,8 @@ class module_registry {
     // один тип можно зарегистрировать под алиасами; args — конфиг
     // конструктора модуля, связывается с фабрикой.
     template <std::derived_from<module_base> M, typename... TArgs>
-        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
+        requires std::constructible_from<M, const std::decay_t<TArgs>&...> ||
+                 std::constructible_from<M, const module_config&, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
         return add(std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name),
                                                                                std::forward<TArgs>(args)...));
@@ -86,6 +88,13 @@ class module_registry {
     // С версией — точное совпадение (1.2 == 1.2.0: дополнение нулями).
     [[nodiscard]] module_ptr create(const std::string& name, const version& v) const {
         return at(name, v).create();
+    }
+
+    [[nodiscard]] module_ptr create(const std::string& name, const std::string& config) const {
+        return at(name).create(config);
+    }
+    [[nodiscard]] module_ptr create(const std::string& name, const version& v, const std::string& config) const {
+        return at(name, v).create(config);
     }
 
     // Пара в духе std::map: at() бросает, find() возвращает nullptr.
@@ -198,8 +207,10 @@ class pinned_factory final : public module_factory_base {
     [[nodiscard]] version get_version() const noexcept override {
         return inner_->get_version();
     }
-    [[nodiscard]] module_ptr create() const override {
-        module_ptr m = inner_->create();
+    using module_factory_base::create;  // сахар create() не должен прятаться за override
+
+    [[nodiscard]] module_ptr create(const std::string& config) const override {
+        module_ptr m = inner_->create(config);
         return module_ptr(m.release(), module_deleter{pin_});
     }
 
@@ -226,13 +237,15 @@ class module_registrar {
 
     // имя из типа — тот же контракт has_module_name, что у module_registry
     template <std::derived_from<module_base> M>
-        requires std::constructible_from<M> && has_module_name<M>
+        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) &&
+                has_module_name<M>
     module_factory_base& add() {
         return add<M>(std::string{M::module_name});
     }
 
     template <std::derived_from<module_base> M, typename... TArgs>
-        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
+        requires std::constructible_from<M, const std::decay_t<TArgs>&...> ||
+                 std::constructible_from<M, const module_config&, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
         return add(std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name),
                                                                                std::forward<TArgs>(args)...));

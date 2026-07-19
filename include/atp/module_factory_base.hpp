@@ -2,6 +2,7 @@
 #define ANITOOLSPLATFORM_MODULE_FACTORY_BASE_HPP
 
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include <atp/module_base.hpp>
@@ -26,7 +27,15 @@ class module_factory_base {
     // module_ptr безопасен и через границу плагина: деструктор модуля —
     // код той библиотеки, где он создан, а пин в делетере не даёт ей
     // выгрузиться, пока модуль жив.
-    [[nodiscard]] virtual module_ptr create() const = 0;
+    // Основной путь создания: config — сырой текст параметров экземпляра
+    // (узел params конфига пайплайна), пустая строка — параметров нет.
+    // Интерпретацию строки определяет фабрика (см. module_config).
+    [[nodiscard]] virtual module_ptr create(const std::string& config) const = 0;
+
+    // Сахар для вызывающих без параметров (реестр, тесты, group).
+    [[nodiscard]] module_ptr create() const {
+        return create(std::string{});
+    }
 
    protected:
     module_factory_base() = default;

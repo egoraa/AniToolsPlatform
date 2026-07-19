@@ -18,7 +18,9 @@ namespace atp {
 //    initialize (кому нужен позже — сохраняет ссылку).
 // 5: NVI-доставка входа (do_deliver) + notifier_base/set_notifier у
 //    input_base — пробуждение потока-потребителя исполнителем.
-inline constexpr unsigned plugin_abi = 5;
+// 6: фабрики — create(config): параметры экземпляра строкой конфига
+//    (module_config).
+inline constexpr unsigned plugin_abi = 6;
 
 // Контракт плагина — два C-символа. Рукопожатие atp_abi_version —
 // единственный вызов, безопасный при любом рассогласовании: чистый C,

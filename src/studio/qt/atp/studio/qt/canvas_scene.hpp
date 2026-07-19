@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -17,6 +18,7 @@
 #include <atp/studio/layout.hpp>
 #include <atp/studio/qt/app_state.hpp>
 #include <atp/studio/qt/canvas_items.hpp>
+#include <atp/studio/value_format.hpp>
 
 namespace atp::studio::qt {
 
@@ -52,6 +54,7 @@ class canvas_scene final : public QGraphicsScene {
         clear();
         links_.clear();
         pins_.clear();
+        prev_writes_.clear();
         temp_link_ = nullptr;
         drag_from_ = nullptr;
         const app::group_node* g = state_.doc.group_at(state_.current_group);
@@ -85,6 +88,32 @@ class canvas_scene final : public QGraphicsScene {
 
     [[nodiscard]] const std::vector<link_item*>& links() const {
         return links_;
+    }
+
+    // Мониторинг: подсветка связей по росту поколения записи и подписи
+    // значений. Сцену не перестраивает — только пены и тексты.
+    void update_samples() {
+        if (!state_.run.running()) {
+            for (link_item* link : links_) {
+                link->set_hot(false);
+                link->set_label({});
+            }
+            prev_writes_.clear();
+            return;
+        }
+        for (const session::connection_sample& sample : state_.run.sample_connections()) {
+            if (sample.group_path != state_.current_group || sample.index >= links_.size()) {
+                continue;
+            }
+            link_item* link = links_[sample.index];
+            link->set_hot(sample.writes != prev_writes_[sample.index]);
+            prev_writes_[sample.index] = sample.writes;
+            if (sample.value) {
+                const auto text = format_value(*sample.value);
+                link->set_label(text ? QString::fromStdString(*text)
+                                     : QString::fromStdString(sample.value->type().name()));
+            }
+        }
     }
 
    protected:
@@ -268,6 +297,7 @@ class canvas_scene final : public QGraphicsScene {
     ui_callbacks& callbacks_;
     std::unordered_map<std::string, pin_item*> pins_;
     std::vector<link_item*> links_;
+    std::unordered_map<std::size_t, std::uint64_t> prev_writes_;  // активность связей между опросами
     pin_item* drag_from_ = nullptr;
     QGraphicsLineItem* temp_link_ = nullptr;
     bool rebuilding_ = false;

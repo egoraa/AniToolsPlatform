@@ -21,6 +21,7 @@
 #include <atp/studio/qt/inspector_widget.hpp>
 #include <atp/studio/qt/manager_widget.hpp>
 #include <atp/studio/qt/palette_widget.hpp>
+#include <atp/studio/qt/runtime_widget.hpp>
 
 namespace atp::studio::qt {
 
@@ -61,6 +62,11 @@ class main_window final : public QMainWindow {
         inspector_dock->setWidget(inspector_);
         addDockWidget(Qt::RightDockWidgetArea, inspector_dock);
 
+        auto* runtime_dock = new QDockWidget("Runtime", this);
+        runtime_ = new runtime_widget(state_, callbacks_, runtime_dock);
+        runtime_dock->setWidget(runtime_);
+        addDockWidget(Qt::BottomDockWidgetArea, runtime_dock);
+
         // 10 Гц: опрос ошибок исполнения и статистики (наполняется задачей 5)
         auto* timer = new QTimer(this);
         QObject::connect(timer, &QTimer::timeout, this, [this] { poll(); });
@@ -79,7 +85,7 @@ class main_window final : public QMainWindow {
         palette_->refresh();
         canvas_->refresh();
         inspector_->refresh();
-        // задача 5 дополняет: runtime
+        runtime_->refresh();
     }
 
     void report(const QString& text) {
@@ -175,7 +181,23 @@ class main_window final : public QMainWindow {
     }
 
     void poll() {
-        // наполняется задачей 5 (ошибки исполнения, статистика, мониторинг)
+        // авария исполнения: первопричина — в журнал, пайплайн гасится
+        if (std::exception_ptr error = state_.run.error()) {
+            try {
+                std::rethrow_exception(error);
+            } catch (const std::exception& e) {
+                report("pipeline", e);
+            } catch (...) {
+                report(QString("pipeline: unknown error"));
+            }
+            state_.run.stop();
+            refresh_all();
+            return;
+        }
+        if (state_.run.running()) {
+            runtime_->refresh();
+            canvas_->scene().update_samples();
+        }
     }
 
     app_state& state_;
@@ -184,6 +206,7 @@ class main_window final : public QMainWindow {
     palette_widget* palette_ = nullptr;
     canvas_widget* canvas_ = nullptr;
     inspector_widget* inspector_ = nullptr;
+    runtime_widget* runtime_ = nullptr;
     QListWidget* errors_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;

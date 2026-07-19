@@ -32,6 +32,7 @@ add_executable(atp_tests
         pipeline_tests.cpp
         service_directory_tests.cpp
         studio_document_tests.cpp
+        studio_layout_tests.cpp
         studio_settings_tests.cpp
         version_tests.cpp)
 # CMAKE_DL_LIBS: на Linux dlopen может требовать -ldl, на Windows пусто.

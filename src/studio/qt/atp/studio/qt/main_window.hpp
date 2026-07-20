@@ -22,6 +22,7 @@
 #include <atp/studio/qt/manager_widget.hpp>
 #include <atp/studio/qt/palette_widget.hpp>
 #include <atp/studio/qt/runtime_widget.hpp>
+#include <atp/studio/settings.hpp>
 
 namespace atp::studio::qt {
 
@@ -96,6 +97,34 @@ class main_window final : public QMainWindow {
         report(QString::fromStdString(context + ": " + e.what()));
     }
 
+    // Открытие по пути — общая точка для диалога, меню Recent и автооткрытия
+    // при старте: любая ошибка уходит в журнал, текущий документ не трогается.
+    void open_path(const std::filesystem::path& path) {
+        try {
+            state_.doc = document::open(path);
+            state_.doc_path = path;
+            state_.reset_view();
+            if (state_.doc.had_includes()) {
+                report(QString("warning: %1 uses $include — saving will write a flattened file")
+                           .arg(QString::fromStdWString(path.wstring())));
+            }
+            // плагины конфига — в реестр сессии: палитре и канвасу нужны порты
+            for (const std::string& p : state_.doc.config().plugins) {
+                try {
+                    state_.manager.load_plugin(state_.config_dir() / p);
+                } catch (const std::exception& e) {
+                    report("plugin", e);
+                }
+            }
+            state_.describe_cache.clear();
+            note_recent(state_.settings, path);
+            save_settings(state_.settings, state_.settings_file);  // сразу: крэш не должен терять список
+            refresh_all();
+        } catch (const std::exception& e) {
+            report("open", e);
+        }
+    }
+
    private:
     void build_menus() {
         QMenu* file = menuBar()->addMenu("&File");
@@ -135,28 +164,8 @@ class main_window final : public QMainWindow {
 
     void open_dialog() {
         const QString file = QFileDialog::getOpenFileName(this, "Open config", QString(), "Pipeline configs (*.json)");
-        if (file.isEmpty()) {
-            return;
-        }
-        try {
-            state_.doc = document::open(std::filesystem::path(file.toStdWString()));
-            state_.doc_path = std::filesystem::path(file.toStdWString());
-            state_.reset_view();
-            if (state_.doc.had_includes()) {
-                report(QString("warning: %1 uses $include — saving will write a flattened file").arg(file));
-            }
-            // плагины конфига — в реестр сессии: палитре и канвасу нужны порты
-            for (const std::string& p : state_.doc.config().plugins) {
-                try {
-                    state_.manager.load_plugin(state_.config_dir() / p);
-                } catch (const std::exception& e) {
-                    report("plugin", e);
-                }
-            }
-            state_.describe_cache.clear();
-            refresh_all();
-        } catch (const std::exception& e) {
-            report("open", e);
+        if (!file.isEmpty()) {
+            open_path(std::filesystem::path(file.toStdWString()));
         }
     }
 
@@ -175,6 +184,8 @@ class main_window final : public QMainWindow {
         try {
             state_.doc.save(target);
             state_.doc_path = target;
+            note_recent(state_.settings, target);
+            save_settings(state_.settings, state_.settings_file);
         } catch (const std::exception& e) {
             report("save", e);
         }

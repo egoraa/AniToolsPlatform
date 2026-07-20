@@ -15,6 +15,11 @@ int main(int argc, char** argv) {
     state.manager.rescan();
 
     atp::studio::qt::main_window window(state);
+    // автооткрытие последнего проекта: неудача — строка в Errors-док,
+    // приложение стартует с пустым документом, без модальных диалогов
+    if (!state.settings.recent_projects.empty()) {
+        window.open_path(state.settings.recent_projects.front());
+    }
     window.show();
     const int code = QApplication::exec();
 

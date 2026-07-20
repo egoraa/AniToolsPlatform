@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
 #include <QTimer>
@@ -82,6 +83,7 @@ class main_window final : public QMainWindow {
         redo_action_->setEnabled(!locked && state_.doc.can_redo());
         save_action_->setEnabled(!locked);
         save_as_action_->setEnabled(!locked);
+        recent_menu_->setEnabled(!state_.settings.recent_projects.empty());
         manager_->refresh();
         palette_->refresh();
         canvas_->refresh();
@@ -135,6 +137,12 @@ class main_window final : public QMainWindow {
             refresh_all();
         });
         file->addAction("&Open...", [this] { open_dialog(); });
+        recent_menu_ = file->addMenu("Recent Projects");
+        // Лениво на aboutToShow, а не в refresh_all: клик по пункту ведёт в
+        // open_path → refresh_all, и clear() там удалил бы QAction, чей
+        // triggered ещё на стеке — у Qt удаление отправителя из слота
+        // небезопасно. aboutToShow перестраивает вне эмиссии.
+        QObject::connect(recent_menu_, &QMenu::aboutToShow, recent_menu_, [this] { rebuild_recent_menu(); });
         save_action_ = file->addAction("&Save", [this] { save(false); });
         save_as_action_ = file->addAction("Save &As...", [this] { save(true); });
 
@@ -145,6 +153,19 @@ class main_window final : public QMainWindow {
         });
         redo_action_ = edit->addAction("&Redo", QKeySequence::Redo, [this] {
             (void)state_.doc.redo();
+            refresh_all();
+        });
+    }
+
+    void rebuild_recent_menu() {
+        recent_menu_->clear();
+        for (const std::string& p : state_.settings.recent_projects) {
+            recent_menu_->addAction(QString::fromStdString(p), [this, p] { open_path(std::filesystem::path(p)); });
+        }
+        recent_menu_->addSeparator();
+        recent_menu_->addAction("Clear Recent", [this] {
+            state_.settings.recent_projects.clear();
+            save_settings(state_.settings, state_.settings_file);
             refresh_all();
         });
     }
@@ -219,6 +240,7 @@ class main_window final : public QMainWindow {
     inspector_widget* inspector_ = nullptr;
     runtime_widget* runtime_ = nullptr;
     QListWidget* errors_ = nullptr;
+    QMenu* recent_menu_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;
     QAction* undo_action_ = nullptr;

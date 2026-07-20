@@ -1,6 +1,7 @@
 #ifndef ATP_STUDIO_SETTINGS_HPP
 #define ATP_STUDIO_SETTINGS_HPP
 
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -15,8 +16,24 @@ namespace atp::studio {
 // Пользовательские настройки studio (не конфиг пайплайна): живут в профиле
 // пользователя, документов не касаются.
 struct studio_settings {
-    std::vector<std::string> search_dirs;  // папки поиска модулей
+    std::vector<std::string> search_dirs;      // папки поиска модулей
+    std::vector<std::string> recent_projects;  // MRU последних проектов, свежее — первым
 };
+
+inline constexpr std::size_t recent_limit = 10;
+
+// MRU-список последних проектов: нормализованный абсолютный путь встаёт в
+// голову, дубликат удаляется, хвост обрезается до recent_limit. Без
+// canonical — путь мог только что появиться (Save As) или временно
+// пропасть (сетевой диск), а в списке он всё равно нужен.
+inline void note_recent(studio_settings& s, const std::filesystem::path& file) {
+    const std::string path = std::filesystem::absolute(file).lexically_normal().string();
+    std::erase(s.recent_projects, path);
+    s.recent_projects.insert(s.recent_projects.begin(), path);
+    if (s.recent_projects.size() > recent_limit) {
+        s.recent_projects.resize(recent_limit);
+    }
+}
 
 // Каталог настроек: %APPDATA%/atp_studio (Windows) или
 // $XDG_CONFIG_HOME/atp_studio, при отсутствии — ~/.config/atp_studio.
@@ -49,6 +66,11 @@ struct studio_settings {
                 s.search_dirs.push_back(d.get<std::string>());
             }
         }
+        for (const nlohmann::json& d : doc.value("recent_projects", nlohmann::json::array())) {
+            if (d.is_string()) {
+                s.recent_projects.push_back(d.get<std::string>());
+            }
+        }
     } catch (const nlohmann::json::parse_error&) {  // NOLINT(bugprone-empty-catch)
     }
     return s;
@@ -58,6 +80,7 @@ inline void save_settings(const studio_settings& s, const std::filesystem::path&
     std::filesystem::create_directories(file.parent_path());
     nlohmann::json doc;
     doc["search_dirs"] = s.search_dirs;
+    doc["recent_projects"] = s.recent_projects;
     std::ofstream out(file);
     if (!out) {
         throw std::runtime_error("cannot write settings '" + file.string() + "'");

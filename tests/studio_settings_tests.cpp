@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -37,6 +38,61 @@ TEST(StudioSettings, SaveCreatesParentDirectories) {
     const auto file = temp_file("deep") / "nested" / "settings.json";
     atp::studio::save_settings({}, file);
     EXPECT_TRUE(std::filesystem::exists(file));
+}
+
+TEST(StudioSettings, RoundTripsRecentProjects) {
+    const auto file = temp_file("settings.json");
+    atp::studio::studio_settings s;
+    s.recent_projects = {"C:/a.json", "C:/b.json"};
+    atp::studio::save_settings(s, file);
+
+    EXPECT_EQ(atp::studio::load_settings(file).recent_projects, s.recent_projects);
+}
+
+TEST(StudioSettings, LoadSkipsNonStringRecentEntries) {
+    const auto file = temp_file("settings.json");
+    std::ofstream(file) << R"({"recent_projects": ["C:/a.json", 5, null]})";
+
+    EXPECT_EQ(atp::studio::load_settings(file).recent_projects, std::vector<std::string>{"C:/a.json"});
+}
+
+TEST(NoteRecent, PutsNewestFirst) {
+    atp::studio::studio_settings s;
+    atp::studio::note_recent(s, "a.json");
+    atp::studio::note_recent(s, "b.json");
+
+    const auto a = std::filesystem::absolute("a.json").lexically_normal().string();
+    const auto b = std::filesystem::absolute("b.json").lexically_normal().string();
+    EXPECT_EQ(s.recent_projects, (std::vector<std::string>{b, a}));
+}
+
+TEST(NoteRecent, MovesDuplicateToFrontWithoutGrowth) {
+    atp::studio::studio_settings s;
+    atp::studio::note_recent(s, "a.json");
+    atp::studio::note_recent(s, "b.json");
+    atp::studio::note_recent(s, "a.json");
+
+    const auto a = std::filesystem::absolute("a.json").lexically_normal().string();
+    const auto b = std::filesystem::absolute("b.json").lexically_normal().string();
+    EXPECT_EQ(s.recent_projects, (std::vector<std::string>{a, b}));
+}
+
+TEST(NoteRecent, CapsAtLimit) {
+    atp::studio::studio_settings s;
+    for (int i = 0; i < 12; ++i) {
+        atp::studio::note_recent(s, "p" + std::to_string(i) + ".json");
+    }
+
+    ASSERT_EQ(s.recent_projects.size(), atp::studio::recent_limit);
+    EXPECT_EQ(s.recent_projects.front(), std::filesystem::absolute("p11.json").lexically_normal().string());
+    EXPECT_EQ(s.recent_projects.back(), std::filesystem::absolute("p2.json").lexically_normal().string());
+}
+
+TEST(NoteRecent, NormalizesRelativePath) {
+    atp::studio::studio_settings s;
+    atp::studio::note_recent(s, "sub/../x.json");
+
+    EXPECT_EQ(s.recent_projects.front(), (std::filesystem::current_path() / "x.json").lexically_normal().string());
 }
 
 }  // namespace

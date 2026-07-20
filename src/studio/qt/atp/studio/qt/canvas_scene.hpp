@@ -5,7 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <tuple>
+#include <typeindex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -222,24 +225,64 @@ class canvas_scene final : public QGraphicsScene {
         return nullptr;
     }
 
+    // Тип порта по пути "дитя.порт" внутри группы: модуль — из describe,
+    // подгруппа — рекурсивно сквозь её expose до реального порта. nullopt —
+    // фабрика не загружена/порт не найден: пин будет нейтрального цвета.
+    [[nodiscard]] std::optional<std::type_index> resolve_port_type(const app::group_node& g,
+                                                                   const std::string& port_path,
+                                                                   bool output) {
+        const std::size_t dot = port_path.find('.');
+        if (dot == std::string::npos) {
+            return std::nullopt;
+        }
+        const std::string child = port_path.substr(0, dot);
+        const std::string port = port_path.substr(dot + 1);
+        for (const app::child_node& c : g.children) {
+            if (c.module && c.module->name == child) {
+                const module_info* info = state_.describe_cached(c.module->factory, c.module->factory_version);
+                if (info == nullptr) {
+                    return std::nullopt;
+                }
+                const auto& list = output ? info->outputs : info->inputs;
+                for (const port_info& p : list) {
+                    if (p.name == port) {
+                        return p.type;
+                    }
+                }
+                return std::nullopt;
+            }
+            if (c.group && c.group->name == child) {
+                const auto& expose = output ? c.group->expose_outputs : c.group->expose_inputs;
+                for (const auto& [alias, path] : expose) {
+                    if (alias == port) {
+                        return resolve_port_type(*c.group, path, output);
+                    }
+                }
+                return std::nullopt;
+            }
+        }
+        return std::nullopt;
+    }
+
     void build_node(const app::child_node& c, const std::unordered_map<std::string, node_position>& fallback) {
         const std::string& name = c.module ? c.module->name : c.group->name;
-        std::vector<std::pair<std::string, bool>> ports;  // (порт, is_output)
+        // (порт, is_output, тип) — тип красит пин: один тип — один цвет
+        std::vector<std::tuple<std::string, bool, std::optional<std::type_index>>> ports;
         if (c.module) {
             if (const module_info* info = state_.describe_cached(c.module->factory, c.module->factory_version)) {
                 for (const port_info& p : info->inputs) {
-                    ports.emplace_back(p.name, false);
+                    ports.emplace_back(p.name, false, p.type);
                 }
                 for (const port_info& p : info->outputs) {
-                    ports.emplace_back(p.name, true);
+                    ports.emplace_back(p.name, true, p.type);
                 }
             }
         } else {
             for (const auto& [alias, path] : c.group->expose_inputs) {
-                ports.emplace_back(alias, false);
+                ports.emplace_back(alias, false, resolve_port_type(*c.group, path, false));
             }
             for (const auto& [alias, path] : c.group->expose_outputs) {
-                ports.emplace_back(alias, true);
+                ports.emplace_back(alias, true, resolve_port_type(*c.group, path, true));
             }
         }
 
@@ -263,12 +306,12 @@ class canvas_scene final : public QGraphicsScene {
         }
 
         double y = node_header;
-        for (const auto& [port, is_output] : ports) {
+        for (const auto& [port, is_output, port_type] : ports) {
             auto* label = new QGraphicsSimpleTextItem(node);
             label->setBrush(QBrush(QColor(200, 200, 210)));
             label->setText(QString::fromStdString(port));
             label->setPos(is_output ? node_width - 14.0 - label->boundingRect().width() : 14.0, y);
-            auto* pin = new pin_item(node, name + "." + port, is_output);
+            auto* pin = new pin_item(node, name + "." + port, is_output, type_color(port_type));
             pin->setPos(is_output ? node_width : 0.0, y + 7.0);
             pins_[pin_key(name + "." + port, is_output)] = pin;
             y += pin_row;

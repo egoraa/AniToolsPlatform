@@ -4,8 +4,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <typeindex>
 #include <utility>
 
 #include <QBrush>
@@ -25,15 +29,31 @@ inline constexpr double node_header = 34.0;
 inline constexpr double pin_row = 18.0;
 inline constexpr double pin_radius = 5.0;
 
+// Цвет порта — детерминированно из имени типа (FNV-1a → оттенок HSV):
+// входы и выходы одного типа выглядят одинаково на всех узлах и между
+// запусками; направление и так видно по стороне узла. Неизвестный тип
+// (фабрика не загружена) — нейтральный серый.
+[[nodiscard]] inline QColor type_color(const std::optional<std::type_index>& type) {
+    if (!type) {
+        return {150, 150, 150};
+    }
+    const std::string_view name = type->name();
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const char c : name) {
+        hash = (hash ^ static_cast<unsigned char>(c)) * 1099511628211ull;
+    }
+    return QColor::fromHsv(static_cast<int>(hash % 360), 170, 220);
+}
+
 class pin_item final : public QGraphicsEllipseItem {
    public:
     enum { Type = UserType + 1 };
 
-    pin_item(QGraphicsItem* parent, std::string port_path, bool output)
+    pin_item(QGraphicsItem* parent, std::string port_path, bool output, const QColor& color)
         : QGraphicsEllipseItem(-pin_radius, -pin_radius, 2 * pin_radius, 2 * pin_radius, parent)
         , port_path_(std::move(port_path))
         , output_(output) {
-        setBrush(QBrush(output ? QColor(120, 200, 120) : QColor(120, 160, 220)));
+        setBrush(QBrush(color));
         setPen(QPen(Qt::black, 1));
     }
 

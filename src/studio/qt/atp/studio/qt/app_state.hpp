@@ -67,14 +67,6 @@ struct ui_callbacks {
     std::function<void()> selection_changed;
 };
 
-namespace detail {
-
-[[nodiscard]] inline std::string full_path(const std::string& group_path, const std::string& child) {
-    return group_path.empty() ? child : group_path + "." + child;
-}
-
-}  // namespace detail
-
 }  // namespace atp::studio::qt
 
 #endif  // ATP_STUDIO_QT_APP_STATE_HPP

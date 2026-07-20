@@ -2,40 +2,15 @@
 #define ATP_STUDIO_QT_PALETTE_WIDGET_HPP
 
 #include <filesystem>
+#include <optional>
 #include <string>
-#include <system_error>
 
 #include <QTreeWidget>
 
+#include <atp/studio/add_module.hpp>
 #include <atp/studio/qt/app_state.hpp>
 
 namespace atp::studio::qt {
-
-namespace detail {
-
-// Имя нового узла: имя фабрики, при занятости — числовой суффикс.
-inline std::string unique_child_name(const app_state& state, const std::string& factory) {
-    const app::group_node* g = state.doc.group_at(state.current_group);
-    auto taken = [&](const std::string& name) {
-        for (const app::child_node& c : g->children) {
-            if ((c.module ? c.module->name : c.group->name) == name) {
-                return true;
-            }
-        }
-        return false;
-    };
-    if (!taken(factory)) {
-        return factory;
-    }
-    for (int i = 2;; ++i) {
-        const std::string candidate = factory + "_" + std::to_string(i);
-        if (!taken(candidate)) {
-            return candidate;
-        }
-    }
-}
-
-}  // namespace detail
 
 class palette_widget final : public QTreeWidget {
    public:
@@ -75,32 +50,28 @@ class palette_widget final : public QTreeWidget {
         if (item == nullptr || item->parent() == nullptr || item->isDisabled() || state_.run.running()) {
             return;  // даблклик по заголовку плагина — не добавление
         }
-        const std::string factory = item->data(0, Qt::UserRole).toString().toStdString();
-        const std::string ver_text = item->data(0, Qt::UserRole + 1).toString().toStdString();
-        const std::filesystem::path plugin(item->data(0, Qt::UserRole + 2).toString().toStdWString());
+        add_module_from_item(item, std::nullopt);
+    }
+
+    // Общий путь для двойного клика (position = nullopt → auto_layout) и
+    // сброса на канвас (position = точка сброса).
+    void add_module_from_item(QTreeWidgetItem* item, std::optional<node_position> position) {
+        studio::add_module_request request;
+        request.group_path = state_.current_group;
+        request.factory = item->data(0, Qt::UserRole).toString().toStdString();
+        request.factory_version = try_parse_version(item->data(0, Qt::UserRole + 1).toString().toStdString());
+        request.plugin = std::filesystem::path(item->data(0, Qt::UserRole + 2).toString().toStdWString());
+        request.config_dir = state_.config_dir();
+        request.position = position;
         try {
-            state_.doc.add_module(state_.current_group, factory, detail::unique_child_name(state_, factory),
-                                  try_parse_version(ver_text));
-            ensure_plugin_listed(plugin);
+            const studio::add_module_result result = studio::add_module(state_.doc, request);
+            if (!result.warning.empty()) {
+                callbacks_.error(QString::fromStdString("warning: " + result.warning));
+            }
             callbacks_.document_changed();
         } catch (const std::exception& e) {
             callbacks_.error(QString::fromStdString(std::string("add module: ") + e.what()));
         }
-    }
-
-    // Модуль из DLL вне plugins конфига не запустится — путь дописывается
-    // автоматически, относительно каталога документа где возможно.
-    void ensure_plugin_listed(const std::filesystem::path& plugin) {
-        std::error_code ec;
-        const std::filesystem::path relative = std::filesystem::relative(plugin, state_.config_dir(), ec);
-        std::string entry;
-        if (!ec && !relative.empty()) {
-            entry = relative.generic_string();
-        } else {
-            entry = plugin.generic_string();
-            callbacks_.error(QString::fromStdString("warning: plugin path is absolute: " + entry));
-        }
-        state_.doc.add_plugin(entry);
     }
 
     app_state& state_;

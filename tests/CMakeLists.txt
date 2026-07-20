@@ -31,6 +31,7 @@ add_executable(atp_tests
         pipeline_runner_tests.cpp
         pipeline_tests.cpp
         service_directory_tests.cpp
+        studio_add_module_tests.cpp
         studio_document_tests.cpp
         studio_layout_tests.cpp
         studio_module_manager_tests.cpp

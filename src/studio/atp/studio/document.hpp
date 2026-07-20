@@ -103,6 +103,12 @@ inline void rewrite_port_prefix(std::string& port_path, const std::string& old_n
     }
 }
 
+// Полный путь узла: "группа.дитя", в корне — просто имя. Живёт здесь, а не в
+// Qt-слое, потому что позициями узлов оперирует и не-Qt код (add_module).
+[[nodiscard]] inline std::string full_path(const std::string& group_path, const std::string& child) {
+    return group_path.empty() ? child : group_path + "." + child;
+}
+
 }  // namespace detail
 
 // Редактируемый документ: типизированная модель конфига + editor-метаданные.

@@ -114,10 +114,15 @@ inline group_node decode_group(std::string name, const nlohmann::json& j) {
     }
     if (j.contains("expose")) {
         const nlohmann::json& expose = j.at("expose");
-        for (const auto& [alias, path] : expose.value("inputs", nlohmann::json::object()).items()) {
+        // value() отдаёт json по значению, а items() держит ссылку на него:
+        // временный объект в заголовке range-for умирает до тела цикла, и
+        // итерация читает освобождённую память. Держим результат в переменной.
+        const nlohmann::json inputs = expose.value("inputs", nlohmann::json::object());
+        for (const auto& [alias, path] : inputs.items()) {
             g.expose_inputs.emplace_back(alias, path.get<std::string>());
         }
-        for (const auto& [alias, path] : expose.value("outputs", nlohmann::json::object()).items()) {
+        const nlohmann::json outputs = expose.value("outputs", nlohmann::json::object());
+        for (const auto& [alias, path] : outputs.items()) {
             g.expose_outputs.emplace_back(alias, path.get<std::string>());
         }
     }
@@ -219,7 +224,8 @@ inline nlohmann::json encode_group_body(const group_node& g) {
         }
         cfg.threads.push_back(std::move(n));
     }
-    for (const auto& [group_path, thread] : doc.value("assign", nlohmann::json::object()).items()) {
+    const nlohmann::json assign = doc.value("assign", nlohmann::json::object());  // см. про items() выше
+    for (const auto& [group_path, thread] : assign.items()) {
         cfg.assignments.emplace_back(group_path, thread.get<std::string>());
     }
     return cfg;

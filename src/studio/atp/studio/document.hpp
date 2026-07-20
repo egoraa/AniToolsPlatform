@@ -506,7 +506,10 @@ class document {
         }
         try {
             const nlohmann::json doc = nlohmann::json::parse(in);
-            for (const auto& [path, p] : doc.value("positions", nlohmann::json::object()).items()) {
+            // items() держит ссылку на объект: временный от value() умер бы
+            // до тела цикла — поэтому через именованную переменную.
+            const nlohmann::json positions = doc.value("positions", nlohmann::json::object());
+            for (const auto& [path, p] : positions.items()) {
                 if (p.is_object() && p.contains("x") && p.contains("y")) {
                     positions_[path] = {p.at("x").get<float>(), p.at("y").get<float>()};
                 }

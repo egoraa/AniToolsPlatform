@@ -9,7 +9,9 @@ file(GLOB_RECURSE ATP_STUDIO_HEADERS CONFIGURE_DEPENDS
 
 # --- GUI на Qt: собирается только при найденном Qt6 — конфигурация без
 # Qt (например, Linux до установки qt6-base-dev) остаётся рабочей.
-find_package(Qt6 COMPONENTS Widgets)
+# Модуль ищет Qt, а при ATP_AUTO_INSTALL_QT — доустанавливает его через aqtinstall;
+# после include() определён Qt6_FOUND.
+include(${CMAKE_SOURCE_DIR}/cmake/AutoInstallQt.cmake)
 if (Qt6_FOUND)
     qt_standard_project_setup()
     qt_add_executable(atp_studio_qt qt/main.cpp)

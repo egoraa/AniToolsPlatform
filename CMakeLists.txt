@@ -4,6 +4,10 @@ project(AniToolsPlatform)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Если Qt не найден, скачать его через aqtinstall в external/ (см. cmake/AutoInstallQt.cmake).
+# По умолчанию OFF: конфигурации с системным Qt или Qt из пресета не меняются.
+option(ATP_AUTO_INSTALL_QT "Download Qt via aqtinstall into external/ if not found" OFF)
+
 # Заголовки платформы — единая точка подключения для приложения и тестов.
 add_library(atp_platform INTERFACE)
 target_include_directories(atp_platform INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)

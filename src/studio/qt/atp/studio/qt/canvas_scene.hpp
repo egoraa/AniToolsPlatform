@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -15,12 +16,16 @@
 
 #include <QGraphicsLineItem>
 #include <QGraphicsScene>
+#include <QGraphicsSceneDragDropEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QKeyEvent>
+#include <QMimeData>
 
+#include <atp/studio/add_module.hpp>
 #include <atp/studio/layout.hpp>
 #include <atp/studio/qt/app_state.hpp>
 #include <atp/studio/qt/canvas_items.hpp>
+#include <atp/studio/qt/module_mime.hpp>
 #include <atp/studio/value_format.hpp>
 
 namespace atp::studio::qt {
@@ -120,6 +125,42 @@ class canvas_scene final : public QGraphicsScene {
     }
 
    protected:
+    // Перетаскивание из палитры: принимаем только свой MIME-тип и только на
+    // стопе — документ на ходу read-only, как и для мыши с Delete.
+    void dragEnterEvent(QGraphicsSceneDragDropEvent* event) override {
+        accept_module_drag(event);
+    }
+
+    void dragMoveEvent(QGraphicsSceneDragDropEvent* event) override {
+        accept_module_drag(event);
+    }
+
+    void dropEvent(QGraphicsSceneDragDropEvent* event) override {
+        module_mime_payload payload;
+        if (state_.run.running() || !decode_module_mime(event->mimeData(), payload)) {
+            QGraphicsScene::dropEvent(event);
+            return;
+        }
+        studio::add_module_request request;
+        request.group_path = state_.current_group;
+        request.factory = payload.factory.toStdString();
+        request.factory_version = try_parse_version(payload.version.toStdString());
+        request.plugin = std::filesystem::path(payload.plugin.toStdWString());
+        request.config_dir = state_.config_dir();
+        request.position = node_position{static_cast<float>(event->scenePos().x()),
+                                         static_cast<float>(event->scenePos().y())};
+        try {
+            const studio::add_module_result result = studio::add_module(state_.doc, request);
+            if (!result.warning.empty()) {
+                callbacks_.error(QString::fromStdString("warning: " + result.warning));
+            }
+            callbacks_.document_changed();
+        } catch (const std::exception& e) {
+            callbacks_.error(QString::fromStdString(std::string("add module: ") + e.what()));
+        }
+        event->acceptProposedAction();
+    }
+
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override {
         if (!state_.run.running()) {
             if (auto* pin = pin_at(event->scenePos())) {
@@ -212,6 +253,16 @@ class canvas_scene final : public QGraphicsScene {
     }
 
    private:
+    // ignore() вместо accept() — курсор сам покажет запрет сброса.
+    void accept_module_drag(QGraphicsSceneDragDropEvent* event) {
+        if (!state_.run.running() && event->mimeData() != nullptr &&
+            event->mimeData()->hasFormat(module_mime_type)) {
+            event->acceptProposedAction();
+        } else {
+            event->ignore();
+        }
+    }
+
     [[nodiscard]] static std::string pin_key(const std::string& port_path, bool output) {
         return (output ? "o:" : "i:") + port_path;
     }

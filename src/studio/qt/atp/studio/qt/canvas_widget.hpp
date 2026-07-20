@@ -26,6 +26,11 @@ class canvas_widget final : public QWidget {
         view_ = new QGraphicsView(scene_, this);
         view_->setRenderHint(QPainter::Antialiasing);
         view_->setDragMode(QGraphicsView::RubberBandDrag);
+        // Сброс принимает вьюпорт, а не сам view: setupViewport копирует флаг в
+        // момент создания вьюпорта, то есть до этой строки — поэтому явно оба.
+        // Дальше QGraphicsView сам транслирует событие сцене.
+        view_->setAcceptDrops(true);
+        view_->viewport()->setAcceptDrops(true);
         layout->addWidget(crumbs_);
         layout->addWidget(view_, 1);
     }

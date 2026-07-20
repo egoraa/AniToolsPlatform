@@ -9,6 +9,7 @@
 
 #include <atp/studio/add_module.hpp>
 #include <atp/studio/qt/app_state.hpp>
+#include <atp/studio/qt/module_mime.hpp>
 
 namespace atp::studio::qt {
 
@@ -16,7 +17,9 @@ class palette_widget final : public QTreeWidget {
    public:
     palette_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent = nullptr)
         : QTreeWidget(parent), state_(state), callbacks_(callbacks) {
-        setHeaderLabel("modules (double-click to add)");
+        setHeaderLabel("modules (double-click or drag to add)");
+        setDragEnabled(true);
+        setDragDropMode(QAbstractItemView::DragOnly);
         QObject::connect(this, &QTreeWidget::itemDoubleClicked, this,
                          [this](QTreeWidgetItem* item, int) { add_from_item(item); });
     }
@@ -43,6 +46,26 @@ class palette_widget final : public QTreeWidget {
         }
         expandAll();
         setEnabled(!state_.run.running());  // документ read-only на ходу
+    }
+
+   protected:
+    [[nodiscard]] QStringList mimeTypes() const override {
+        return {QString::fromLatin1(module_mime_type)};
+    }
+
+    // nullptr — перетаскивания не будет: заголовок плагина (нет родителя),
+    // сломанный модуль (isDisabled) и запущенный пайплайн не перетаскиваются.
+    [[nodiscard]] QMimeData* mimeData(const QList<QTreeWidgetItem*>& items) const override {
+        if (items.size() != 1 || state_.run.running()) {
+            return nullptr;
+        }
+        QTreeWidgetItem* item = items.front();
+        if (item->parent() == nullptr || item->isDisabled()) {
+            return nullptr;
+        }
+        return encode_module_mime({item->data(0, Qt::UserRole).toString(),
+                                   item->data(0, Qt::UserRole + 1).toString(),
+                                   item->data(0, Qt::UserRole + 2).toString()});
     }
 
    private:

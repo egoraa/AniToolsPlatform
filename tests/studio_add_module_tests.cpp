@@ -9,9 +9,14 @@
 
 namespace {
 
-// Каталог конфига в тестах не создаётся на диске: relative() работает
-// лексически (weakly_canonical) и несуществующие пути обрабатывает.
-const std::filesystem::path config_dir = "/tmp/atp-cfg";
+// Каталоги на диске не создаются: relative() достраивает несуществующий
+// хвост лексически. Но корень — существующий temp_directory_path, а не
+// написанный руками "/tmp": на Windows путь без имени диска остаётся
+// drive-relative, и weakly_canonical достроит диск только тому пути, чей
+// префикс реально существует. Разъехавшиеся root_name дают пустой
+// lexically_relative — тест зависел бы от содержимого диска.
+const std::filesystem::path test_root = std::filesystem::temp_directory_path() / "atp-add-module";
+const std::filesystem::path config_dir = test_root / "cfg";
 
 atp::studio::add_module_request request(const char* factory) {
     atp::studio::add_module_request r;
@@ -64,10 +69,10 @@ TEST(StudioAddModule, PluginInsideConfigDirBecomesRelative) {
 TEST(StudioAddModule, PluginOutsideConfigDirWalksUp) {
     atp::studio::document doc = atp::studio::document::create();
     auto r = request("counter");
-    r.plugin = "/opt/atp/libdemo.so";
+    r.plugin = test_root / "opt" / "atp" / "libdemo.so";
     const auto result = atp::studio::add_module(doc, r);
     ASSERT_EQ(doc.config().plugins.size(), 1u);
-    EXPECT_EQ(doc.config().plugins[0], "../../opt/atp/libdemo.so");  // /tmp/atp-cfg → / → opt
+    EXPECT_EQ(doc.config().plugins[0], "../opt/atp/libdemo.so");  // <root>/cfg → <root> → opt
     EXPECT_TRUE(result.warning.empty());  // относительный путь получился — предупреждать не о чем
 }
 
@@ -79,7 +84,7 @@ TEST(StudioAddModule, UnsavedDocumentKeepsAbsolutePluginAndWarns) {
     r.config_dir.clear();
     const auto result = atp::studio::add_module(doc, r);
     ASSERT_EQ(doc.config().plugins.size(), 1u);
-    EXPECT_EQ(doc.config().plugins[0], "/tmp/atp-cfg/libdemo.so");
+    EXPECT_EQ(doc.config().plugins[0], (config_dir / "libdemo.so").generic_string());
     EXPECT_FALSE(result.warning.empty());
 }
 

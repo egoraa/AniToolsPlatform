@@ -14,8 +14,7 @@ namespace {
 class DocumentFiles : public ::testing::Test {
    protected:
     void SetUp() override {
-        dir_ = std::filesystem::path(::testing::TempDir()) /
-               ::testing::UnitTest::GetInstance()->current_test_info()->name();
+        dir_ = std::filesystem::temp_directory_path() / ::testing::UnitTest::GetInstance()->current_test_info()->name();
         std::filesystem::create_directories(dir_);
     }
 

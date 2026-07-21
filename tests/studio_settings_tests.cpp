@@ -11,7 +11,7 @@ namespace {
 
 std::filesystem::path temp_file(const std::string& name) {
     const auto dir =
-        std::filesystem::path(::testing::TempDir()) / ::testing::UnitTest::GetInstance()->current_test_info()->name();
+        std::filesystem::temp_directory_path() / ::testing::UnitTest::GetInstance()->current_test_info()->name();
     std::filesystem::create_directories(dir);
     return dir / name;
 }

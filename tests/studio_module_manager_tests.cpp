@@ -55,7 +55,7 @@ TEST(ModuleManager, DuplicateModulesRejectPluginEntirely) {
 
     // та же DLL под другим именем: те же (имя, версия) → конфликт, файл
     // отвергается целиком, победил загруженный раньше
-    const auto copy = std::filesystem::path(::testing::TempDir()) / "copy_of_test_plugin.dll";
+    const auto copy = std::filesystem::temp_directory_path() / "copy_of_test_plugin.dll";
     std::filesystem::copy_file(ATP_TEST_PLUGIN, copy, std::filesystem::copy_options::overwrite_existing);
     manager.load_plugin(copy);
 

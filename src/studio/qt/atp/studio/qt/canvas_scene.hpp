@@ -23,6 +23,7 @@
 
 #include <atp/studio/add_module.hpp>
 #include <atp/studio/layout.hpp>
+#include <atp/studio/port_types.hpp>
 #include <atp/studio/qt/app_state.hpp>
 #include <atp/studio/qt/canvas_items.hpp>
 #include <atp/studio/qt/module_mime.hpp>
@@ -147,8 +148,8 @@ class canvas_scene final : public QGraphicsScene {
         request.factory_version = try_parse_version(payload.version.toStdString());
         request.plugin = std::filesystem::path(payload.plugin.toStdWString());
         request.config_dir = state_.config_dir();
-        request.position = node_position{static_cast<float>(event->scenePos().x()),
-                                         static_cast<float>(event->scenePos().y())};
+        request.position =
+            node_position{static_cast<float>(event->scenePos().x()), static_cast<float>(event->scenePos().y())};
         try {
             const studio::add_module_result result = studio::add_module(state_.doc, request);
             if (!result.warning.empty()) {
@@ -193,7 +194,7 @@ class canvas_scene final : public QGraphicsScene {
                 const std::string& from = drag_from_->is_output() ? drag_from_->port_path() : target->port_path();
                 const std::string& to = drag_from_->is_output() ? target->port_path() : drag_from_->port_path();
                 try {
-                    state_.doc.connect(state_.current_group, from, to);
+                    connect_ports(state_.doc, state_.current_group, from, to, describer());
                     callbacks_.document_changed();
                 } catch (const std::exception& e) {
                     callbacks_.error(QString::fromStdString(std::string("connect: ") + e.what()));
@@ -255,8 +256,7 @@ class canvas_scene final : public QGraphicsScene {
    private:
     // ignore() вместо accept() — курсор сам покажет запрет сброса.
     void accept_module_drag(QGraphicsSceneDragDropEvent* event) {
-        if (!state_.run.running() && event->mimeData() != nullptr &&
-            event->mimeData()->hasFormat(module_mime_type)) {
+        if (!state_.run.running() && event->mimeData() != nullptr && event->mimeData()->hasFormat(module_mime_type)) {
             event->acceptProposedAction();
         } else {
             event->ignore();
@@ -276,43 +276,12 @@ class canvas_scene final : public QGraphicsScene {
         return nullptr;
     }
 
-    // Тип порта по пути "дитя.порт" внутри группы: модуль — из describe,
-    // подгруппа — рекурсивно сквозь её expose до реального порта. nullopt —
-    // фабрика не загружена/порт не найден: пин будет нейтрального цвета.
-    [[nodiscard]] std::optional<std::type_index> resolve_port_type(const app::group_node& g,
-                                                                   const std::string& port_path,
-                                                                   bool output) {
-        const std::size_t dot = port_path.find('.');
-        if (dot == std::string::npos) {
-            return std::nullopt;
-        }
-        const std::string child = port_path.substr(0, dot);
-        const std::string port = port_path.substr(dot + 1);
-        for (const app::child_node& c : g.children) {
-            if (c.module && c.module->name == child) {
-                const module_info* info = state_.describe_cached(c.module->factory, c.module->factory_version);
-                if (info == nullptr) {
-                    return std::nullopt;
-                }
-                const auto& list = output ? info->outputs : info->inputs;
-                for (const port_info& p : list) {
-                    if (p.name == port) {
-                        return p.type;
-                    }
-                }
-                return std::nullopt;
-            }
-            if (c.group && c.group->name == child) {
-                const auto& expose = output ? c.group->expose_outputs : c.group->expose_inputs;
-                for (const auto& [alias, path] : expose) {
-                    if (alias == port) {
-                        return resolve_port_type(*c.group, path, output);
-                    }
-                }
-                return std::nullopt;
-            }
-        }
-        return std::nullopt;
+    // Описатель для не-Qt слоя (цвета пинов, проверка типов при связывании):
+    // кэш app_state, завёрнутый в коллбэк.
+    [[nodiscard]] describe_fn describer() {
+        return [this](const std::string& factory, const std::optional<version>& ver) {
+            return state_.describe_cached(factory, ver);
+        };
     }
 
     void build_node(const app::child_node& c, const std::unordered_map<std::string, node_position>& fallback) {
@@ -330,10 +299,10 @@ class canvas_scene final : public QGraphicsScene {
             }
         } else {
             for (const auto& [alias, path] : c.group->expose_inputs) {
-                ports.emplace_back(alias, false, resolve_port_type(*c.group, path, false));
+                ports.emplace_back(alias, false, resolve_port_type(*c.group, path, false, describer()));
             }
             for (const auto& [alias, path] : c.group->expose_outputs) {
-                ports.emplace_back(alias, true, resolve_port_type(*c.group, path, true));
+                ports.emplace_back(alias, true, resolve_port_type(*c.group, path, true, describer()));
             }
         }
 

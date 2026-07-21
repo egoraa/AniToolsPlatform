@@ -35,6 +35,7 @@ add_executable(atp_tests
         studio_document_tests.cpp
         studio_layout_tests.cpp
         studio_module_manager_tests.cpp
+        studio_port_types_tests.cpp
         studio_session_tests.cpp
         studio_settings_tests.cpp
         version_tests.cpp)

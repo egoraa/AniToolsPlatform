@@ -10,9 +10,11 @@ Header-only C++23 платформа модульных пайплайнов: м
 - `include/atp/` — **SDK автора модулей** (цель `atp_platform`, INTERFACE):
   io-слой, `module`/`module_base`, фабрики, реестр, `plugin.hpp`. Канонический
   инклюд — `<atp/...>` везде, зонтичный `<atp/io.hpp>` (без `version.hpp`).
-- `src/atp/` — **хост-машинерия** (цель `atp_host`, INTERFACE поверх
-  `atp_platform`): `group`, `pipeline`, `pipeline_runner`, `module_loader`,
-  `thread_name`. Плагины видят только `include/`, хост — оба.
+- `src/runtime/` — **хост-рантайм** (цель `atp_runtime`, INTERFACE поверх
+  `atp_platform` и nlohmann_json): `group`, `pipeline`, `pipeline_runner`,
+  `module_loader`, `thread_name`, а также подсистема конфига (namespace
+  `atp::runtime`, инклюд `<atp/runtime/...>`). Плагины видят только
+  `include/`, хост — оба.
 - `examples/demo` — пайплайн-демо; `examples/plugin_demo` — монолит и DLL-плагин
   из одного модуля; `tests/` — googletest.
 - Сборка — нативные тулчейны через `CMakePresets.json`: `windows-msvc`
@@ -116,7 +118,7 @@ Header-only C++23 платформа модульных пайплайнов: м
   Обёртка `pinned_factory` пересаживает модуль на пин при `create()`;
   монолитный путь (пустой пин) не меняется.
 
-## Платформа исполнения (`src/atp/`)
+## Платформа исполнения (`src/runtime/`)
 
 - **`group : module_base`** — модуль-композит: владеет детьми
   (`child{name, module_ptr, detached}`; подгруппа — такой же ребёнок), снаружи
@@ -168,14 +170,15 @@ Header-only C++23 платформа модульных пайплайнов: м
 
 - Хост по JSON-конфигу: `atp_app <config.json>` — загрузка, валидация,
   сборка `pipeline` + `pipeline_runner`, работа до Ctrl+C или аварии.
-  Логика — header-only `atp_app_lib` (INTERFACE: `atp_host` +
-  nlohmann/json), `main.cpp` тонкий; тесты линкуют `atp_app_lib` напрямую.
-- Компоненты (`src/app/atp/app/`, инклюд `<atp/app/...>`):
-  `config_loader` (чтение + `$include`), `config_validator` (все ошибки за
-  один проход, каждая с JSON-путём), `config_model` (типизированная модель +
-  `decode` + `encode` — обратный, каноничная форма с опущенными дефолтами),
-  `pipeline_builder` (`application`; `build` — плагины + сборка,
-  `build_pipeline` — сборка в уже наполненный реестр, путь studio).
+  `atp_app` — тонкий `main.cpp` поверх `atp_runtime`; тесты линкуют
+  `atp_runtime` напрямую.
+- Компоненты (`src/runtime/atp/runtime/`, инклюд `<atp/runtime/...>`,
+  namespace `atp::runtime`): `config_loader` (чтение + `$include`),
+  `config_validator` (все ошибки за один проход, каждая с JSON-путём),
+  `config_model` (типизированная модель + `decode` + `encode` — обратный,
+  каноничная форма с опущенными дефолтами), `pipeline_builder`
+  (`application`; `build` — плагины + сборка, `build_pipeline` — сборка в
+  уже наполненный реестр, путь studio).
 - **Схема 1.0** (`config_schema_version`): мажор конфига обязан совпадать,
   минор — не превышать наш («поля из будущего» отклоняются, не игнорируются).
   Корневые ключи: `version` (только в корневом документе), `plugins` (пути

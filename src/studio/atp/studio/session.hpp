@@ -12,11 +12,11 @@
 #include <utility>
 #include <vector>
 
-#include <atp/runtime/config_model.hpp>
-#include <atp/runtime/pipeline_builder.hpp>
 #include <atp/group.hpp>
 #include <atp/pipeline.hpp>
 #include <atp/pipeline_runner.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/pipeline_builder.hpp>
 
 namespace atp::studio {
 

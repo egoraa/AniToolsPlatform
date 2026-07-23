@@ -8,9 +8,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atp/module.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
-#include <atp/module.hpp>
 #include <atp/studio/module_manager.hpp>
 #include <atp/studio/session.hpp>
 #include <atp/studio/value_format.hpp>

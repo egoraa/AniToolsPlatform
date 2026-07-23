@@ -7,12 +7,12 @@
 #include <utility>
 #include <vector>
 
-#include <atp/runtime/config_model.hpp>
 #include <atp/group.hpp>
 #include <atp/module_loader.hpp>
 #include <atp/module_registry.hpp>
 #include <atp/pipeline.hpp>
 #include <atp/pipeline_runner.hpp>
+#include <atp/runtime/config_model.hpp>
 
 namespace atp::runtime {
 

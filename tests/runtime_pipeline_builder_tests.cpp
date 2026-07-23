@@ -6,10 +6,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atp/module.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
-#include <atp/module.hpp>
 
 namespace {
 

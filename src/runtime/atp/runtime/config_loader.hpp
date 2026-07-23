@@ -1,5 +1,5 @@
-#ifndef ATP_APP_CONFIG_LOADER_HPP
-#define ATP_APP_CONFIG_LOADER_HPP
+#ifndef ATP_RUNTIME_CONFIG_LOADER_HPP
+#define ATP_RUNTIME_CONFIG_LOADER_HPP
 
 #include <algorithm>
 #include <cstddef>
@@ -11,9 +11,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_model.hpp>
+#include <atp/runtime/config_model.hpp>
 
-namespace atp::app {
+namespace atp::runtime {
 
 namespace detail {
 
@@ -104,6 +104,6 @@ inline void expand_includes(nlohmann::json& node,
     return doc;
 }
 
-}  // namespace atp::app
+}  // namespace atp::runtime
 
-#endif  // ATP_APP_CONFIG_LOADER_HPP
+#endif  // ATP_RUNTIME_CONFIG_LOADER_HPP

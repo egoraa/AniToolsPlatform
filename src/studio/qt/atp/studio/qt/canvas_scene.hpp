@@ -70,14 +70,14 @@ class canvas_scene final : public QGraphicsScene {
         prev_writes_.clear();
         temp_link_ = nullptr;
         drag_from_ = nullptr;
-        const app::group_node* g = state_.doc.group_at(state_.current_group);
+        const runtime::group_node* g = state_.doc.group_at(state_.current_group);
         if (g == nullptr) {
             // группу могли удалить/переименовать — канвас откатывается к корню
             state_.current_group.clear();
             g = state_.doc.group_at("");
         }
         const auto fallback = auto_layout(*g);
-        for (const app::child_node& c : g->children) {
+        for (const runtime::child_node& c : g->children) {
             build_node(c, fallback);
         }
         rebuild_links(*g);
@@ -87,7 +87,7 @@ class canvas_scene final : public QGraphicsScene {
 
     // Обновление концов связей при переносе узлов — без перестройки сцены.
     void update_link_paths() {
-        const app::group_node* g = state_.doc.group_at(state_.current_group);
+        const runtime::group_node* g = state_.doc.group_at(state_.current_group);
         if (g == nullptr) {
             return;
         }
@@ -331,7 +331,7 @@ class canvas_scene final : public QGraphicsScene {
         };
     }
 
-    void build_node(const app::child_node& c, const std::unordered_map<std::string, node_position>& fallback) {
+    void build_node(const runtime::child_node& c, const std::unordered_map<std::string, node_position>& fallback) {
         const std::string& name = c.module ? c.module->name : c.group->name;
         // (порт, is_output, тип) — тип красит пин: один тип — один цвет
         std::vector<std::tuple<std::string, bool, std::optional<std::type_index>>> ports;
@@ -394,7 +394,7 @@ class canvas_scene final : public QGraphicsScene {
         };
     }
 
-    void rebuild_links(const app::group_node& g) {
+    void rebuild_links(const runtime::group_node& g) {
         for (std::size_t i = 0; i < g.connections.size(); ++i) {
             auto* link = new link_item(i);
             addItem(link);
@@ -407,7 +407,7 @@ class canvas_scene final : public QGraphicsScene {
     // экспонируется через входной пин ребёнка (левая сторона), выход — через
     // выходной (правая). Пин отсутствует (фабрика не загружена) — стаб
     // пропускаем, как связи с недостающими концами.
-    void build_stubs(const app::group_node& g) {
+    void build_stubs(const runtime::group_node& g) {
         for (const auto& [alias, path] : g.expose_inputs) {
             add_stub(g, alias, path, false);
         }
@@ -417,7 +417,7 @@ class canvas_scene final : public QGraphicsScene {
         reposition_stubs();
     }
 
-    void add_stub(const app::group_node& g, const std::string& alias, const std::string& path, bool is_output) {
+    void add_stub(const runtime::group_node& g, const std::string& alias, const std::string& path, bool is_output) {
         auto pin = pins_.find(pin_key(path, is_output));
         if (pin == pins_.end()) {
             return;
@@ -432,7 +432,7 @@ class canvas_scene final : public QGraphicsScene {
     // двигаем и стаб. Пин ищем заново по алиасу через expose_* текущей группы
     // (отдельный вектор пинов не держим — моделей мало).
     void reposition_stubs() {
-        const app::group_node* g = state_.doc.group_at(state_.current_group);
+        const runtime::group_node* g = state_.doc.group_at(state_.current_group);
         if (g == nullptr) {
             return;
         }

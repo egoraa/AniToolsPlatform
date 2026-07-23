@@ -46,9 +46,9 @@ class inspector_widget final : public QWidget {
             delete old;
         }
         const bool locked = state_.run.running();
-        const app::group_node* g = state_.doc.group_at(state_.current_group);
+        const runtime::group_node* g = state_.doc.group_at(state_.current_group);
         if (g != nullptr && !state_.selected_child.empty()) {
-            for (const app::child_node& c : g->children) {
+            for (const runtime::child_node& c : g->children) {
                 const std::string& name = c.module ? c.module->name : c.group->name;
                 if (name != state_.selected_child) {
                     continue;
@@ -88,7 +88,7 @@ class inspector_widget final : public QWidget {
         }
     }
 
-    void build_module_section(const app::module_node& m) {
+    void build_module_section(const runtime::module_node& m) {
         add_header(QString::fromStdString("module: " + m.factory));
 
         QWidget* row = add_row();
@@ -130,7 +130,7 @@ class inspector_widget final : public QWidget {
 
     void build_expose_editor(const std::string& child, bool inputs) {
         const std::string group_path = detail::full_path(state_.current_group, child);
-        const app::group_node* g = state_.doc.group_at(group_path);
+        const runtime::group_node* g = state_.doc.group_at(group_path);
         if (g == nullptr) {
             return;
         }
@@ -186,7 +186,7 @@ class inspector_widget final : public QWidget {
         add_header("Threads");
         auto* threads = new QListWidget(body_);
         threads->setFixedHeight(70);
-        for (const app::thread_node& t : state_.doc.config().threads) {
+        for (const runtime::thread_node& t : state_.doc.config().threads) {
             QString text = QString::fromStdString(t.name);
             switch (t.mode) {
                 case thread_mode::on_demand:

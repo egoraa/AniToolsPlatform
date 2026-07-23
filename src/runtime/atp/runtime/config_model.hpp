@@ -1,5 +1,5 @@
-#ifndef ATP_APP_CONFIG_MODEL_HPP
-#define ATP_APP_CONFIG_MODEL_HPP
+#ifndef ATP_RUNTIME_CONFIG_MODEL_HPP
+#define ATP_RUNTIME_CONFIG_MODEL_HPP
 
 #include <chrono>
 #include <memory>
@@ -14,7 +14,7 @@
 #include <atp/pipeline_runner.hpp>
 #include <atp/version.hpp>
 
-namespace atp::app {
+namespace atp::runtime {
 
 // Версия схемы конфига, которую понимает приложение: мажор конфига обязан
 // совпадать, минор — не превышать наш (поля «из будущего» отклоняются,
@@ -273,6 +273,6 @@ inline nlohmann::json encode_group_body(const group_node& g) {
     return doc;
 }
 
-}  // namespace atp::app
+}  // namespace atp::runtime
 
-#endif  // ATP_APP_CONFIG_MODEL_HPP
+#endif  // ATP_RUNTIME_CONFIG_MODEL_HPP

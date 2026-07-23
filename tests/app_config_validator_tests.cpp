@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_validator.hpp>
+#include <atp/runtime/config_validator.hpp>
 
 namespace {
 
@@ -33,7 +33,7 @@ json valid_config() {
 }
 
 std::vector<std::string> check(const json& doc) {
-    return atp::app::validate(doc);
+    return atp::runtime::validate(doc);
 }
 
 TEST(ConfigValidator, AcceptsValidConfig) {

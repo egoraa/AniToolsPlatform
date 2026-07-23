@@ -1,5 +1,5 @@
-#ifndef ATP_APP_PIPELINE_BUILDER_HPP
-#define ATP_APP_PIPELINE_BUILDER_HPP
+#ifndef ATP_RUNTIME_PIPELINE_BUILDER_HPP
+#define ATP_RUNTIME_PIPELINE_BUILDER_HPP
 
 #include <cstddef>
 #include <filesystem>
@@ -7,14 +7,14 @@
 #include <utility>
 #include <vector>
 
-#include <atp/app/config_model.hpp>
+#include <atp/runtime/config_model.hpp>
 #include <atp/group.hpp>
 #include <atp/module_loader.hpp>
 #include <atp/module_registry.hpp>
 #include <atp/pipeline.hpp>
 #include <atp/pipeline_runner.hpp>
 
-namespace atp::app {
+namespace atp::runtime {
 
 // Собранное приложение. Порядок членов = порядок разрушения в обратную
 // сторону: раннер умирает первым (останавливает потоки, ссылаясь на
@@ -125,6 +125,6 @@ inline void build(application& app, const config& cfg, const std::filesystem::pa
     build_pipeline(app.pipe, app.runner, cfg, app.registry);
 }
 
-}  // namespace atp::app
+}  // namespace atp::runtime
 
-#endif  // ATP_APP_PIPELINE_BUILDER_HPP
+#endif  // ATP_RUNTIME_PIPELINE_BUILDER_HPP

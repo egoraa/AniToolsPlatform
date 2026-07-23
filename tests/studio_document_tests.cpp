@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_validator.hpp>
+#include <atp/runtime/config_validator.hpp>
 #include <atp/studio/document.hpp>
 
 namespace {
@@ -44,7 +44,7 @@ constexpr const char* sample_config = R"({
 
 TEST_F(DocumentFiles, CreateStartsEmptyWithCurrentSchema) {
     const atp::studio::document doc = atp::studio::document::create();
-    EXPECT_EQ(doc.config().schema, atp::app::config_schema_version);
+    EXPECT_EQ(doc.config().schema, atp::runtime::config_schema_version);
     EXPECT_TRUE(doc.config().pipeline.children.empty());
     EXPECT_FALSE(doc.had_includes());
 }
@@ -66,7 +66,7 @@ TEST_F(DocumentFiles, OpenRejectsInvalidConfigWithAggregatedErrors) {
     try {
         (void)atp::studio::document::open(file);
         FAIL() << "expected config_error";
-    } catch (const atp::app::config_error& e) {
+    } catch (const atp::runtime::config_error& e) {
         EXPECT_NE(std::string(e.what()).find("typo"), std::string::npos);  // текст валидатора дошёл
     }
 }
@@ -93,7 +93,7 @@ TEST_F(DocumentFiles, SaveWritesValidConfigAndLayoutSidecar) {
 
     std::ifstream in(saved);
     const nlohmann::json written = nlohmann::json::parse(in);
-    EXPECT_TRUE(atp::app::validate(written).empty());  // файл пригоден для atp_app
+    EXPECT_TRUE(atp::runtime::validate(written).empty());  // файл пригоден для atp_app
 
     const atp::studio::document reopened = atp::studio::document::open(saved);
     ASSERT_TRUE(reopened.position("left.src").has_value());
@@ -115,7 +115,7 @@ TEST(DocumentEdit, BuildsPipelineThroughOperations) {
     doc.add_plugin("libdemo.dll");
     doc.add_plugin("libdemo.dll");  // дедуп: не операция, undo не растёт
 
-    const atp::app::config& cfg = doc.config();
+    const atp::runtime::config& cfg = doc.config();
     ASSERT_EQ(cfg.pipeline.children.size(), 2u);
     EXPECT_EQ(cfg.pipeline.children[1].group->children[0].module->name, "printer");
     ASSERT_EQ(cfg.pipeline.connections.size(), 1u);
@@ -124,7 +124,7 @@ TEST(DocumentEdit, BuildsPipelineThroughOperations) {
     ASSERT_EQ(cfg.assignments.size(), 1u);
     ASSERT_EQ(cfg.plugins.size(), 1u);
     // построенное операциями проходит полный validate — инварианты те же
-    EXPECT_TRUE(atp::app::validate(atp::app::encode(cfg)).empty());
+    EXPECT_TRUE(atp::runtime::validate(atp::runtime::encode(cfg)).empty());
 }
 
 TEST(DocumentEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
@@ -132,15 +132,15 @@ TEST(DocumentEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
     doc.add_group("", "g");
     doc.add_module("g", "counter");
 
-    EXPECT_THROW(doc.add_module("g", "counter"), atp::app::config_error);      // дубликат имени
-    EXPECT_THROW(doc.add_module("ghost", "counter"), atp::app::config_error);  // нет группы
-    EXPECT_THROW(doc.add_group("g", "bad.name"), atp::app::config_error);      // точка в имени
-    EXPECT_THROW(doc.connect("g", "no_dot", "counter.in"), atp::app::config_error);
-    EXPECT_THROW(doc.connect("g", "ghost.out", "counter.in"), atp::app::config_error);  // нет ребёнка
-    EXPECT_THROW(doc.set_params("g", "ghost", "{}"), atp::app::config_error);
-    EXPECT_THROW(doc.set_params("g", "counter", "{broken"), atp::app::config_error);         // не-JSON
-    EXPECT_THROW(doc.add_thread("t", atp::thread_mode::throttled), atp::app::config_error);  // период
-    EXPECT_THROW(doc.set_assignment("g", "nowhere"), atp::app::config_error);                // нет потока
+    EXPECT_THROW(doc.add_module("g", "counter"), atp::runtime::config_error);      // дубликат имени
+    EXPECT_THROW(doc.add_module("ghost", "counter"), atp::runtime::config_error);  // нет группы
+    EXPECT_THROW(doc.add_group("g", "bad.name"), atp::runtime::config_error);      // точка в имени
+    EXPECT_THROW(doc.connect("g", "no_dot", "counter.in"), atp::runtime::config_error);
+    EXPECT_THROW(doc.connect("g", "ghost.out", "counter.in"), atp::runtime::config_error);  // нет ребёнка
+    EXPECT_THROW(doc.set_params("g", "ghost", "{}"), atp::runtime::config_error);
+    EXPECT_THROW(doc.set_params("g", "counter", "{broken"), atp::runtime::config_error);         // не-JSON
+    EXPECT_THROW(doc.add_thread("t", atp::thread_mode::throttled), atp::runtime::config_error);  // период
+    EXPECT_THROW(doc.set_assignment("g", "nowhere"), atp::runtime::config_error);                // нет потока
 
     // после отказов откатываются ровно две успешные операции — и всё
     EXPECT_TRUE(doc.undo());

@@ -23,7 +23,7 @@ using describe_fn = std::function<const module_info*(const std::string&, const s
 // Тип порта по пути "дитя.порт" внутри группы: модуль — из describe,
 // подгруппа — рекурсивно сквозь её expose до реального порта. nullopt —
 // фабрика не загружена/порт не найден.
-[[nodiscard]] inline std::optional<std::type_index> resolve_port_type(const app::group_node& g,
+[[nodiscard]] inline std::optional<std::type_index> resolve_port_type(const runtime::group_node& g,
                                                                       const std::string& port_path,
                                                                       bool output,
                                                                       const describe_fn& describe) {
@@ -33,7 +33,7 @@ using describe_fn = std::function<const module_info*(const std::string&, const s
     }
     const std::string child = port_path.substr(0, dot);
     const std::string port = port_path.substr(dot + 1);
-    for (const app::child_node& c : g.children) {
+    for (const runtime::child_node& c : g.children) {
         if (c.module && c.module->name == child) {
             const module_info* info = describe(c.module->factory, c.module->factory_version);
             if (info == nullptr) {
@@ -76,14 +76,14 @@ inline void connect_ports(document& doc,
                           const std::string& to,
                           const describe_fn& describe,
                           bool replay = false) {
-    const app::group_node* g = doc.group_at(group_path);
+    const runtime::group_node* g = doc.group_at(group_path);
     if (g == nullptr) {
-        throw app::config_error("no group '" + group_path + "'");
+        throw runtime::config_error("no group '" + group_path + "'");
     }
     const auto produced = resolve_port_type(*g, from, true, describe);
     const auto accepted = resolve_port_type(*g, to, false, describe);
     if (produced && accepted && !types_compatible(*produced, *accepted)) {
-        throw app::config_error("incompatible types: output '" + from + "' is " + produced->name() + ", input '" + to +
+        throw runtime::config_error("incompatible types: output '" + from + "' is " + produced->name() + ", input '" + to +
                                 "' accepts " + accepted->name());
     }
     doc.connect(group_path, from, to, replay);
@@ -97,9 +97,9 @@ inline void connect_ports(document& doc,
                                              const std::string& group_path,
                                              const std::string& port_path,
                                              bool is_output) {
-    const app::group_node* g = doc.group_at(group_path);
+    const runtime::group_node* g = doc.group_at(group_path);
     if (g == nullptr) {
-        throw app::config_error("no group '" + group_path + "'");
+        throw runtime::config_error("no group '" + group_path + "'");
     }
     const auto& map = is_output ? g->expose_outputs : g->expose_inputs;
     // порт уже экспонирован в этом направлении — дубль не создаём
@@ -110,7 +110,7 @@ inline void connect_ports(document& doc,
     }
     const std::size_t dot = port_path.find('.');
     if (dot == std::string::npos || dot + 1 == port_path.size()) {
-        throw app::config_error("expected '<child>.<port>', got '" + port_path + "'");
+        throw runtime::config_error("expected '<child>.<port>', got '" + port_path + "'");
     }
     const std::string base = port_path.substr(dot + 1);
     // дедуп: base, base_2, base_3, … — первое свободное в этом направлении

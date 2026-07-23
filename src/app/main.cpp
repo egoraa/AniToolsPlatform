@@ -9,10 +9,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_loader.hpp>
-#include <atp/app/config_model.hpp>
-#include <atp/app/config_validator.hpp>
-#include <atp/app/pipeline_builder.hpp>
+#include <atp/runtime/config_loader.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/pipeline_builder.hpp>
 
 namespace {
 
@@ -32,8 +32,8 @@ int main(int argc, char** argv) {
     }
     try {
         const std::filesystem::path config_path = argv[1];
-        const nlohmann::json doc = atp::app::load_config(config_path);
-        const std::vector<std::string> errors = atp::app::validate(doc);
+        const nlohmann::json doc = atp::runtime::load_config(config_path);
+        const std::vector<std::string> errors = atp::runtime::validate(doc);
         if (!errors.empty()) {
             std::cerr << "invalid config '" << config_path.string() << "':\n";
             for (const std::string& e : errors) {
@@ -41,10 +41,10 @@ int main(int argc, char** argv) {
             }
             return 2;
         }
-        const atp::app::config cfg = atp::app::decode(doc);
+        const atp::runtime::config cfg = atp::runtime::decode(doc);
 
-        atp::app::application app;
-        atp::app::build(app, cfg, std::filesystem::weakly_canonical(config_path).parent_path());
+        atp::runtime::application app;
+        atp::runtime::build(app, cfg, std::filesystem::weakly_canonical(config_path).parent_path());
 
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);

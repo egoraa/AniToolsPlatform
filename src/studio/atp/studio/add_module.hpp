@@ -34,12 +34,12 @@ namespace detail {
 [[nodiscard]] inline std::string unique_child_name(const document& doc,
                                                    const std::string& group_path,
                                                    const std::string& factory) {
-    const app::group_node* g = doc.group_at(group_path);
+    const runtime::group_node* g = doc.group_at(group_path);
     auto taken = [&](const std::string& name) {
         if (g == nullptr) {
             return false;  // группы нет — конфликтовать не с чем, ошибку даст add_module
         }
-        for (const app::child_node& c : g->children) {
+        for (const runtime::child_node& c : g->children) {
             if ((c.module ? c.module->name : c.group->name) == name) {
                 return true;
             }
@@ -61,7 +61,7 @@ namespace detail {
 
 // Добавляет модуль и всё, что к нему прилагается: запись DLL в plugins конфига
 // (иначе модуль не запустится) и, если задана, позицию узла. Бросает
-// app::config_error на тех же условиях, что document::add_module.
+// runtime::config_error на тех же условиях, что document::add_module.
 inline add_module_result add_module(document& doc, const add_module_request& request) {
     add_module_result result;
     result.name = detail::unique_child_name(doc, request.group_path, request.factory);

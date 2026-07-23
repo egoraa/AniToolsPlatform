@@ -12,8 +12,8 @@
 #include <utility>
 #include <vector>
 
-#include <atp/app/config_model.hpp>
-#include <atp/app/pipeline_builder.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/pipeline_builder.hpp>
 #include <atp/group.hpp>
 #include <atp/pipeline.hpp>
 #include <atp/pipeline_runner.hpp>
@@ -30,13 +30,13 @@ class session {
 
     // Бросает (config_error сборки и т.п.) — сессия при этом остаётся
     // чистой и пригодной к следующему запуску.
-    void start(const app::config& cfg) {
+    void start(const runtime::config& cfg) {
         if (running()) {
             throw std::logic_error("session is already running");
         }
         auto pipe = std::make_unique<pipeline>();
         auto runner = std::make_unique<pipeline_runner>();
-        app::build_pipeline(*pipe, *runner, cfg, *registry_);
+        runtime::build_pipeline(*pipe, *runner, cfg, *registry_);
         runner->start(*pipe);
         pipe_ = std::move(pipe);  // публикация только после удачного старта
         runner_ = std::move(runner);

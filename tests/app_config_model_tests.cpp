@@ -5,8 +5,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_model.hpp>
-#include <atp/app/config_validator.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_validator.hpp>
 
 namespace {
 
@@ -25,9 +25,9 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
         "threads": [{"name": "t", "mode": "throttled", "period_ms": 5}],
         "assign": {"sub": "t"}
     })");
-    ASSERT_TRUE(atp::app::validate(doc).empty());
+    ASSERT_TRUE(atp::runtime::validate(doc).empty());
 
-    const atp::app::config cfg = atp::app::decode(doc);
+    const atp::runtime::config cfg = atp::runtime::decode(doc);
     EXPECT_EQ(cfg.schema, (atp::version{1, 0}));
     ASSERT_EQ(cfg.plugins.size(), 1u);
 
@@ -59,9 +59,9 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
         "version": "1.0",
         "pipeline": {"children": [{"module": "counter"}]}
     })");
-    ASSERT_TRUE(atp::app::validate(doc).empty());
+    ASSERT_TRUE(atp::runtime::validate(doc).empty());
 
-    const atp::app::config cfg = atp::app::decode(doc);
+    const atp::runtime::config cfg = atp::runtime::decode(doc);
     EXPECT_TRUE(cfg.plugins.empty());
     EXPECT_TRUE(cfg.threads.empty());
     ASSERT_EQ(cfg.pipeline.children.size(), 1u);
@@ -87,8 +87,8 @@ TEST(ConfigEncode, RoundTripsCanonicalDocument) {
         "threads": [{"name": "t", "mode": "throttled", "period_ms": 5}],
         "assign": {"sub": "t"}
     })");
-    ASSERT_TRUE(atp::app::validate(doc).empty());
-    EXPECT_EQ(atp::app::encode(atp::app::decode(doc)), doc);
+    ASSERT_TRUE(atp::runtime::validate(doc).empty());
+    EXPECT_EQ(atp::runtime::encode(atp::runtime::decode(doc)), doc);
 }
 
 TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
@@ -102,15 +102,15 @@ TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
         },
         "threads": [{"name": "t"}]
     })");
-    ASSERT_TRUE(atp::app::validate(doc).empty());
+    ASSERT_TRUE(atp::runtime::validate(doc).empty());
 
-    const nlohmann::json out = atp::app::encode(atp::app::decode(doc));
+    const nlohmann::json out = atp::runtime::encode(atp::runtime::decode(doc));
     // канонизация: имя == фабрике опущено, пустые разделы исчезли, mode явный
     EXPECT_FALSE(out.at("pipeline").at("children").at(0).contains("name"));
     EXPECT_FALSE(out.at("pipeline").at("children").at(1).contains("children"));
     EXPECT_FALSE(out.at("pipeline").at("children").at(1).contains("connections"));
     EXPECT_EQ(out.at("threads").at(0).at("mode"), "on_demand");
-    EXPECT_TRUE(atp::app::validate(out).empty());  // encode выдаёт валидный конфиг
+    EXPECT_TRUE(atp::runtime::validate(out).empty());  // encode выдаёт валидный конфиг
 }
 
 }  // namespace

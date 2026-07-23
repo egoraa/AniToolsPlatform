@@ -15,9 +15,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_loader.hpp>
-#include <atp/app/config_model.hpp>
-#include <atp/app/config_validator.hpp>
+#include <atp/runtime/config_loader.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_validator.hpp>
 
 namespace atp::studio {
 
@@ -35,14 +35,14 @@ namespace detail {
 // Спуск по пути групп ("" — корень, дальше сегменты по точкам). Модуль на
 // пути или неизвестный сегмент — nullptr: вызывающий сам решает, ошибка это
 // или проверка существования.
-inline const app::group_node* find_group(const app::group_node& root, const std::string& path) {
-    const app::group_node* current = &root;
+inline const runtime::group_node* find_group(const runtime::group_node& root, const std::string& path) {
+    const runtime::group_node* current = &root;
     std::size_t begin = 0;
     while (!path.empty()) {
         const std::size_t dot = path.find('.', begin);
         const std::string segment = path.substr(begin, dot == std::string::npos ? dot : dot - begin);
-        const app::group_node* next = nullptr;
-        for (const app::child_node& c : current->children) {
+        const runtime::group_node* next = nullptr;
+        for (const runtime::child_node& c : current->children) {
             if (c.group && c.group->name == segment) {
                 next = c.group.get();
                 break;
@@ -60,16 +60,16 @@ inline const app::group_node* find_group(const app::group_node& root, const std:
     return current;
 }
 
-inline app::group_node* find_group(app::group_node& root, const std::string& path) {
+inline runtime::group_node* find_group(runtime::group_node& root, const std::string& path) {
     // const-версия — единственная реализация; снятие const законно:
     // исходный объект неконстантен.
-    return const_cast<app::group_node*>(find_group(std::as_const(root), path));
+    return const_cast<runtime::group_node*>(find_group(std::as_const(root), path));
 }
 
 // Имя ребёнка/потока/алиаса: непустое, без точки (разделитель путей).
 inline void check_name(const std::string& name, const char* what) {
     if (name.empty() || name.find('.') != std::string::npos) {
-        throw app::config_error(std::string(what) + " '" + name + "' must be non-empty and contain no '.'");
+        throw runtime::config_error(std::string(what) + " '" + name + "' must be non-empty and contain no '.'");
     }
 }
 
@@ -78,17 +78,17 @@ inline std::string port_path_child(const std::string& path) {
     const std::size_t dot = path.find('.');
     if (dot == std::string::npos || dot == 0 || dot + 1 == path.size() ||
         path.find('.', dot + 1) != std::string::npos) {
-        throw app::config_error("expected '<child>.<port>', got '" + path + "'");
+        throw runtime::config_error("expected '<child>.<port>', got '" + path + "'");
     }
     return path.substr(0, dot);
 }
 
-inline const std::string& child_name(const app::child_node& c) {
+inline const std::string& child_name(const runtime::child_node& c) {
     return c.module ? c.module->name : c.group->name;
 }
 
-inline app::child_node* find_child(app::group_node& g, const std::string& name) {
-    for (app::child_node& c : g.children) {
+inline runtime::child_node* find_child(runtime::group_node& g, const std::string& name) {
+    for (runtime::child_node& c : g.children) {
         if (child_name(c) == name) {
             return &c;
         }
@@ -118,7 +118,7 @@ class document {
    public:
     [[nodiscard]] static document create() {
         document d;
-        d.cfg_.schema = app::config_schema_version;
+        d.cfg_.schema = runtime::config_schema_version;
         return d;
     }
 
@@ -134,16 +134,16 @@ class document {
             raw << in.rdbuf();
             d.had_includes_ = raw.str().find("\"$include\"") != std::string::npos;
         }
-        const nlohmann::json doc = app::load_config(file);
-        const std::vector<std::string> errors = app::validate(doc);
+        const nlohmann::json doc = runtime::load_config(file);
+        const std::vector<std::string> errors = runtime::validate(doc);
         if (!errors.empty()) {
             std::string message = "invalid config '" + file.string() + "':";
             for (const std::string& e : errors) {
                 message += "\n  " + e;
             }
-            throw app::config_error(message);
+            throw runtime::config_error(message);
         }
-        d.cfg_ = app::decode(doc);
+        d.cfg_ = runtime::decode(doc);
         d.load_layout(layout_path(file));
         return d;
     }
@@ -151,13 +151,13 @@ class document {
     void save(const std::filesystem::path& file) const {
         std::ofstream out(file);
         if (!out) {
-            throw app::config_error("cannot write config '" + file.string() + "'");
+            throw runtime::config_error("cannot write config '" + file.string() + "'");
         }
-        out << app::encode(cfg_).dump(4) << '\n';
+        out << runtime::encode(cfg_).dump(4) << '\n';
         save_layout(layout_path(file));
     }
 
-    [[nodiscard]] const app::config& config() const {
+    [[nodiscard]] const runtime::config& config() const {
         return cfg_;
     }
 
@@ -165,7 +165,7 @@ class document {
         return had_includes_;
     }
 
-    [[nodiscard]] const app::group_node* group_at(const std::string& path) const {
+    [[nodiscard]] const runtime::group_node* group_at(const std::string& path) const {
         return detail::find_group(cfg_.pipeline, path);
     }
 
@@ -174,7 +174,7 @@ class document {
                     std::string name = {},
                     std::optional<version> factory_version = {},
                     std::string params = {}) {
-        app::group_node& g = require_group(group_path);
+        runtime::group_node& g = require_group(group_path);
         if (name.empty()) {
             name = factory;  // умолчание то же, что у decode
         }
@@ -184,30 +184,30 @@ class document {
             params = parse_params(params);
         }
         snapshot();
-        app::child_node c;
-        c.module = app::module_node{factory, std::move(name), factory_version, std::move(params)};
+        runtime::child_node c;
+        c.module = runtime::module_node{factory, std::move(name), factory_version, std::move(params)};
         g.children.push_back(std::move(c));
     }
 
     void add_group(const std::string& group_path, const std::string& name) {
-        app::group_node& g = require_group(group_path);
+        runtime::group_node& g = require_group(group_path);
         detail::check_name(name, "group name");
         require_free_name(g, name);
         snapshot();
-        app::child_node c;
-        c.group = std::make_unique<app::group_node>();
+        runtime::child_node c;
+        c.group = std::make_unique<runtime::group_node>();
         c.group->name = name;
         g.children.push_back(std::move(c));
     }
 
     void remove_child(const std::string& group_path, const std::string& name) {
-        app::group_node& g = require_group(group_path);
+        runtime::group_node& g = require_group(group_path);
         if (detail::find_child(g, name) == nullptr) {
-            throw app::config_error("no child '" + name + "' in group '" + group_path + "'");
+            throw runtime::config_error("no child '" + name + "' in group '" + group_path + "'");
         }
         snapshot();
         const std::string prefix = name + ".";
-        std::erase_if(g.connections, [&](const app::connection_node& c) {
+        std::erase_if(g.connections, [&](const runtime::connection_node& c) {
             return c.from.starts_with(prefix) || c.to.starts_with(prefix);
         });
         std::erase_if(g.expose_inputs, [&](const auto& e) { return e.second.starts_with(prefix); });
@@ -215,16 +215,16 @@ class document {
         const std::string full = join_path(group_path, name);
         std::erase_if(cfg_.assignments,
                       [&](const auto& a) { return a.first == full || a.first.starts_with(full + "."); });
-        std::erase_if(g.children, [&](const app::child_node& c) { return detail::child_name(c) == name; });
+        std::erase_if(g.children, [&](const runtime::child_node& c) { return detail::child_name(c) == name; });
         // позиции — визуальный слой, но осиротевшие ключи копить незачем
         std::erase_if(positions_, [&](const auto& p) { return p.first == full || p.first.starts_with(full + "."); });
     }
 
     void rename_child(const std::string& group_path, const std::string& old_name, const std::string& new_name) {
-        app::group_node& g = require_group(group_path);
-        app::child_node* child = detail::find_child(g, old_name);
+        runtime::group_node& g = require_group(group_path);
+        runtime::child_node* child = detail::find_child(g, old_name);
         if (child == nullptr) {
-            throw app::config_error("no child '" + old_name + "' in group '" + group_path + "'");
+            throw runtime::config_error("no child '" + old_name + "' in group '" + group_path + "'");
         }
         detail::check_name(new_name, "child name");
         if (new_name != old_name) {
@@ -236,7 +236,7 @@ class document {
         } else {
             child->group->name = new_name;
         }
-        for (app::connection_node& c : g.connections) {
+        for (runtime::connection_node& c : g.connections) {
             detail::rewrite_port_prefix(c.from, old_name, new_name);
             detail::rewrite_port_prefix(c.to, old_name, new_name);
         }
@@ -261,12 +261,12 @@ class document {
     }
 
     void connect(const std::string& group_path, const std::string& from, const std::string& to, bool replay = false) {
-        app::group_node& g = require_group(group_path);
+        runtime::group_node& g = require_group(group_path);
         require_port_child(g, group_path, from);
         require_port_child(g, group_path, to);
-        for (const app::connection_node& c : g.connections) {
+        for (const runtime::connection_node& c : g.connections) {
             if (c.from == from && c.to == to) {
-                throw app::config_error("connection '" + from + "' -> '" + to + "' already exists");
+                throw runtime::config_error("connection '" + from + "' -> '" + to + "' already exists");
             }
         }
         snapshot();
@@ -274,19 +274,19 @@ class document {
     }
 
     void disconnect(const std::string& group_path, std::size_t index) {
-        app::group_node& g = require_group(group_path);
+        runtime::group_node& g = require_group(group_path);
         if (index >= g.connections.size()) {
-            throw app::config_error("no connection #" + std::to_string(index) + " in group '" + group_path + "'");
+            throw runtime::config_error("no connection #" + std::to_string(index) + " in group '" + group_path + "'");
         }
         snapshot();
         g.connections.erase(g.connections.begin() + static_cast<std::ptrdiff_t>(index));
     }
 
     void set_params(const std::string& group_path, const std::string& name, const std::string& params) {
-        app::group_node& g = require_group(group_path);
-        app::child_node* child = detail::find_child(g, name);
+        runtime::group_node& g = require_group(group_path);
+        runtime::child_node* child = detail::find_child(g, name);
         if (child == nullptr || !child->module) {
-            throw app::config_error("no module '" + name + "' in group '" + group_path + "'");
+            throw runtime::config_error("no module '" + name + "' in group '" + group_path + "'");
         }
         std::string canonical = params.empty() ? std::string{} : parse_params(params);
         snapshot();
@@ -294,11 +294,11 @@ class document {
     }
 
     void set_expose_input(const std::string& group_path, const std::string& alias, const std::string& port_path) {
-        app::group_node& g = require_group(group_path);
+        runtime::group_node& g = require_group(group_path);
         set_expose(g.expose_inputs, g, group_path, alias, port_path);
     }
     void set_expose_output(const std::string& group_path, const std::string& alias, const std::string& port_path) {
-        app::group_node& g = require_group(group_path);
+        runtime::group_node& g = require_group(group_path);
         set_expose(g.expose_outputs, g, group_path, alias, port_path);
     }
     void remove_expose_input(const std::string& group_path, const std::string& alias) {
@@ -310,26 +310,26 @@ class document {
 
     void add_thread(const std::string& name, thread_mode mode, std::chrono::milliseconds period = {}) {
         detail::check_name(name, "thread name");
-        for (const app::thread_node& t : cfg_.threads) {
+        for (const runtime::thread_node& t : cfg_.threads) {
             if (t.name == name) {
-                throw app::config_error("duplicate thread name '" + name + "'");
+                throw runtime::config_error("duplicate thread name '" + name + "'");
             }
         }
         // те же контракты, что у pipeline_runner::add_thread
         if (mode == thread_mode::throttled && period <= std::chrono::milliseconds::zero()) {
-            throw app::config_error("throttled thread '" + name + "' requires a positive period");
+            throw runtime::config_error("throttled thread '" + name + "' requires a positive period");
         }
         if (mode != thread_mode::throttled && period != std::chrono::milliseconds::zero()) {
-            throw app::config_error("thread '" + name + "': period is only for throttled mode");
+            throw runtime::config_error("thread '" + name + "': period is only for throttled mode");
         }
         snapshot();
         cfg_.threads.push_back({name, mode, period});
     }
 
     void remove_thread(const std::string& name) {
-        auto it = std::ranges::find_if(cfg_.threads, [&](const app::thread_node& t) { return t.name == name; });
+        auto it = std::ranges::find_if(cfg_.threads, [&](const runtime::thread_node& t) { return t.name == name; });
         if (it == cfg_.threads.end()) {
-            throw app::config_error("no thread '" + name + "'");
+            throw runtime::config_error("no thread '" + name + "'");
         }
         snapshot();
         cfg_.threads.erase(it);
@@ -338,10 +338,10 @@ class document {
 
     void set_assignment(const std::string& group_path, const std::string& thread) {
         if (group_path.empty() || detail::find_group(cfg_.pipeline, group_path) == nullptr) {
-            throw app::config_error("no group at path '" + group_path + "'");
+            throw runtime::config_error("no group at path '" + group_path + "'");
         }
-        if (std::ranges::none_of(cfg_.threads, [&](const app::thread_node& t) { return t.name == thread; })) {
-            throw app::config_error("no thread '" + thread + "'");
+        if (std::ranges::none_of(cfg_.threads, [&](const runtime::thread_node& t) { return t.name == thread; })) {
+            throw runtime::config_error("no thread '" + thread + "'");
         }
         snapshot();
         for (auto& [path, existing] : cfg_.assignments) {
@@ -362,7 +362,7 @@ class document {
     // GUI приводит к относительному от каталога конфига, где может).
     void add_plugin(const std::string& path) {
         if (path.empty()) {
-            throw app::config_error("plugin path must not be empty");
+            throw runtime::config_error("plugin path must not be empty");
         }
         if (std::ranges::find(cfg_.plugins, path) != cfg_.plugins.end()) {
             return;  // уже есть — не операция, историю не трогаем
@@ -373,7 +373,7 @@ class document {
 
     void remove_plugin(const std::string& path) {
         if (std::ranges::find(cfg_.plugins, path) == cfg_.plugins.end()) {
-            throw app::config_error("no plugin '" + path + "' in config");
+            throw runtime::config_error("no plugin '" + path + "' in config");
         }
         snapshot();
         std::erase(cfg_.plugins, path);
@@ -386,8 +386,8 @@ class document {
         if (undo_.empty()) {
             return false;
         }
-        redo_.push_back(app::encode(cfg_));
-        cfg_ = app::decode(undo_.back());
+        redo_.push_back(runtime::encode(cfg_));
+        cfg_ = runtime::decode(undo_.back());
         undo_.pop_back();
         return true;
     }
@@ -398,8 +398,8 @@ class document {
         if (redo_.empty()) {
             return false;
         }
-        undo_.push_back(app::encode(cfg_));
-        cfg_ = app::decode(redo_.back());
+        undo_.push_back(runtime::encode(cfg_));
+        cfg_ = runtime::decode(redo_.back());
         redo_.pop_back();
         return true;
     }
@@ -419,32 +419,32 @@ class document {
     // Снапшот — только ПОСЛЕ всех проверок операции: отказанная операция
     // не должна ни менять документ, ни расти в истории.
     void snapshot() {
-        undo_.push_back(app::encode(cfg_));
+        undo_.push_back(runtime::encode(cfg_));
         redo_.clear();
     }
 
-    [[nodiscard]] app::group_node& require_group(const std::string& path) {
-        app::group_node* g = detail::find_group(cfg_.pipeline, path);
+    [[nodiscard]] runtime::group_node& require_group(const std::string& path) {
+        runtime::group_node* g = detail::find_group(cfg_.pipeline, path);
         if (g == nullptr) {
-            throw app::config_error("no group at path '" + path + "'");
+            throw runtime::config_error("no group at path '" + path + "'");
         }
         return *g;
     }
 
-    void require_free_name(const app::group_node& g, const std::string& name) const {
-        for (const app::child_node& c : g.children) {
+    void require_free_name(const runtime::group_node& g, const std::string& name) const {
+        for (const runtime::child_node& c : g.children) {
             if (detail::child_name(c) == name) {
-                throw app::config_error("duplicate child name '" + name + "'");
+                throw runtime::config_error("duplicate child name '" + name + "'");
             }
         }
     }
 
     // Путь порта обязан вести к существующему ребёнку группы; сам порт
     // проверит сборка (философия платформы: реестр — на этапе build).
-    void require_port_child(app::group_node& g, const std::string& group_path, const std::string& port_path) {
+    void require_port_child(runtime::group_node& g, const std::string& group_path, const std::string& port_path) {
         const std::string child = detail::port_path_child(port_path);
         if (detail::find_child(g, child) == nullptr) {
-            throw app::config_error("no child '" + child + "' in group '" + group_path + "' for '" + port_path + "'");
+            throw runtime::config_error("no child '" + child + "' in group '" + group_path + "' for '" + port_path + "'");
         }
     }
 
@@ -453,7 +453,7 @@ class document {
         try {
             return nlohmann::json::parse(params).dump();
         } catch (const nlohmann::json::parse_error& e) {
-            throw app::config_error(std::string("params is not valid JSON: ") + e.what());
+            throw runtime::config_error(std::string("params is not valid JSON: ") + e.what());
         }
     }
 
@@ -470,7 +470,7 @@ class document {
     }
 
     void set_expose(std::vector<std::pair<std::string, std::string>>& map,
-                    app::group_node& g,
+                    runtime::group_node& g,
                     const std::string& group_path,
                     const std::string& alias,
                     const std::string& port_path) {
@@ -494,7 +494,7 @@ class document {
         std::erase_if(map, [&](const auto& e) { return e.first == alias; });
         if (map.size() == before) {
             undo_.pop_back();  // ничего не изменилось — снапшот лишний
-            throw app::config_error("no alias '" + alias + "' in group '" + group_path + "'");
+            throw runtime::config_error("no alias '" + alias + "' in group '" + group_path + "'");
         }
     }
 
@@ -538,7 +538,7 @@ class document {
         }
     }
 
-    app::config cfg_;
+    runtime::config cfg_;
     bool had_includes_ = false;
     std::map<std::string, node_position> positions_;
     std::vector<nlohmann::json> undo_, redo_;

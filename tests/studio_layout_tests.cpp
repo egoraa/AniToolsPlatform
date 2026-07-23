@@ -1,20 +1,20 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_model.hpp>
-#include <atp/app/config_validator.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_validator.hpp>
 #include <atp/studio/layout.hpp>
 
 namespace {
 
-atp::app::group_node make_group(const char* text) {
+atp::runtime::group_node make_group(const char* text) {
     const nlohmann::json doc = nlohmann::json::parse(text);
-    EXPECT_TRUE(atp::app::validate(doc).empty());
-    return atp::app::decode(doc).pipeline;
+    EXPECT_TRUE(atp::runtime::validate(doc).empty());
+    return atp::runtime::decode(doc).pipeline;
 }
 
 TEST(StudioLayout, ChainsFormColumnsByConnectionDirection) {
-    const atp::app::group_node g = make_group(R"({
+    const atp::runtime::group_node g = make_group(R"({
         "version": "1.0",
         "pipeline": {
             "children": [{"module": "a"}, {"module": "b"}, {"module": "c"}],
@@ -28,7 +28,7 @@ TEST(StudioLayout, ChainsFormColumnsByConnectionDirection) {
 }
 
 TEST(StudioLayout, IndependentNodesStackInFirstColumn) {
-    const atp::app::group_node g = make_group(R"({
+    const atp::runtime::group_node g = make_group(R"({
         "version": "1.0",
         "pipeline": {"children": [{"module": "a"}, {"module": "b"}]}
     })");
@@ -38,7 +38,7 @@ TEST(StudioLayout, IndependentNodesStackInFirstColumn) {
 }
 
 TEST(StudioLayout, ConnectionCycleDoesNotHang) {
-    const atp::app::group_node g = make_group(R"({
+    const atp::runtime::group_node g = make_group(R"({
         "version": "1.0",
         "pipeline": {
             "children": [{"module": "a"}, {"module": "b"}],

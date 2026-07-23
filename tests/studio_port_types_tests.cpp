@@ -7,7 +7,7 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/app/config_model.hpp>
+#include <atp/runtime/config_model.hpp>
 #include <atp/studio/port_types.hpp>
 
 namespace {
@@ -83,7 +83,7 @@ TEST(PortTypes, ConnectRejectsMismatchedTypesWithoutTouchingDocument) {
     const fake_catalog catalog = make_catalog();
 
     EXPECT_THROW(atp::studio::connect_ports(doc, "", "source.value", "text_sink.value", catalog.describer()),
-                 atp::app::config_error);
+                 atp::runtime::config_error);
     EXPECT_TRUE(doc.group_at("")->connections.empty());
 }
 
@@ -113,7 +113,7 @@ TEST(PortTypes, ResolvesSubgroupPortsThroughExpose) {
     EXPECT_EQ(*type, std::type_index(typeid(int)));
 
     EXPECT_THROW(atp::studio::connect_ports(doc, "", "inner.out", "text_sink.value", catalog.describer()),
-                 atp::app::config_error);
+                 atp::runtime::config_error);
     atp::studio::connect_ports(doc, "", "inner.out", "sink.value", catalog.describer());
     EXPECT_EQ(doc.group_at("")->connections.size(), 1u);
 }

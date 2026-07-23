@@ -8,8 +8,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_model.hpp>
-#include <atp/app/config_validator.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_validator.hpp>
 #include <atp/module.hpp>
 #include <atp/studio/module_manager.hpp>
 #include <atp/studio/session.hpp>
@@ -55,7 +55,7 @@ class studio_sink : public atp::module<drain_inputs, atp::io::outputs, "studio_s
     }
 };
 
-atp::app::config session_config() {
+atp::runtime::config session_config() {
     const nlohmann::json doc = nlohmann::json::parse(R"({
         "version": "1.0",
         "pipeline": {
@@ -68,8 +68,8 @@ atp::app::config session_config() {
             "connections": [{"from": "left.out", "to": "right.in"}]
         }
     })");
-    EXPECT_TRUE(atp::app::validate(doc).empty());
-    return atp::app::decode(doc);
+    EXPECT_TRUE(atp::runtime::validate(doc).empty());
+    return atp::runtime::decode(doc);
 }
 
 TEST(StudioSession, RunsConfigSamplesConnectionsAndRestarts) {
@@ -81,7 +81,7 @@ TEST(StudioSession, RunsConfigSamplesConnectionsAndRestarts) {
     EXPECT_FALSE(s.running());
     EXPECT_TRUE(s.stats().empty());
 
-    const atp::app::config cfg = session_config();
+    const atp::runtime::config cfg = session_config();
     s.start(cfg);
     EXPECT_TRUE(s.running());
 
@@ -110,8 +110,8 @@ TEST(StudioSession, BuildFailureLeavesSessionClean) {
     atp::studio::module_manager manager;
     atp::studio::session s(manager.registry());
 
-    const atp::app::config cfg = session_config();  // модули не зарегистрированы
-    EXPECT_THROW(s.start(cfg), atp::app::config_error);
+    const atp::runtime::config cfg = session_config();  // модули не зарегистрированы
+    EXPECT_THROW(s.start(cfg), atp::runtime::config_error);
     EXPECT_FALSE(s.running());
     EXPECT_TRUE(s.sample_connections().empty());
 

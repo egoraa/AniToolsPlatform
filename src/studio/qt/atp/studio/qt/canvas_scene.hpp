@@ -14,11 +14,14 @@
 #include <utility>
 #include <vector>
 
+#include <QAction>
 #include <QGraphicsLineItem>
 #include <QGraphicsScene>
 #include <QGraphicsSceneDragDropEvent>
+#include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QMimeData>
 
 #include <atp/studio/add_module.hpp>
@@ -62,6 +65,7 @@ class canvas_scene final : public QGraphicsScene {
         rebuilding_ = true;
         clear();
         links_.clear();
+        stubs_.clear();
         pins_.clear();
         prev_writes_.clear();
         temp_link_ = nullptr;
@@ -77,6 +81,7 @@ class canvas_scene final : public QGraphicsScene {
             build_node(c, fallback);
         }
         rebuild_links(*g);
+        build_stubs(*g);
         rebuilding_ = false;
     }
 
@@ -93,6 +98,7 @@ class canvas_scene final : public QGraphicsScene {
                 links_[i]->set_endpoints(from->second->scenePos(), to->second->scenePos());
             }
         }
+        reposition_stubs();
     }
 
     [[nodiscard]] const std::vector<link_item*>& links() const {
@@ -163,7 +169,8 @@ class canvas_scene final : public QGraphicsScene {
     }
 
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override {
-        if (!state_.run.running()) {
+        // только ЛКМ арминит протяжку — ПКМ уходит в contextMenuEvent, не мигая линией
+        if (!state_.run.running() && event->button() == Qt::LeftButton) {
             if (auto* pin = pin_at(event->scenePos())) {
                 drag_from_ = pin;
                 temp_link_ =
@@ -199,6 +206,15 @@ class canvas_scene final : public QGraphicsScene {
                 } catch (const std::exception& e) {
                     callbacks_.error(QString::fromStdString(std::string("connect: ") + e.what()));
                 }
+            } else if (target == nullptr) {
+                // отпустили в пустоту — экспонировать порт ребёнка наружу группы
+                try {
+                    (void)expose_port(state_.doc, state_.current_group, drag_from_->port_path(),
+                                      drag_from_->is_output());
+                    callbacks_.document_changed();
+                } catch (const std::exception& e) {
+                    callbacks_.error(QString::fromStdString(std::string("expose: ") + e.what()));
+                }
             }
             drag_from_ = nullptr;
             event->accept();
@@ -222,14 +238,38 @@ class canvas_scene final : public QGraphicsScene {
         QGraphicsScene::mouseDoubleClickEvent(event);
     }
 
+    // Правый клик по пину ребёнка — экспонировать порт наружу группы. Меню
+    // через exec()+сравнение возврата: без сигналов, значит без Q_OBJECT/moc.
+    void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override {
+        pin_item* pin = state_.run.running() ? nullptr : pin_at(event->scenePos());
+        if (pin == nullptr) {
+            QGraphicsScene::contextMenuEvent(event);
+            return;
+        }
+        QMenu menu;
+        QAction* expose = menu.addAction(QStringLiteral("Экспонировать наружу"));
+        if (menu.exec(event->screenPos()) == expose) {
+            try {
+                (void)expose_port(state_.doc, state_.current_group, pin->port_path(), pin->is_output());
+                callbacks_.document_changed();
+            } catch (const std::exception& e) {
+                callbacks_.error(QString::fromStdString(std::string("expose: ") + e.what()));
+            }
+        }
+        event->accept();
+    }
+
     void keyPressEvent(QKeyEvent* event) override {
         if (event->key() == Qt::Key_Delete && !state_.run.running()) {
             // связи — по убыванию индексов: удаление сдвигает следующие
             std::vector<std::size_t> link_indices;
+            std::vector<std::pair<bool, std::string>> stubs;  // (is_output, alias) снятия expose
             std::vector<std::string> nodes;
             for (QGraphicsItem* item : selectedItems()) {
                 if (auto* link = qgraphicsitem_cast<link_item*>(item)) {
                     link_indices.push_back(link->index());
+                } else if (auto* stub = qgraphicsitem_cast<stub_item*>(item)) {
+                    stubs.emplace_back(stub->is_output(), stub->alias());
                 } else if (auto* node = qgraphicsitem_cast<node_item*>(item)) {
                     nodes.push_back(node->child_name());
                 }
@@ -238,6 +278,13 @@ class canvas_scene final : public QGraphicsScene {
             try {
                 for (std::size_t index : link_indices) {
                     state_.doc.disconnect(state_.current_group, index);
+                }
+                for (const auto& [is_output, alias] : stubs) {
+                    if (is_output) {
+                        state_.doc.remove_expose_output(state_.current_group, alias);
+                    } else {
+                        state_.doc.remove_expose_input(state_.current_group, alias);
+                    }
                 }
                 for (const std::string& name : nodes) {
                     state_.doc.remove_child(state_.current_group, name);
@@ -356,10 +403,57 @@ class canvas_scene final : public QGraphicsScene {
         update_link_paths();
     }
 
+    // Стабы границы: по одному на каждый exposed-порт текущей группы. Вход
+    // экспонируется через входной пин ребёнка (левая сторона), выход — через
+    // выходной (правая). Пин отсутствует (фабрика не загружена) — стаб
+    // пропускаем, как связи с недостающими концами.
+    void build_stubs(const app::group_node& g) {
+        for (const auto& [alias, path] : g.expose_inputs) {
+            add_stub(g, alias, path, false);
+        }
+        for (const auto& [alias, path] : g.expose_outputs) {
+            add_stub(g, alias, path, true);
+        }
+        reposition_stubs();
+    }
+
+    void add_stub(const app::group_node& g, const std::string& alias, const std::string& path, bool is_output) {
+        auto pin = pins_.find(pin_key(path, is_output));
+        if (pin == pins_.end()) {
+            return;
+        }
+        const std::optional<std::type_index> port_type = resolve_port_type(g, path, is_output, describer());
+        auto* stub = new stub_item(is_output, alias, type_color(port_type));
+        addItem(stub);
+        stubs_.push_back(stub);
+    }
+
+    // Концы стабов привязаны к пинам детей: при переносе узла пин двигается —
+    // двигаем и стаб. Пин ищем заново по алиасу через expose_* текущей группы
+    // (отдельный вектор пинов не держим — моделей мало).
+    void reposition_stubs() {
+        const app::group_node* g = state_.doc.group_at(state_.current_group);
+        if (g == nullptr) {
+            return;
+        }
+        for (stub_item* stub : stubs_) {
+            const auto& map = stub->is_output() ? g->expose_outputs : g->expose_inputs;
+            auto entry = std::ranges::find_if(map, [&](const auto& e) { return e.first == stub->alias(); });
+            if (entry == map.end()) {
+                continue;
+            }
+            auto pin = pins_.find(pin_key(entry->second, stub->is_output()));
+            if (pin != pins_.end()) {
+                stub->set_anchor(pin->second->scenePos());
+            }
+        }
+    }
+
     app_state& state_;
     ui_callbacks& callbacks_;
     std::unordered_map<std::string, pin_item*> pins_;
     std::vector<link_item*> links_;
+    std::vector<stub_item*> stubs_;  // визуализация exposed-портов текущей группы
     std::unordered_map<std::size_t, std::uint64_t> prev_writes_;  // активность связей между опросами
     pin_item* drag_from_ = nullptr;
     QGraphicsLineItem* temp_link_ = nullptr;

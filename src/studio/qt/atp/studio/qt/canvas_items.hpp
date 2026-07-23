@@ -148,6 +148,63 @@ class link_item final : public QGraphicsPathItem {
     QGraphicsSimpleTextItem* label_ = nullptr;
 };
 
+// Стаб границы группы: короткий висящий сегмент от пина ребёнка к «краю»,
+// показывающий, что порт экспонирован наружу (expose_input/expose_output).
+// Изнутри группы это единственная видимая метка связи, уходящей к родителю;
+// сегмент фиксированной длины, потому что у бесконечной сцены нет реального
+// края. Выделяемый, но не перемещаемый — двигается только вслед за пином.
+class stub_item final : public QGraphicsPathItem {
+   public:
+    enum { Type = UserType + 4 };
+
+    stub_item(bool is_output, std::string alias, const QColor& color)
+        : is_output_(is_output), alias_(std::move(alias)) {
+        setFlag(ItemIsSelectable);
+        // Пунктир отличает границу от сплошных внутренних связей; цвет типа
+        // порта — тот же, что у пина, чтобы тип читался.
+        setPen(QPen(color, 1.5, Qt::DashLine));
+        label_ = new QGraphicsSimpleTextItem(this);
+        label_->setBrush(QBrush(QColor(180, 180, 190)));
+        label_->setText(QString::fromStdString(alias_));
+    }
+
+    [[nodiscard]] int type() const override {
+        return Type;
+    }
+    [[nodiscard]] bool is_output() const {
+        return is_output_;
+    }
+    [[nodiscard]] const std::string& alias() const {
+        return alias_;
+    }
+
+    // Экспонированный выход уходит вправо (стрелка от пина), вход приходит
+    // слева (стрелка в пин). Длина сегмента фиксированная.
+    void set_anchor(QPointF pin_scene_pos) {
+        constexpr double length = 40.0;
+        const double dir = is_output_ ? 1.0 : -1.0;
+        const QPointF outer = pin_scene_pos + QPointF(dir * length, 0.0);
+        QPainterPath path(pin_scene_pos);
+        path.lineTo(outer);
+        // Наконечник стрелки: у выхода — на внешнем конце, у входа — у пина.
+        const QPointF tip = is_output_ ? outer : pin_scene_pos;
+        const double head = 5.0;
+        path.moveTo(tip);
+        path.lineTo(tip + QPointF(-dir * head, -head));
+        path.moveTo(tip);
+        path.lineTo(tip + QPointF(-dir * head, head));
+        setPath(path);
+        label_->setText(QString::fromStdString(alias_));
+        // Подпись у внешнего конца, немного выше линии.
+        label_->setPos(outer + QPointF(is_output_ ? 4.0 : -4.0 - label_->boundingRect().width(), -16.0));
+    }
+
+   private:
+    bool is_output_;
+    std::string alias_;
+    QGraphicsSimpleTextItem* label_ = nullptr;
+};
+
 }  // namespace atp::studio::qt
 
 #endif  // ATP_STUDIO_QT_CANVAS_ITEMS_HPP

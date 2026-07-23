@@ -118,4 +118,41 @@ TEST(PortTypes, ResolvesSubgroupPortsThroughExpose) {
     EXPECT_EQ(doc.group_at("")->connections.size(), 1u);
 }
 
+// expose_port: алиас из имени порта, дедуп суффиксом, идемпотентность.
+TEST(PortTypes, ExposePortOutputUsesPortNameAlias) {
+    atp::studio::document doc = make_doc();
+    const std::string alias = atp::studio::expose_port(doc, "", "source.value", true);
+    EXPECT_EQ(alias, "value");
+    const auto& outs = doc.group_at("")->expose_outputs;
+    ASSERT_EQ(outs.size(), 1u);
+    EXPECT_EQ(outs[0].first, "value");
+    EXPECT_EQ(outs[0].second, "source.value");
+    EXPECT_TRUE(doc.group_at("")->expose_inputs.empty());
+}
+
+TEST(PortTypes, ExposePortInputGoesToInputMap) {
+    atp::studio::document doc = make_doc();
+    const std::string alias = atp::studio::expose_port(doc, "", "sink.value", false);
+    EXPECT_EQ(alias, "value");
+    const auto& ins = doc.group_at("")->expose_inputs;
+    ASSERT_EQ(ins.size(), 1u);
+    EXPECT_EQ(ins[0].second, "sink.value");
+    EXPECT_TRUE(doc.group_at("")->expose_outputs.empty());
+}
+
+TEST(PortTypes, ExposePortDedupesAliasOnCollision) {
+    atp::studio::document doc = make_doc();
+    doc.add_module("", "source", "source2");  // фабрика source, выход "value"
+    EXPECT_EQ(atp::studio::expose_port(doc, "", "source.value", true), "value");
+    EXPECT_EQ(atp::studio::expose_port(doc, "", "source2.value", true), "value_2");
+    EXPECT_EQ(doc.group_at("")->expose_outputs.size(), 2u);
+}
+
+TEST(PortTypes, ExposePortIsIdempotentForSamePort) {
+    atp::studio::document doc = make_doc();
+    EXPECT_EQ(atp::studio::expose_port(doc, "", "source.value", true), "value");
+    EXPECT_EQ(atp::studio::expose_port(doc, "", "source.value", true), "value");
+    EXPECT_EQ(doc.group_at("")->expose_outputs.size(), 1u);
+}
+
 }  // namespace

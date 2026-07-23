@@ -1,6 +1,7 @@
 #ifndef ATP_STUDIO_PORT_TYPES_HPP
 #define ATP_STUDIO_PORT_TYPES_HPP
 
+#include <algorithm>
 #include <any>
 #include <cstddef>
 #include <functional>
@@ -86,6 +87,43 @@ inline void connect_ports(document& doc,
                                 "' accepts " + accepted->name());
     }
     doc.connect(group_path, from, to, replay);
+}
+
+// Экспонировать порт ребёнка наружу группы под авто-именем. Базовый алиас —
+// имя порта; при коллизии в этом направлении добавляется числовой суффикс
+// (_2, _3, …). Порт уже экспонирован (в этом направлении) — не создаём дубль,
+// возвращаем существующий алиас. Возврат — имя, под которым порт виден снаружи.
+[[nodiscard]] inline std::string expose_port(document& doc,
+                                             const std::string& group_path,
+                                             const std::string& port_path,
+                                             bool is_output) {
+    const app::group_node* g = doc.group_at(group_path);
+    if (g == nullptr) {
+        throw app::config_error("no group '" + group_path + "'");
+    }
+    const auto& map = is_output ? g->expose_outputs : g->expose_inputs;
+    // порт уже экспонирован в этом направлении — дубль не создаём
+    for (const auto& [alias, path] : map) {
+        if (path == port_path) {
+            return alias;
+        }
+    }
+    const std::size_t dot = port_path.find('.');
+    if (dot == std::string::npos || dot + 1 == port_path.size()) {
+        throw app::config_error("expected '<child>.<port>', got '" + port_path + "'");
+    }
+    const std::string base = port_path.substr(dot + 1);
+    // дедуп: base, base_2, base_3, … — первое свободное в этом направлении
+    std::string alias = base;
+    for (std::size_t n = 2; std::ranges::any_of(map, [&](const auto& e) { return e.first == alias; }); ++n) {
+        alias = base + "_" + std::to_string(n);
+    }
+    if (is_output) {
+        doc.set_expose_output(group_path, alias, port_path);
+    } else {
+        doc.set_expose_input(group_path, alias, port_path);
+    }
+    return alias;
 }
 
 }  // namespace atp::studio

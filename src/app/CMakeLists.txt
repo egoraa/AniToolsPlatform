@@ -13,7 +13,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 # исполняемый файл остаётся тонким main.
 add_library(atp_app_lib INTERFACE)
 target_include_directories(atp_app_lib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(atp_app_lib INTERFACE atp_host nlohmann_json::nlohmann_json)
+target_link_libraries(atp_app_lib INTERFACE atp_runtime nlohmann_json::nlohmann_json)
 
 file(GLOB_RECURSE ATP_APP_HEADERS CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/atp/app/*.hpp)

@@ -18,10 +18,6 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(test_plugin)
 
 add_executable(atp_tests
-        app_config_loader_tests.cpp
-        app_config_model_tests.cpp
-        app_config_validator_tests.cpp
-        app_pipeline_builder_tests.cpp
         group_tests.cpp
         io_tests.cpp
         module_tests.cpp
@@ -30,6 +26,10 @@ add_executable(atp_tests
         module_registry_tests.cpp
         pipeline_runner_tests.cpp
         pipeline_tests.cpp
+        runtime_config_loader_tests.cpp
+        runtime_config_model_tests.cpp
+        runtime_config_validator_tests.cpp
+        runtime_pipeline_builder_tests.cpp
         service_directory_tests.cpp
         studio_add_module_tests.cpp
         studio_document_tests.cpp

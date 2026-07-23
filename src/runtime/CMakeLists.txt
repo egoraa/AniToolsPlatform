@@ -13,5 +13,5 @@ FetchContent_MakeAvailable(nlohmann_json)
 # плагинов, конфиг и сборка пайплайна по нему. Header-only: приложение, studio
 # и тесты подключают одну и ту же библиотеку.
 add_library(atp_runtime INTERFACE)
-target_include_directories(atp_runtime INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(atp_runtime INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(atp_runtime INTERFACE atp_platform nlohmann_json::nlohmann_json)

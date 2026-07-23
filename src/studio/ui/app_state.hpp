@@ -1,5 +1,5 @@
-#ifndef ATP_STUDIO_QT_APP_STATE_HPP
-#define ATP_STUDIO_QT_APP_STATE_HPP
+#ifndef ATP_STUDIO_UI_APP_STATE_HPP
+#define ATP_STUDIO_UI_APP_STATE_HPP
 
 #include <filesystem>
 #include <functional>
@@ -15,7 +15,7 @@
 #include <atp/studio/settings.hpp>
 #include <atp/version.hpp>
 
-namespace atp::studio::qt {
+namespace atp::studio::ui {
 
 // Всё состояние приложения одним агрегатом; виджеты — тонкие обёртки над
 // ним. Порядок членов = порядок разрушения в обратную сторону: сессия
@@ -58,8 +58,8 @@ struct app_state {
     }
 };
 
-// Коллбэки вместо сигналов: виджеты без Q_OBJECT/moc — header-only, как
-// весь проект. document_changed перестраивает зависимые виджеты; error
+// Коллбэки вместо сигналов: виджеты обходятся без Q_OBJECT/moc.
+// document_changed перестраивает зависимые виджеты; error
 // пишет в журнал; selection_changed обновляет инспектор.
 struct ui_callbacks {
     std::function<void()> document_changed;
@@ -67,6 +67,6 @@ struct ui_callbacks {
     std::function<void()> selection_changed;
 };
 
-}  // namespace atp::studio::qt
+}  // namespace atp::studio::ui
 
-#endif  // ATP_STUDIO_QT_APP_STATE_HPP
+#endif  // ATP_STUDIO_UI_APP_STATE_HPP

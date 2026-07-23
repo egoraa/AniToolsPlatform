@@ -1,5 +1,5 @@
-#ifndef ATP_STUDIO_QT_MODULE_MIME_HPP
-#define ATP_STUDIO_QT_MODULE_MIME_HPP
+#ifndef ATP_STUDIO_UI_MODULE_MIME_HPP
+#define ATP_STUDIO_UI_MODULE_MIME_HPP
 
 #include <QByteArray>
 #include <QDataStream>
@@ -7,7 +7,7 @@
 #include <QMimeData>
 #include <QString>
 
-namespace atp::studio::qt {
+namespace atp::studio::ui {
 
 // Свой MIME-тип: перетаскивание принимает только канвас этого приложения,
 // чужие drop'ы (файлы, текст) сцену не трогают. Формат общий для палитры и
@@ -39,6 +39,6 @@ struct module_mime_payload {
     return stream.status() == QDataStream::Ok && !out.factory.isEmpty();
 }
 
-}  // namespace atp::studio::qt
+}  // namespace atp::studio::ui
 
-#endif  // ATP_STUDIO_QT_MODULE_MIME_HPP
+#endif  // ATP_STUDIO_UI_MODULE_MIME_HPP

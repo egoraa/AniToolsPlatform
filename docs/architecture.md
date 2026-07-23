@@ -10,10 +10,10 @@ Header-only C++23 платформа модульных пайплайнов: м
 - `include/atp/` — **SDK автора модулей** (цель `atp_platform`, INTERFACE):
   io-слой, `module`/`module_base`, фабрики, реестр, `plugin.hpp`. Канонический
   инклюд — `<atp/...>` везде, зонтичный `<atp/io.hpp>` (без `version.hpp`).
-- `src/runtime/` — **хост-рантайм** (цель `atp_runtime`, INTERFACE поверх
-  `atp_platform` и nlohmann_json): `group`, `pipeline`, `pipeline_runner`,
+- `src/runtime/include/atp/` — **хост-рантайм** (цель `atp_runtime`, INTERFACE
+  поверх `atp_platform` и nlohmann_json): `group`, `pipeline`, `pipeline_runner`,
   `module_loader`, `thread_name`, а также подсистема конфига (namespace
-  `atp::runtime`, инклюд `<atp/runtime/...>`). Плагины видят только
+  `atp::runtime`, инклюд `<atp/runtime/...>`). Плагины видят только корневой
   `include/`, хост — оба.
 - `examples/demo` — пайплайн-демо; `examples/plugin_demo` — монолит и DLL-плагин
   из одного модуля; `tests/` — googletest.
@@ -172,7 +172,7 @@ Header-only C++23 платформа модульных пайплайнов: м
   сборка `pipeline` + `pipeline_runner`, работа до Ctrl+C или аварии.
   `atp_app` — тонкий `main.cpp` поверх `atp_runtime`; тесты линкуют
   `atp_runtime` напрямую.
-- Компоненты (`src/runtime/atp/runtime/`, инклюд `<atp/runtime/...>`,
+- Компоненты (`src/runtime/include/atp/runtime/`, инклюд `<atp/runtime/...>`,
   namespace `atp::runtime`): `config_loader` (чтение + `$include`),
   `config_validator` (все ошибки за один проход, каждая с JSON-путём),
   `config_model` (типизированная модель + `decode` + `encode` — обратный,
@@ -216,11 +216,11 @@ Header-only C++23 платформа модульных пайплайнов: м
   реестра менеджера; мониторинг — `stats()` раннера и `peek`-снимки
   соединений), `value_format` (текст ходовых типов, незнакомое — честный
   отказ). Всё тестируется без GUI в общем `atp_tests`.
-- **GUI на Qt** (`atp_studio_qt`, ветка `studio-qt`; Qt 6 Widgets,
+- **GUI на Qt** (`atp_studio`, ветка `studio`; Qt 6 Widgets,
   собирается только при найденном Qt6 — `find_package` в
-  `src/studio/CMakeLists.txt`): приватные header-only панели
-  (`src/studio/qt/atp/studio/qt/`, без Q_OBJECT/moc — виджеты получают
-  `app_state&` и коллбэки) — палитра (даблклик добавляет модуль, DLL
+  `src/studio/CMakeLists.txt`): приватные панели парами hpp/cpp
+  (`src/studio/ui/`, namespace `atp::studio::ui`, без Q_OBJECT/moc —
+  виджеты получают `app_state&` и коллбэки) — палитра (даблклик добавляет модуль, DLL
   дописывается в `plugins`), канвас на собственном QGraphicsScene (узлы с
   пинами, резиновая связь пин→пин, Del, двойной клик в подгруппу, крошки,
   позиции ↔ документ), инспектор (rename/params/expose/потоки/раскладка),

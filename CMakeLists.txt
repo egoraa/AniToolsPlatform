@@ -25,7 +25,7 @@ add_subdirectory(src/runtime)
 # GLOB здесь, а не в src/runtime: переменную потребляет examples/demo,
 # а переменные подкаталога до соседних каталогов не доходят.
 file(GLOB_RECURSE ATP_RUNTIME_HEADERS CONFIGURE_DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/atp/*.hpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime/include/atp/*.hpp)
 
 add_subdirectory(examples/demo)
 add_subdirectory(examples/plugin_demo)

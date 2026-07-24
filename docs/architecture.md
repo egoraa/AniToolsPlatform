@@ -216,9 +216,10 @@ Header-only C++23 платформа модульных пайплайнов: м
   реестра менеджера; мониторинг — `stats()` раннера и `peek`-снимки
   соединений), `value_format` (текст ходовых типов, незнакомое — честный
   отказ). Всё тестируется без GUI в общем `atp_tests`.
-- **GUI на Qt** (`atp_studio`, ветка `studio`; Qt 6 Widgets,
-  собирается только при найденном Qt6 — `find_package` в
-  `src/studio/CMakeLists.txt`): приватные панели парами hpp/cpp
+- **GUI на Qt** (`atp_studio`, ветка `studio`; Qt 6 Widgets, собирается при
+  включённой опции `ATP_BUILD_STUDIO` (по умолчанию `ON`; `OFF` исключает
+  `src/studio` целиком — для headless/CI без Qt) и найденном Qt6 —
+  `find_package` в `src/studio/CMakeLists.txt`): приватные панели парами hpp/cpp
   (`src/studio/ui/`, namespace `atp::studio::ui`, без Q_OBJECT/moc —
   виджеты получают `app_state&` и коллбэки) — палитра (даблклик добавляет модуль, DLL
   дописывается в `plugins`), канвас на собственном QGraphicsScene (узлы с

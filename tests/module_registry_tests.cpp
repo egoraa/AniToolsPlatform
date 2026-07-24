@@ -13,19 +13,19 @@
 
 namespace {
 
-class alpha_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
+class alpha_module : public atp::module<atp::io::ports<>, "", atp::version{1, 0}> {};
 
-class beta_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class beta_module : public atp::module<> {};
 
 // вторая версия того же по смыслу модуля — для тестов мультиверсионности
-class alpha_v2_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 0}> {};
+class alpha_v2_module : public atp::module<atp::io::ports<>, "", atp::version{2, 0}> {};
 
 // второй безверсионный тип (default_version, как beta_module) — для
 // проверки, что дубликат определяется парой (имя, версия), а не типом
-class gamma_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class gamma_module : public atp::module<> {};
 
 // модуль со встроенным именем — для add<M>() без аргумента
-class named_module : public atp::module<atp::io::inputs, atp::io::outputs, "named", atp::version{1, 0}> {};
+class named_module : public atp::module<atp::io::ports<>, "named", atp::version{1, 0}> {};
 
 // модуль мимо шаблона module<>: контракт — статический член, не NTTP
 class handmade_module : public atp::module_base {
@@ -57,7 +57,7 @@ class handmade_module : public atp::module_base {
 };
 
 // Модуль с конфигом в конструкторе — для тестов вариадик-регистрации.
-class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+class configured_module : public atp::module<> {
    public:
     explicit configured_module(int value) : value_(value) {}
 

@@ -62,7 +62,7 @@ class event_log {
 
 // Модуль-зонд: пишет фазы в журнал, по указанию бросает из фазы,
 // сигналит latch-ем о первом iterate — тесты ждут без sleep.
-class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+class probe_module : public atp::module<> {
    public:
     probe_module(event_log& log, std::string name) : log_(&log), name_(std::move(name)) {}
 

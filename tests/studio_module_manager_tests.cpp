@@ -68,15 +68,16 @@ TEST(ModuleManager, DuplicateModulesRejectPluginEntirely) {
 
 // Порты палитра узнаёт пробным экземпляром: конструктор лёгкий по
 // контракту жизненного цикла (тяжёлое — в initialize, он не зовётся).
-struct probe_outputs : atp::io::outputs {
-    atp::io::output<int>& count = make<atp::io::output<int>>("count");
-};
 struct probe_inputs : atp::io::inputs {
     atp::io::input<int>& value = make<atp::io::input<int>>("value");
 };
-class probed_module : public atp::module<probe_inputs, probe_outputs, "probed"> {};
+struct probe_outputs : atp::io::outputs {
+    atp::io::output<int>& count = make<atp::io::output<int>>("count");
+};
+using probe_ports = atp::io::ports<probe_inputs, probe_outputs>;
+class probed_module : public atp::module<probe_ports, "probed"> {};
 
-class throwing_module : public atp::module<atp::io::inputs, atp::io::outputs, "throwing"> {
+class throwing_module : public atp::module<atp::io::ports<>, "throwing"> {
    public:
     throwing_module() {
         throw std::runtime_error("broken constructor");

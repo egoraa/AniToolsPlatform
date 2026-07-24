@@ -3,6 +3,7 @@
 #include <string_view>
 #include <typeindex>
 #include <typeinfo>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -10,26 +11,28 @@
 
 namespace {
 
-struct test_inputs : atp::io::inputs {
+struct test_in : atp::io::inputs {
     atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
     atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
 };
+using test_ports = atp::io::ports<test_in>;
 
-class test_module : public atp::module<test_inputs, atp::io::outputs> {
+class test_module : public atp::module<test_ports> {
    public:
+    using module::module;  // конструктор с готовым узлом — для теста переноса
     void initialize(atp::module_context&) override {
         initialized = true;
     }
     bool initialized = false;
 };
 
-class versioned_module : public atp::module<test_inputs, atp::io::outputs, "", atp::version{1, 2, 3}> {};
+class versioned_module : public atp::module<test_ports, "", atp::version{1, 2, 3}> {};
 
-// имя третьим NTTP-параметром; версия не указана — default_version
-class named_module : public atp::module<test_inputs, atp::io::outputs, "named"> {};
+// имя вторым NTTP-параметром; версия не указана — default_version
+class named_module : public atp::module<test_ports, "named"> {};
 
 // имя и версия вместе
-class full_module : public atp::module<test_inputs, atp::io::outputs, "full", atp::version{1, 2, 3}> {};
+class full_module : public atp::module<test_ports, "full", atp::version{1, 2, 3}> {};
 
 }  // namespace
 
@@ -57,7 +60,7 @@ TEST(Module, InputsReturnsReference) {
     module.inputs().input1(42);
     std::string world = "World";
     module.inputs().input2(world);
-    // записи не пропадают во временной копии — inputs() отдаёт ссылку на член
+    // записи не пропадают во временной копии — inputs() отдаёт ссылку на секцию
     EXPECT_EQ(module.inputs().input1.get(), 42);
     EXPECT_EQ(module.inputs().input2.get(), "World");
 }
@@ -74,6 +77,24 @@ TEST(Module, ConstAccess) {
     module.inputs().input1(1);
     const test_module& cmodule = module;
     EXPECT_FALSE(cmodule.inputs().input1.empty());
+}
+
+TEST(Module, CovariantAccessorsReturnNodeSections) {
+    test_module module;
+    // Ковариантные inputs()/outputs() — это секции узла io().
+    EXPECT_EQ(&module.inputs(), &module.io().in);
+    EXPECT_EQ(&module.outputs(), &module.io().out);
+}
+
+TEST(Module, ConstructedFromPrewiredPorts) {
+    // Узел коммутируется до модуля; модуль забирает его конструктором,
+    // соединение переживает перенос (порты в куче, move их не трогает).
+    atp::io::output<int> feeder{"feeder"};
+    test_ports ports;
+    feeder.connect(ports.in.input1);
+    test_module module{std::move(ports)};
+    feeder(11);
+    EXPECT_EQ(module.inputs().input1.get(), 11);
 }
 
 TEST(Module, DefaultVersionThroughBase) {
@@ -106,10 +127,11 @@ TEST(Module, DeclaredNameThroughBase) {
 }
 
 namespace {
-struct erased_probe_inputs : atp::io::inputs {
+struct erased_probe_in : atp::io::inputs {
     atp::io::input<int>& number = make<atp::io::input<int>>("number");
 };
-class erased_probe : public atp::module<erased_probe_inputs, atp::io::outputs> {};
+using erased_probe_ports = atp::io::ports<erased_probe_in>;
+class erased_probe : public atp::module<erased_probe_ports> {};
 }  // namespace
 
 TEST(Module, IoRegistriesReachableThroughBase) {

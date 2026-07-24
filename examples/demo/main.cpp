@@ -13,14 +13,16 @@ namespace {
 struct source_outputs : atp::io::outputs {
     atp::io::output<int>& number = make<atp::io::output<int>>("number");
 };
+using source_ports = atp::io::ports<atp::io::inputs, source_outputs>;
 
 struct sink_inputs : atp::io::inputs {
     atp::io::input<int>& number = make<atp::io::input<int>>("number");  // safe: границу потоков выбирает раскладка
     atp::io::queued_input<int>& history = make<atp::io::queued_input<int>>("history");
 };
+using sink_ports = atp::io::ports<sink_inputs>;
 
 // Источник: несколько значений и тишина — демо конечное.
-class source_module : public atp::module<atp::io::inputs, source_outputs, "source"> {
+class source_module : public atp::module<source_ports, "source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         if (next_ > 3) {
@@ -34,7 +36,7 @@ class source_module : public atp::module<atp::io::inputs, source_outputs, "sourc
     int next_ = 1;
 };
 
-class sink_module : public atp::module<sink_inputs, atp::io::outputs, "sink"> {
+class sink_module : public atp::module<sink_ports, "sink"> {
    public:
     std::latch* done = nullptr;
 

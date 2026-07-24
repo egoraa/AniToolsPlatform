@@ -13,9 +13,9 @@
 
 namespace {
 
-class plain_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class plain_module : public atp::module<> {};
 
-class versioned_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 1}> {};
+class versioned_module : public atp::module<atp::io::ports<>, "", atp::version{2, 1}> {};
 
 // Модуль мимо шаблона module<> — без константы module_version:
 // фабрика должна отвечать default_version (симметрия с module_base).
@@ -47,7 +47,7 @@ class bare_module : public atp::module_base {
 };
 
 // Модуль с конфигом в конструкторе — для тестов связывания аргументов фабрикой.
-class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+class configured_module : public atp::module<> {
    public:
     explicit configured_module(int value) : value_(value) {}
 
@@ -60,7 +60,7 @@ class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> 
 };
 
 // Модуль с параметрами: конструктор берёт module_config первым аргументом.
-class params_module : public atp::module<atp::io::inputs, atp::io::outputs, "configured"> {
+class params_module : public atp::module<atp::io::ports<>, "configured"> {
    public:
     explicit params_module(atp::module_config config) : config_(std::move(config)) {}
     [[nodiscard]] const std::string& raw() const {
@@ -72,7 +72,7 @@ class params_module : public atp::module<atp::io::inputs, atp::io::outputs, "con
 };
 
 // Параметры + связанные при регистрации аргументы фабрики.
-class params_with_args_module : public atp::module<atp::io::inputs, atp::io::outputs, "configured_args"> {
+class params_with_args_module : public atp::module<atp::io::ports<>, "configured_args"> {
    public:
     params_with_args_module(atp::module_config config, int bound) : config_(std::move(config)), bound_(bound) {}
     [[nodiscard]] const std::string& raw() const {
@@ -88,7 +88,7 @@ class params_with_args_module : public atp::module<atp::io::inputs, atp::io::out
 };
 
 // Пустой модуль с именем — для реестрового теста отказа от параметров.
-class named_plain_module : public atp::module<atp::io::inputs, atp::io::outputs, "plain"> {};
+class named_plain_module : public atp::module<atp::io::ports<>, "plain"> {};
 
 }  // namespace
 

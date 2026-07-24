@@ -44,7 +44,7 @@ struct both_impl : greeter, counter {
 
 // Поставщик: публикует себя как интерфейс в initialize, снимает в stop.
 // Контекст даётся только в initialize — кому он нужен в stop, сохраняет ссылку.
-class greeter_module : public atp::module<atp::io::inputs, atp::io::outputs, "greeter">, public greeter {
+class greeter_module : public atp::module<atp::io::ports<>, "greeter">, public greeter {
    public:
     void initialize(atp::module_context& context) override {
         context_ = &context;
@@ -63,7 +63,7 @@ class greeter_module : public atp::module<atp::io::inputs, atp::io::outputs, "gr
 
 // Потребитель: ищет соседа только в start — порядок initialize не важен.
 // Ссылку на контекст запоминает в initialize, ищет по ней в start.
-class consumer_module : public atp::module<atp::io::inputs, atp::io::outputs, "consumer"> {
+class consumer_module : public atp::module<atp::io::ports<>, "consumer"> {
    public:
     void initialize(atp::module_context& context) override {
         context_ = &context;

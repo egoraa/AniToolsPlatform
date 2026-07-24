@@ -114,14 +114,16 @@ TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnImplicitMain) {
 TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsWithThreadNames) {
     atp::pipeline pipe;
 
-    struct out_ports : atp::io::outputs {
+    struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
     };
-    struct in_ports : atp::io::inputs {
+    struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value", atp::io::unsafe);
     };
-    class producer : public atp::module<atp::io::inputs, out_ports> {};
-    class consumer : public atp::module<in_ports, atp::io::outputs> {};
+    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::io::ports<in_section>;
+    class producer : public atp::module<producer_ports> {};
+    class consumer : public atp::module<consumer_ports> {};
 
     atp::group& left = pipe.root().add_group("left");
     left.make<producer>("p");
@@ -172,14 +174,16 @@ TEST(PipelineRunner, ConfigurationErrors) {
 TEST(PipelineRunner, FailedValidationLeavesRunnerReusable) {
     atp::pipeline pipe;
 
-    struct out_ports : atp::io::outputs {
+    struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
     };
-    struct in_ports : atp::io::inputs {
+    struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value", atp::io::unsafe);
     };
-    class producer : public atp::module<atp::io::inputs, out_ports> {};
-    class consumer : public atp::module<in_ports, atp::io::outputs> {};
+    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::io::ports<in_section>;
+    class producer : public atp::module<producer_ports> {};
+    class consumer : public atp::module<consumer_ports> {};
 
     atp::group& left = pipe.root().add_group("left");
     left.make<producer>("p");
@@ -214,8 +218,10 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
     struct drain_inputs : atp::io::inputs {
         atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
     };
+    using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
+    using drain_ports = atp::io::ports<drain_inputs>;
     // Источник молчит до отмашки теста; потребитель считает пассы.
-    class gated_source : public atp::module<atp::io::inputs, feed_outputs> {
+    class gated_source : public atp::module<feed_ports> {
        public:
         std::atomic<bool> go{false};
         atp::work_status iterate(std::stop_token) override {
@@ -226,7 +232,7 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
             return atp::work_status::busy;
         }
     };
-    class counting_sink : public atp::module<drain_inputs, atp::io::outputs> {
+    class counting_sink : public atp::module<drain_ports> {
        public:
         std::latch* delivered = nullptr;
         std::atomic<int> passes{0};
@@ -277,9 +283,11 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
     struct drain_inputs : atp::io::inputs {
         atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
     };
+    using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
+    using drain_ports = atp::io::ports<drain_inputs>;
     // Источник спинится и стреляет по отмашке — его собственная латентность
     // из замера исключена, меряется только пробуждение потребителя.
-    class gated_source : public atp::module<atp::io::inputs, feed_outputs> {
+    class gated_source : public atp::module<feed_ports> {
        public:
         std::atomic<bool> go{false};
         atp::work_status iterate(std::stop_token) override {
@@ -290,7 +298,7 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
             return atp::work_status::busy;
         }
     };
-    class counting_sink : public atp::module<drain_inputs, atp::io::outputs> {
+    class counting_sink : public atp::module<drain_ports> {
        public:
         std::atomic<int> received{0};
         atp::work_status iterate(std::stop_token) override {
@@ -346,7 +354,7 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
 
     // Первый пасс каждого потока гарантируется латчем: без него праздный
     // поток мог бы не успеть до stop() и его passes были бы нулевыми.
-    class counting_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+    class counting_module : public atp::module<> {
        public:
         std::latch* first = nullptr;
         atp::work_status status = atp::work_status::idle;
@@ -391,7 +399,7 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
 
 TEST(PipelineRunner, ThrottledPacesIterations) {
     atp::pipeline pipe;
-    class counting_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+    class counting_module : public atp::module<> {
        public:
         std::atomic<int> passes{0};
         atp::work_status iterate(std::stop_token) override {
@@ -416,7 +424,7 @@ TEST(PipelineRunner, ThrottledPacesIterations) {
 
 TEST(PipelineRunner, SpinningThreadIteratesWithoutSleep) {
     atp::pipeline pipe;
-    class idle_counter : public atp::module<atp::io::inputs, atp::io::outputs> {
+    class idle_counter : public atp::module<> {
        public:
         std::atomic<int> passes{0};
         atp::work_status iterate(std::stop_token) override {
@@ -528,13 +536,15 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
     atp::pipeline pipe;
     std::latch delivered(1);
 
-    struct out_ports : atp::io::outputs {
+    struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
     };
-    struct in_ports : atp::io::inputs {
+    struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value");  // safe — умолчание
     };
-    class producer : public atp::module<atp::io::inputs, out_ports> {
+    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::io::ports<in_section>;
+    class producer : public atp::module<producer_ports> {
        public:
         atp::work_status iterate(std::stop_token) override {
             if (sent_) {
@@ -548,7 +558,7 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
        private:
         bool sent_ = false;
     };
-    class consumer : public atp::module<in_ports, atp::io::outputs> {
+    class consumer : public atp::module<consumer_ports> {
        public:
         std::latch* delivered = nullptr;
         std::atomic<int> received{0};  // watcher изымает значение (take) — вход после poll пуст

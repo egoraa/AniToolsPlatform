@@ -17,8 +17,9 @@ namespace demo {
 struct counter_outputs : atp::io::outputs {
     atp::io::output<int>& count = make<atp::io::output<int>>("count");
 };
+using counter_ports = atp::io::ports<atp::io::inputs, counter_outputs>;
 
-class counter_module : public atp::module<atp::io::inputs, counter_outputs, "counter", atp::ver<"1.0">> {
+class counter_module : public atp::module<counter_ports, "counter", atp::ver<"1.0">> {
    public:
     atp::work_status iterate(std::stop_token) override {
         outputs().count(++value_);
@@ -32,11 +33,12 @@ class counter_module : public atp::module<atp::io::inputs, counter_outputs, "cou
 struct printer_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
+using printer_ports = atp::io::ports<printer_inputs>;
 
 // Приёмник с параметрами — демонстрация пути конфига до модуля. Пока
 // печатает сырую строку params как есть: типизированный разбор появится
 // вместе с обработчиками module_config.
-class printer_module : public atp::module<printer_inputs, atp::io::outputs, "printer", atp::ver<"1.0">> {
+class printer_module : public atp::module<printer_ports, "printer", atp::ver<"1.0">> {
    public:
     explicit printer_module(atp::module_config config) : config_(std::move(config)) {}
 

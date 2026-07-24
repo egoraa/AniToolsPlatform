@@ -5,7 +5,7 @@
 // модуля из NTTP плюс алиас того же типа, версия модуля 2.0.
 namespace {
 
-class plugin_module : public atp::module<atp::io::inputs, atp::io::outputs, "plugin_module", atp::ver<"2.0">> {};
+class plugin_module : public atp::module<atp::io::ports<>, "plugin_module", atp::ver<"2.0">> {};
 
 }  // namespace
 

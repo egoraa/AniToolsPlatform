@@ -6,6 +6,7 @@
 #include <thread>
 #include <typeindex>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -481,6 +482,19 @@ TEST(InputsRegistry, DynamicInputCanBeRemoved) {
     EXPECT_EQ(ins.list().size(), 2u);
     EXPECT_THROW((void)ins.at("extra"), std::runtime_error);
     EXPECT_FALSE(ins.remove("extra"));
+}
+
+TEST(InputsRegistry, MoveKeepsPortsAlive) {
+    struct movable_inputs : atp::io::inputs {
+        atp::io::input<int>& number = make<atp::io::input<int>>("number");
+    };
+    movable_inputs src;
+    src.number(41);
+    movable_inputs dst{std::move(src)};
+    // Порты живут в куче: map переехал, объект порта — нет. Ссылка-член
+    // назначения указывает на тот же объект, что и запись реестра.
+    EXPECT_EQ(dst.find("number"), static_cast<atp::io::input_base*>(&dst.number));
+    EXPECT_EQ(dst.number.get(), 41);
 }
 
 TEST(Output, MetadataCarriesNameAndType) {

@@ -19,9 +19,11 @@ struct feed_outputs : atp::io::outputs {
 struct drain_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
+using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
+using drain_ports = atp::io::ports<drain_inputs>;
 
 // Источник шлёт одно значение — тесту хватает факта доставки.
-class one_shot_source : public atp::module<atp::io::inputs, feed_outputs, "one_shot"> {
+class one_shot_source : public atp::module<feed_ports, "one_shot"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         if (sent_) {
@@ -37,7 +39,7 @@ class one_shot_source : public atp::module<atp::io::inputs, feed_outputs, "one_s
 };
 
 // Приёмник с параметрами: сохраняет сырую строку и сигналит о доставке.
-class recording_sink : public atp::module<drain_inputs, atp::io::outputs, "recorder"> {
+class recording_sink : public atp::module<drain_ports, "recorder"> {
    public:
     // Снимок параметров — прямо из конструктора: build создаёт модуль через
     // фабрику до всяких каскадов, тест проверяет доставку params без запуска.

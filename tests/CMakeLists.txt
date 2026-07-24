@@ -26,6 +26,7 @@ add_executable(atp_tests
         module_registry_tests.cpp
         pipeline_runner_tests.cpp
         pipeline_tests.cpp
+        ports_tests.cpp
         runtime_config_loader_tests.cpp
         runtime_config_model_tests.cpp
         runtime_config_validator_tests.cpp

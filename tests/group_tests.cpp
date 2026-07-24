@@ -16,8 +16,8 @@ namespace {
 using atp_tests::event_log;
 using atp_tests::probe_module;
 
-class named_module : public atp::module<atp::io::inputs, atp::io::outputs, "named"> {};
-class plain_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class named_module : public atp::module<atp::io::ports<>, "named"> {};
+class plain_module : public atp::module<> {};
 
 struct number_inputs : atp::io::inputs {
     atp::io::input<int>& number = make<atp::io::input<int>>("number");
@@ -25,8 +25,10 @@ struct number_inputs : atp::io::inputs {
 struct number_outputs : atp::io::outputs {
     atp::io::output<int>& number = make<atp::io::output<int>>("number");
 };
-class source_module : public atp::module<atp::io::inputs, number_outputs> {};
-class sink_module : public atp::module<number_inputs, atp::io::outputs> {};
+using source_ports = atp::io::ports<atp::io::inputs, number_outputs>;
+using sink_ports = atp::io::ports<number_inputs>;
+class source_module : public atp::module<source_ports> {};
+class sink_module : public atp::module<sink_ports> {};
 
 // Дерево root[a, stage[b, deep[c]], d] — общая фикстура каскадов.
 struct rig {

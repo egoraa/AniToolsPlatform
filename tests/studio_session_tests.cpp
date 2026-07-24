@@ -32,8 +32,10 @@ struct feed_outputs : atp::io::outputs {
 struct drain_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
+using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
+using drain_ports = atp::io::ports<drain_inputs>;
 
-class studio_source : public atp::module<atp::io::inputs, feed_outputs, "studio_source"> {
+class studio_source : public atp::module<feed_ports, "studio_source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         if (sent_) {
@@ -48,7 +50,7 @@ class studio_source : public atp::module<atp::io::inputs, feed_outputs, "studio_
     bool sent_ = false;
 };
 
-class studio_sink : public atp::module<drain_inputs, atp::io::outputs, "studio_sink"> {
+class studio_sink : public atp::module<drain_ports, "studio_sink"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         return inputs().value.try_pop() ? atp::work_status::busy : atp::work_status::idle;

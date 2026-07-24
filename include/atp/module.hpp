@@ -46,14 +46,6 @@ class module : public module_base {
     }
     void stop() override {}
 
-    // Узел целиком — для передачи заранее скоммутированных портов.
-    [[nodiscard]] TPorts& io() {
-        return io_;
-    }
-    [[nodiscard]] const TPorts& io() const {
-        return io_;
-    }
-
     // Ковариантные overrides — авторская точка доступа и контракт базы
     // одновременно: конкретный тип модуля видит свои секции с портами
     // (inputs().step, outputs().count), машинерия через module_base —

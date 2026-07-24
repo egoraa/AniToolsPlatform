@@ -5,8 +5,12 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Если Qt не найден, скачать его через aqtinstall в external/ (см. cmake/AutoInstallQt.cmake).
-# По умолчанию OFF: конфигурации с системным Qt или Qt из пресета не меняются.
+# По умолчанию OFF: конфигурации с системным Qt или Qt из CMAKE_PREFIX_PATH не меняются.
 option(ATP_AUTO_INSTALL_QT "Download Qt via aqtinstall into external/ if not found" OFF)
+
+# Studio — Qt-GUI хост. Отключается на окружениях без Qt (CI, headless-сборки),
+# чтобы остальная платформа собиралась без зависимости от Qt.
+option(ATP_BUILD_STUDIO "Build the studio GUI application" ON)
 
 # Заголовки платформы — единая точка подключения для приложения и тестов.
 add_library(atp_platform INTERFACE)
@@ -30,7 +34,9 @@ file(GLOB_RECURSE ATP_RUNTIME_HEADERS CONFIGURE_DEPENDS
 add_subdirectory(examples/demo)
 add_subdirectory(examples/plugin_demo)
 add_subdirectory(src/app)
-add_subdirectory(src/studio)
+if (ATP_BUILD_STUDIO)
+    add_subdirectory(src/studio)
+endif ()
 
 enable_testing()
 add_subdirectory(tests)

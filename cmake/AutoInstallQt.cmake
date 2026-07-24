@@ -5,16 +5,16 @@
 # импортированные цели Qt6::*): include() не создаёт новую область, поэтому результат
 # find_package виден вызывающему CMakeLists.
 
-# Версия фиксирована и совпадает с путём Windows-пресета в CMakePresets.json.
+# Версия фиксирована и совпадает с локальной установкой Qt разработчика.
 set(ATP_QT_VERSION 6.10.3)
 
-# Шаг 1: обычный поиск. Системный Qt или Qt из CMAKE_PREFIX_PATH пресета имеет
+# Шаг 1: обычный поиск. Системный Qt или Qt из CMAKE_PREFIX_PATH имеет
 # приоритет — aqt в этом случае не трогаем вовсе.
 find_package(Qt6 COMPONENTS Widgets QUIET)
 
 if (NOT Qt6_FOUND AND ATP_AUTO_INSTALL_QT)
-    # host/arch aqt и каталог распаковки различаются по платформам; поддерживаем те же,
-    # что описаны в CMakePresets.json (Linux/GCC и Windows/MSVC).
+    # host/arch aqt и каталог распаковки различаются по платформам; поддерживаем
+    # Linux/GCC и Windows/MSVC.
     if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
         set(_atp_qt_host linux)
         set(_atp_qt_arch linux_gcc_64)

@@ -17,9 +17,9 @@ Header-only C++23 платформа модульных пайплайнов: м
   `include/`, хост — оба.
 - `examples/demo` — пайплайн-демо; `examples/plugin_demo` — монолит и DLL-плагин
   из одного модуля; `tests/` — googletest.
-- Сборка — нативные тулчейны через `CMakePresets.json`: `windows-msvc`
-  (VS Build Tools 2022) и `linux-gcc` (Ninja; пресет написан, верифицируется
-  при появлении Linux-машины). Каталоги — `build/<preset>`.
+- Сборка — нативные тулчейны: Linux/GCC (Ninja) и Windows/MSVC
+  (VS Build Tools 2022). Разработка ведётся в CLion с его bundled-инструментами
+  (профиль в `cmake-build-debug/`).
 
 ## IO-слой (`include/atp/io/`)
 

@@ -87,7 +87,7 @@ Header-only C++23 платформа модульных пайплайнов: м
   передаются одним узлом `io::ports<TIn, TOut>`; `inputs()`/`outputs()` —
   ковариантные overrides: конкретный тип модуля видит свои секции с портами
   (`inputs().step`, `outputs().count`), машинерия через `module_base` — те
-  же реестры type-erased. `io()` отдаёт узел целиком; `module(TPorts)`
+  же реестры type-erased. `module(TPorts)`
   принимает заранее скоммутированный узел. Имя и
   версия объявляются один раз NTTP-параметрами, доступны и на компиляции
   (`module_name`, `module_version`), и в рантайме. `version` — структурный

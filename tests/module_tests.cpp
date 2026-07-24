@@ -79,11 +79,16 @@ TEST(Module, ConstAccess) {
     EXPECT_FALSE(cmodule.inputs().input1.empty());
 }
 
-TEST(Module, CovariantAccessorsReturnNodeSections) {
-    test_module module;
-    // Ковариантные inputs()/outputs() — это секции узла io().
-    EXPECT_EQ(&module.inputs(), &module.io().in);
-    EXPECT_EQ(&module.outputs(), &module.io().out);
+TEST(Module, PortsAreNodePorts) {
+    // Порты модуля — это порты переданного узла. Сравниваются адреса
+    // именно портов, а не секций: секции — члены узла и переносятся по
+    // значению, сами же порты живут в куче и перенос их не трогает.
+    test_ports ports;
+    atp::io::input<int>* input1 = &ports.in.input1;
+    atp::io::input<std::string>* input2 = &ports.in.input2;
+    test_module module{std::move(ports)};
+    EXPECT_EQ(&module.inputs().input1, input1);
+    EXPECT_EQ(&module.inputs().input2, input2);
 }
 
 TEST(Module, ConstructedFromPrewiredPorts) {

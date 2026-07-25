@@ -18,6 +18,7 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(test_plugin)
 
 add_executable(atp_tests
+        enum_names_tests.cpp
         group_tests.cpp
         io_tests.cpp
         module_tests.cpp
@@ -27,16 +28,20 @@ add_executable(atp_tests
         pipeline_runner_tests.cpp
         pipeline_tests.cpp
         ports_tests.cpp
+        property_codec_tests.cpp
+        property_tests.cpp
         runtime_config_loader_tests.cpp
         runtime_config_model_tests.cpp
         runtime_config_validator_tests.cpp
         runtime_pipeline_builder_tests.cpp
+        runtime_property_override_tests.cpp
         service_directory_tests.cpp
         studio_add_module_tests.cpp
         studio_document_tests.cpp
         studio_layout_tests.cpp
         studio_module_manager_tests.cpp
         studio_port_types_tests.cpp
+        studio_property_sync_tests.cpp
         studio_session_tests.cpp
         studio_settings_tests.cpp
         version_tests.cpp)

@@ -12,6 +12,7 @@
 namespace atp::io {
 class inputs;
 class outputs;
+class properties;
 }  // namespace atp::io
 
 namespace atp {
@@ -55,6 +56,11 @@ class module_base {
     [[nodiscard]] virtual const io::inputs& inputs() const = 0;
     [[nodiscard]] virtual io::outputs& outputs() = 0;
     [[nodiscard]] virtual const io::outputs& outputs() const = 0;
+
+    // Проперти — третий реестр модуля: значения-настройки, редактируемые
+    // на лету (builder, CLI, studio идут этим type-erased путём).
+    [[nodiscard]] virtual io::properties& properties() = 0;
+    [[nodiscard]] virtual const io::properties& properties() const = 0;
 
     // Имя модуля через type-erased ссылку — симметрично get_version.
     // Модуль, не объявивший имени, — «аноним»: пустой string_view

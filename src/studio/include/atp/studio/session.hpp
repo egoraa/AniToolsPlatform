@@ -17,6 +17,7 @@
 #include <atp/pipeline_runner.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
+#include <atp/runtime/property_override.hpp>
 
 namespace atp::studio {
 
@@ -50,6 +51,23 @@ class session {
 
     [[nodiscard]] bool running() const {
         return runner_ && runner_->running();
+    }
+
+    // Правка проперти живого модуля — канал studio «на лету». Документ она
+    // не трогает: persistent-правки инспектор дублирует в document сам.
+    void set_property(const runtime::property_override& o) {
+        if (!running()) {
+            throw std::logic_error("session is not running");
+        }
+        runtime::apply_property_override(pipe_->root(), o);
+    }
+
+    // Живое дерево (nullptr — не запущено): инспектору для чтения текущих
+    // значений и sync_persistent_properties при сохранении на ходу. Проверка
+    // по running(), а не по наличию pipe_: остановленный пайплайн ещё жив до
+    // следующего start, но живым деревом уже не считается.
+    [[nodiscard]] group* live_root() const {
+        return running() ? &pipe_->root() : nullptr;
     }
 
     // Ошибка исполнения (первая); nullptr — не запускались или чисто.

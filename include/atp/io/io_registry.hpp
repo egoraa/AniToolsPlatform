@@ -16,9 +16,12 @@
 
 namespace atp::io::detail {
 
-// Общая механика реестров входов и выходов; владеет элементами.
+// Общая механика реестров входов, выходов и пропертей; владеет элементами.
 // Наследник объявляет элементы ссылками:
 //     input<int>& number = make<input<int>>("number");
+// Хвост аргументов make уходит конструктору элемента как есть — за именем
+// следует всё, что вид элемента о себе объявляет (safety у портов, дефолт и
+// теги у пропертей).
 // Некопируем: ссылки наследника привязаны к конкретным объектам в реестре.
 // НЕ потокобезопасен — make/remove/get относятся к фазе настройки.
 // kind — слово для сообщений об ошибках («input»/«output»); ожидается
@@ -29,9 +32,11 @@ class io_registry {
     io_registry(const io_registry&) = delete;
     io_registry& operator=(const io_registry&) = delete;
 
-    template <std::derived_from<TBase> TItem>
-    TItem& make(std::string name, safety s = safe) {
-        auto item = std::make_unique<TItem>(name, s);
+    // Хвост аргументов уходит конструктору элемента как есть: input попадает
+    // на (name, safety), property — на (name, default, persistence, safety).
+    template <std::derived_from<TBase> TItem, typename... TArgs>
+    TItem& make(std::string name, TArgs&&... args) {
+        auto item = std::make_unique<TItem>(name, std::forward<TArgs>(args)...);
         TItem& ref = *item;
         // try_emplace без аргументов: при дубликате ничего не конструируется
         // и item остаётся владельцем для текста ошибки.

@@ -1,7 +1,14 @@
 {
     "group": "consumers",
     "children": [
-        { "module": "printer", "params": { "label": "count" } }
+        {
+            "module": "printer",
+            "properties": {
+                "tag": "count",
+                "format": "bracketed",
+                "verbose": true
+            }
+        }
     ],
     "expose": { "inputs": { "numbers": "printer.value" } }
 }

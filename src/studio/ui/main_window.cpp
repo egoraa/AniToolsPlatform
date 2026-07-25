@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <atp/studio/property_sync.hpp>
 #include <atp/studio/settings.hpp>
 
 namespace atp::studio::ui {
@@ -61,8 +62,10 @@ void main_window::refresh_all() {
     const bool locked = state_.run.running();
     undo_action_->setEnabled(!locked && state_.doc.can_undo());
     redo_action_->setEnabled(!locked && state_.doc.can_redo());
-    save_action_->setEnabled(!locked);
-    save_as_action_->setEnabled(!locked);
+    // Сохранение больше не заперто исполнением: на ходу правят проперти, и
+    // сохранить результат нужно там же (save стянет их из живых модулей).
+    save_action_->setEnabled(true);
+    save_as_action_->setEnabled(true);
     recent_menu_->setEnabled(!state_.settings.recent_projects.empty());
     manager_->refresh();
     palette_->refresh();
@@ -172,14 +175,20 @@ void main_window::save(bool ask_path) {
     if (!ask_path && state_.doc_path) {
         target = *state_.doc_path;
     } else {
-        const QString file =
-            QFileDialog::getSaveFileName(this, "Save config", QString(), "Pipeline configs (*.json)");
+        const QString file = QFileDialog::getSaveFileName(this, "Save config", QString(), "Pipeline configs (*.json)");
         if (file.isEmpty()) {
             return;
         }
         target = std::filesystem::path(file.toStdWString());
     }
     try {
+        // На ходу сначала стянуть persistent-проперти живых модулей:
+        // правки на лету и самозапись модулей попадают в файл.
+        if (state_.run.running()) {
+            if (atp::group* root = state_.run.live_root()) {
+                sync_persistent_properties(state_.doc, state_.doc.config(), *root);
+            }
+        }
         state_.doc.save(target);
         state_.doc_path = target;
         note_recent(state_.settings, target);

@@ -1,19 +1,77 @@
 #include "inspector_widget.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
+#include <string>
 
 #include <QComboBox>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
 
+#include <atp/runtime/property_override.hpp>
+
 namespace atp::studio::ui {
+
+namespace {
+
+property_editor* make_editor(const property_info& p, const QString& current, QWidget* parent) {
+    auto* editor = new property_editor;  // владение — у вектора инспектора
+    editor->kind = p.kind;
+    if (!p.options.empty()) {
+        editor->combo = new QComboBox(parent);
+        for (const std::string& option : p.options) {
+            editor->combo->addItem(QString::fromStdString(option));
+        }
+        // setCurrentText на редактируемом комбобоксе завёл бы левый пункт;
+        // findText отдаёт -1 на рассинхроне документа с описанием модуля —
+        // тогда остаётся первый вариант, а Set перезапишет значение явно.
+        const int index = editor->combo->findText(current);
+        editor->combo->setCurrentIndex(index < 0 ? 0 : index);
+        editor->widget = editor->combo;
+    } else if (p.kind == io::property_kind::boolean) {
+        editor->check = new QCheckBox(parent);
+        editor->check->setChecked(current == "true");
+        editor->widget = editor->check;
+    } else {
+        editor->line = new QLineEdit(current, parent);
+        editor->widget = editor->line;
+    }
+    return editor;
+}
+
+// Текст редактора → JSON-скаляр для документа (обратная сторона
+// scalar_to_string). Мусор в number — config_error через guard: разобравшийся,
+// но нечисловой JSON («true», «[1]») отвергается тоже, иначе в конфиг уехало бы
+// значение чужого типа и споткнулось бы только при следующей сборке.
+nlohmann::json editor_to_json(const property_editor& e) {
+    const std::string text = e.text();
+    switch (e.kind) {
+        case io::property_kind::number:
+            try {
+                nlohmann::json parsed = nlohmann::json::parse(text);
+                if (!parsed.is_number()) {
+                    throw runtime::config_error("'" + text + "' is not a number");
+                }
+                return parsed;
+            } catch (const nlohmann::json::parse_error&) {
+                throw runtime::config_error("'" + text + "' is not a number");
+            }
+        case io::property_kind::boolean:
+            return nlohmann::json(text == "true");
+        case io::property_kind::text:
+            break;
+    }
+    return nlohmann::json(text);
+}
+
+}  // namespace
 
 inspector_widget::inspector_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent)
     : QWidget(parent), state_(state), callbacks_(callbacks) {
@@ -34,6 +92,8 @@ void inspector_widget::refresh() {
         delete old->widget();
         delete old;
     }
+    property_editors_.clear();  // виджеты уже мертвы — их connect'ы вместе с ними
+    property_rows_.clear();
     const bool locked = state_.run.running();
     const runtime::group_node* g = state_.doc.group_at(state_.current_group);
     if (g != nullptr && !state_.selected_child.empty()) {
@@ -51,7 +111,18 @@ void inspector_widget::refresh() {
         }
     }
     build_document_section();
-    body_->setEnabled(!locked);  // документ read-only на ходу
+    // Структура документа read-only на ходу, проперти — исключение (их правят
+    // именно на ходу). Поэтому запирается не body_ целиком, а каждый его блок
+    // по отдельности: setEnabled(true) на ребёнке запрещённого родителя в Qt —
+    // no-op, и включить строки пропертей обратно было бы уже нельзя.
+    for (int i = 0; i < body_layout_->count(); ++i) {
+        QWidget* block = body_layout_->itemAt(i)->widget();
+        if (block == nullptr) {
+            continue;
+        }
+        const bool is_property_block = std::ranges::find(property_rows_, block) != property_rows_.end();
+        block->setEnabled(!locked || is_property_block);
+    }
 }
 
 void inspector_widget::add_header(const QString& text) {
@@ -99,15 +170,86 @@ void inspector_widget::build_module_section(const runtime::module_node& m) {
         QString::fromStdString("version: " + (m.factory_version ? m.factory_version->to_string() : "(latest)")),
         body_));
 
-    auto* params = new QPlainTextEdit(QString::fromStdString(m.params), body_);
-    params->setFixedHeight(80);
-    body_layout_->addWidget(params);
-    auto* apply = new QPushButton("Apply params", body_);
-    body_layout_->addWidget(apply);
-    QObject::connect(apply, &QPushButton::clicked, this, [this, old_name, params] {
-        guard("params",
-              [&] { state_.doc.set_params(state_.current_group, old_name, params->toPlainText().toStdString()); });
-    });
+    // Строки пропертей — последними в секции: refresh вернёт им доступность
+    // после общего запирания формы на ходу.
+    property_rows_ = build_property_rows(m);
+}
+
+std::vector<QWidget*> inspector_widget::build_property_rows(const runtime::module_node& m) {
+    std::vector<QWidget*> rows;
+    const module_info* info = state_.describe_cached(m.factory, m.factory_version);
+    if (info == nullptr || info->properties.empty()) {
+        return rows;
+    }
+    add_header("properties");
+    rows.push_back(body_layout_->itemAt(body_layout_->count() - 1)->widget());  // заголовок не гасим вместе с формой
+    const bool running = state_.run.running();
+    const std::string module_path = detail::full_path(state_.current_group, m.name);
+    for (const property_info& p : info->properties) {
+        QWidget* row = add_row();
+        rows.push_back(row);
+        auto* label = new QLabel(QString::fromStdString(p.name), row);
+        if (!p.persistent) {
+            label->setText(label->text() + " (на время сеанса)");
+            QFont f = label->font();
+            f.setItalic(true);
+            label->setFont(f);
+        }
+        row->layout()->addWidget(label);
+
+        // Текущее значение: на ходу — с живого модуля, иначе из документа;
+        // нет в документе — дефолт из описания. Повторный резолв на refresh
+        // дешёв: формы малы.
+        QString current = QString::fromStdString(p.default_value);
+        for (const auto& [pname, pvalue] : m.properties) {
+            if (pname == p.name) {
+                current = QString::fromStdString(runtime::detail::scalar_to_string(pvalue));
+            }
+        }
+        if (running) {
+            if (atp::group* root = state_.run.live_root()) {
+                try {
+                    current = QString::fromStdString(runtime::find_property(*root, module_path, p.name).to_string());
+                } catch (const std::exception&) {  // NOLINT(bugprone-empty-catch)
+                    // рассинхрон документа и запуска — показываем документное значение
+                }
+            }
+        }
+
+        property_editors_.push_back(std::unique_ptr<property_editor>(make_editor(p, current, row)));
+        property_editor* editor = property_editors_.back().get();
+        row->layout()->addWidget(editor->widget);
+        auto* apply = new QPushButton("Set", row);
+        row->layout()->addWidget(apply);
+        auto* clear = new QPushButton("Reset", row);
+        row->layout()->addWidget(clear);
+
+        const std::string prop_name = p.name;
+        const std::string child_name = m.name;
+        const bool persistent = p.persistent;
+        QObject::connect(
+            apply, &QPushButton::clicked, this, [this, module_path, child_name, prop_name, persistent, editor] {
+                guard("property", [&] {
+                    if (state_.run.running()) {
+                        state_.run.set_property({module_path, prop_name, editor->text()});
+                    }
+                    if (persistent) {
+                        state_.doc.set_property(state_.current_group, child_name, prop_name, editor_to_json(*editor));
+                    }
+                });
+            });
+        const std::string default_value = p.default_value;
+        QObject::connect(clear, &QPushButton::clicked, this, [this, module_path, child_name, prop_name, default_value] {
+            guard("property", [&] {
+                if (state_.run.running()) {
+                    // живой модуль узнаёт об откате тем же каналом записи
+                    state_.run.set_property({module_path, prop_name, default_value});
+                }
+                state_.doc.clear_property(state_.current_group, child_name, prop_name);
+            });
+        });
+    }
+    return rows;
 }
 
 void inspector_widget::build_group_section(const std::string& name) {
@@ -221,9 +363,9 @@ void inspector_widget::build_document_section() {
             const thread_mode m = mode->currentIndex() == 0   ? thread_mode::on_demand
                                   : mode->currentIndex() == 1 ? thread_mode::throttled
                                                               : thread_mode::spinning;
-            state_.doc.add_thread(thread_name->text().toStdString(), m,
-                                  m == thread_mode::throttled ? std::chrono::milliseconds(period->value())
-                                                              : std::chrono::milliseconds{});
+            state_.doc.add_thread(
+                thread_name->text().toStdString(), m,
+                m == thread_mode::throttled ? std::chrono::milliseconds(period->value()) : std::chrono::milliseconds{});
         });
     });
 

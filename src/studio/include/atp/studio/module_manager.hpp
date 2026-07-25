@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <atp/io/property_base.hpp>
 #include <atp/module_loader.hpp>
 #include <atp/module_registry.hpp>
 
@@ -18,11 +19,23 @@ struct port_info {
     std::type_index type;
 };
 
+// Описание проперти: всё, что инспектору нужно для виджета и обратной
+// конвертации введённого в JSON. Набор копируется — описание переживает
+// временный модуль-зонд, с которого снято.
+struct property_info {
+    std::string name;
+    io::property_kind kind;            // подсказка виджету инспектора
+    std::string default_value;         // дефолт строкой — сравнение при сохранении
+    std::vector<std::string> options;  // непусто у перечислений: элементы выпадающего списка
+    bool persistent = true;
+};
+
 struct module_info {
     std::string name;
     version ver;
     std::vector<port_info> inputs;
     std::vector<port_info> outputs;
+    std::vector<property_info> properties;
     bool broken = false;  // пробный экземпляр не создался
     std::string error;
 };
@@ -102,12 +115,12 @@ class module_manager {
         return plugins_;
     }
 
-    // Порты — пробным экземпляром: create() без параметров, перечислить
-    // owned() и выбросить. Опора на контракт жизненного цикла: конструктор
-    // лёгкий, тяжёлое — в initialize (не зовётся). Бросивший конструктор —
-    // модуль «сломан», палитра покажет причину.
+    // Порты и проперти — пробным экземпляром: create(), перечислить owned()
+    // и выбросить. Опора на контракт жизненного цикла: конструктор лёгкий,
+    // тяжёлое — в initialize (не зовётся). Бросивший конструктор — модуль
+    // «сломан», палитра покажет причину.
     [[nodiscard]] static module_info describe(const module_factory_base& factory) {
-        module_info info{std::string(factory.name()), factory.get_version(), {}, {}, false, {}};
+        module_info info{std::string(factory.name()), factory.get_version(), {}, {}, {}, false, {}};
         try {
             const module_ptr probe = factory.create();
             for (io::input_base* p : probe->inputs().owned()) {
@@ -115,6 +128,9 @@ class module_manager {
             }
             for (io::output_base* p : probe->outputs().owned()) {
                 info.outputs.push_back({p->name(), p->type()});
+            }
+            for (io::property_base* p : probe->properties().owned()) {
+                info.properties.push_back({p->name(), p->kind(), p->default_string(), p->options(), p->persistent()});
             }
         } catch (const std::exception& e) {
             info.broken = true;

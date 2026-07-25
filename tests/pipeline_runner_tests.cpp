@@ -97,8 +97,16 @@ TEST(PipelineRunner, AssignmentsPlaceGroupsOnNamedThreads) {
 
 TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnImplicitMain) {
     rig r;
-    std::latch ticked(1);
+    // Ждём всех четырёх, а не одного: зонд сигналит latch в начале своего
+    // iterate, поэтому пробуждение на середине пасса ничего не говорит об
+    // остальных детях, а stop() между c и d срезал бы пасс корня (iterate
+    // группы проверяет стоп-токен перед каждым ребёнком) — d остался бы без
+    // записи в журнале. Записи при этом доезжают: stop() соединяет потоки.
+    std::latch ticked(4);
+    r.a->first_iterate = &ticked;
+    r.b->first_iterate = &ticked;
     r.c->first_iterate = &ticked;
+    r.d->first_iterate = &ticked;
 
     atp::pipeline_runner runner;  // ни одного add_thread
     runner.start(r.pipe);

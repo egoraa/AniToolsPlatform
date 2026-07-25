@@ -165,6 +165,16 @@ class group : public module_base {
         return outputs_;
     }
 
+    // Группа-композит собственных пропертей не имеет: реестр пуст.
+    // Проперти детей достаются по путям (см. runtime::property_override),
+    // алиасов на уровне группы нет — до появления нужды.
+    [[nodiscard]] io::properties& properties() override {
+        return properties_;
+    }
+    [[nodiscard]] const io::properties& properties() const override {
+        return properties_;
+    }
+
     // --- Жизненный цикл: каскады по порядку вставки ---
 
     // Локальный fail-fast: бросок ребёнка — stop уже инициализированным в
@@ -301,6 +311,7 @@ class group : public module_base {
     std::vector<connection> connections_;
     io::inputs inputs_;
     io::outputs outputs_;
+    io::properties properties_;
 };
 
 }  // namespace atp

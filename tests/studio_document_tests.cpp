@@ -104,7 +104,7 @@ TEST_F(DocumentFiles, SaveWritesValidConfigAndLayoutSidecar) {
 TEST(DocumentEdit, BuildsPipelineThroughOperations) {
     atp::studio::document doc = atp::studio::document::create();
     doc.add_group("", "left");
-    doc.add_module("left", "counter", "ticks", atp::version{1, 0}, R"({"rate":10})");
+    doc.add_module("left", "counter", "ticks", atp::version{1, 0});
     doc.set_expose_output("left", "out", "ticks.count");
     doc.add_group("", "right");
     doc.add_module("right", "printer");  // имя по умолчанию — имя фабрики
@@ -136,9 +136,7 @@ TEST(DocumentEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
     EXPECT_THROW(doc.add_module("ghost", "counter"), atp::runtime::config_error);  // нет группы
     EXPECT_THROW(doc.add_group("g", "bad.name"), atp::runtime::config_error);      // точка в имени
     EXPECT_THROW(doc.connect("g", "no_dot", "counter.in"), atp::runtime::config_error);
-    EXPECT_THROW(doc.connect("g", "ghost.out", "counter.in"), atp::runtime::config_error);  // нет ребёнка
-    EXPECT_THROW(doc.set_params("g", "ghost", "{}"), atp::runtime::config_error);
-    EXPECT_THROW(doc.set_params("g", "counter", "{broken"), atp::runtime::config_error);         // не-JSON
+    EXPECT_THROW(doc.connect("g", "ghost.out", "counter.in"), atp::runtime::config_error);       // нет ребёнка
     EXPECT_THROW(doc.add_thread("t", atp::thread_mode::throttled), atp::runtime::config_error);  // период
     EXPECT_THROW(doc.set_assignment("g", "nowhere"), atp::runtime::config_error);                // нет потока
 
@@ -202,6 +200,34 @@ TEST(DocumentEdit, UndoRedoWalkHistory) {
     EXPECT_TRUE(doc.undo());
     doc.add_module("g", "other");  // новая ветка истории
     EXPECT_FALSE(doc.can_redo());  // redo сброшен
+}
+
+TEST(DocumentEdit, SetPropertyAddsAndReplaces) {
+    auto doc = atp::studio::document::create();
+    doc.add_module("", "counter");
+    doc.set_property("", "counter", "limit", 5);
+    ASSERT_EQ(doc.config().pipeline.children[0].module->properties.size(), 1u);
+    EXPECT_EQ(doc.config().pipeline.children[0].module->properties[0].second, nlohmann::json(5));
+    doc.set_property("", "counter", "limit", 7);  // замена, не дубль
+    ASSERT_EQ(doc.config().pipeline.children[0].module->properties.size(), 1u);
+    EXPECT_EQ(doc.config().pipeline.children[0].module->properties[0].second, nlohmann::json(7));
+    EXPECT_TRUE(doc.can_undo());
+}
+
+TEST(DocumentEdit, SetPropertyRejectsNonScalarAndGhostModule) {
+    auto doc = atp::studio::document::create();
+    doc.add_module("", "counter");
+    EXPECT_THROW(doc.set_property("", "counter", "limit", nlohmann::json::object()), atp::runtime::config_error);
+    EXPECT_THROW(doc.set_property("", "ghost", "limit", 5), atp::runtime::config_error);
+}
+
+TEST(DocumentEdit, ClearPropertyRemovesPair) {
+    auto doc = atp::studio::document::create();
+    doc.add_module("", "counter");
+    doc.set_property("", "counter", "limit", 5);
+    doc.clear_property("", "counter", "limit");
+    EXPECT_TRUE(doc.config().pipeline.children[0].module->properties.empty());
+    doc.clear_property("", "counter", "ghost");  // отсутствие пары — no-op, не ошибка
 }
 
 }  // namespace

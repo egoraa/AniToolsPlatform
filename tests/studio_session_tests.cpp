@@ -57,6 +57,18 @@ class studio_sink : public atp::module<drain_ports, "studio_sink"> {
     }
 };
 
+// Модуль-носитель проперти: правку на лету проверяем на живом дереве.
+struct target_props : atp::io::properties {
+    atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
+};
+class target_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
+
+atp::runtime::config make_config(const char* text) {
+    const nlohmann::json doc = nlohmann::json::parse(text);
+    EXPECT_TRUE(atp::runtime::validate(doc).empty());
+    return atp::runtime::decode(doc);
+}
+
 atp::runtime::config session_config() {
     const nlohmann::json doc = nlohmann::json::parse(R"({
         "version": "1.0",
@@ -121,6 +133,20 @@ TEST(StudioSession, BuildFailureLeavesSessionClean) {
     manager.registry().add<studio_sink>();
     s.start(cfg);  // сессия пригодна после отказа
     s.stop();
+}
+
+TEST(StudioSession, SetPropertyReachesLiveModule) {
+    atp::module_registry registry;
+    registry.add<target_module>();
+    atp::studio::session s(registry);
+    EXPECT_THROW(s.set_property({"target", "limit", "5"}), std::logic_error);  // не запущено
+    s.start(make_config(R"({"version": "1.1", "pipeline": {"children": [{"module": "target"}]}})"));
+    s.set_property({"target", "limit", "42"});
+    auto* m = s.live_root()->find_module("target");
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->properties().at("limit").to_string(), "42");
+    s.stop();
+    EXPECT_EQ(s.live_root(), nullptr) << "после stop живого дерева нет";
 }
 
 }  // namespace

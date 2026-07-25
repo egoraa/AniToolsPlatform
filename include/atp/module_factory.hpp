@@ -3,14 +3,12 @@
 
 #include <concepts>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
 
 #include <atp/module_base.hpp>
-#include <atp/module_config.hpp>
 #include <atp/module_factory_base.hpp>
 #include <atp/version.hpp>
 
@@ -32,9 +30,10 @@ concept has_module_version = requires {
 // Конфиг связывается при регистрации: фабрика хранит аргументы конструктора,
 // каждый create() строит экземпляр от них — все экземпляры фабрики
 // одинаковы, разные конфиги оформляются разными регистрациями (алиасами).
+// Настройки экземпляра идут не сюда, а в проперти модуля: их выставляют уже
+// на созданном объекте, поэтому у create нет параметров.
 template <std::derived_from<module_base> M, typename... TArgs>
-    requires std::constructible_from<M, const TArgs&...> ||
-             std::constructible_from<M, const module_config&, const TArgs&...>
+    requires std::constructible_from<M, const TArgs&...>
 class module_factory final : public module_factory_base {
    public:
     explicit module_factory(std::string name, TArgs... args) : name_(std::move(name)), args_(std::move(args)...) {}
@@ -51,23 +50,8 @@ class module_factory final : public module_factory_base {
         }
     }
 
-    using module_factory_base::create;  // сахар create() не должен прятаться за override
-
-    // Модуль с module_config-конструктором получает строку конфига; при
-    // наличии обоих конструкторов конфигный побеждает (модуль объявил
-    // готовность принимать параметры — молча терять их нельзя). Модуль без
-    // параметров с непустым config — ошибка конфигурации, не тихий игнор.
-    [[nodiscard]] module_ptr create(const std::string& config) const override {
-        if constexpr (std::constructible_from<M, const module_config&, const TArgs&...>) {
-            return std::apply(
-                [&config](const TArgs&... args) { return module_ptr(new M(module_config{config}, args...), {}); },
-                args_);
-        } else {
-            if (!config.empty()) {
-                throw std::runtime_error("module '" + name_ + "' does not accept parameters");
-            }
-            return std::apply([](const TArgs&... args) { return module_ptr(new M(args...), {}); }, args_);
-        }
+    [[nodiscard]] module_ptr create() const override {
+        return std::apply([](const TArgs&... args) { return module_ptr(new M(args...), {}); }, args_);
     }
 
    private:

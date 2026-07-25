@@ -19,7 +19,7 @@ namespace atp::runtime {
 // Версия схемы конфига, которую понимает приложение: мажор конфига обязан
 // совпадать, минор — не превышать наш (поля «из будущего» отклоняются,
 // а не игнорируются молча). Само поле "version" — первое, что проверяется.
-inline constexpr version config_schema_version{1, 0};
+inline constexpr version config_schema_version{1, 1};
 
 // Ошибка уровня приложения: чтение, инклуды, сборка по конфигу.
 class config_error : public std::runtime_error {
@@ -31,7 +31,9 @@ struct module_node {
     std::string factory;                     // имя фабрики в реестре
     std::string name;                        // имя ребёнка в группе (дефолт — имя фабрики)
     std::optional<version> factory_version;  // нет — последняя зарегистрированная
-    std::string params;                      // сырой JSON узла params; "" — параметров нет
+    // Начальные значения пропертей: имя → JSON-скаляр. Значение хранится
+    // узлом, не строкой: encode обязан отличать 5 от "5" (round-trip).
+    std::vector<std::pair<std::string, nlohmann::json>> properties;
 };
 
 struct group_node;
@@ -88,8 +90,13 @@ inline module_node decode_module(const nlohmann::json& j) {
         }
         m.factory_version = *v;
     }
-    if (j.contains("params")) {
-        m.params = j.at("params").dump();  // компактно: фабрике важен смысл, не форматирование
+    if (j.contains("properties")) {
+        // value()/at() отдают json по значению или по ссылке, а items() держит
+        // ссылку на объект: результат сначала в переменную (см. decode_group).
+        const nlohmann::json props = j.at("properties");
+        for (const auto& [name, value] : props.items()) {
+            m.properties.emplace_back(name, value);
+        }
     }
     return m;
 }
@@ -147,8 +154,12 @@ inline nlohmann::json encode_child(const child_node& c) {
         if (c.module->factory_version) {
             j["version"] = c.module->factory_version->to_string();
         }
-        if (!c.module->params.empty()) {
-            j["params"] = nlohmann::json::parse(c.module->params);  // params — JSON-узел, не строка
+        if (!c.module->properties.empty()) {
+            nlohmann::json props = nlohmann::json::object();
+            for (const auto& [name, value] : c.module->properties) {
+                props[name] = value;
+            }
+            j["properties"] = std::move(props);
         }
         return j;
     }
@@ -232,7 +243,7 @@ inline nlohmann::json encode_group_body(const group_node& g) {
 }
 
 // Модель → JSON, обратный к decode. Каноничная форма (дефолты опущены,
-// mode потока явный, params — узлом); инварианты: validate(encode(cfg))
+// mode потока явный, значения пропертей — скалярами своего типа); инварианты: validate(encode(cfg))
 // пуст, encode(decode(doc)) == doc для каноничного документа. Порядок
 // алиасов expose при round-trip не сохраняется — JSON-объект сортирует
 // ключи; на смысл конфига это не влияет.

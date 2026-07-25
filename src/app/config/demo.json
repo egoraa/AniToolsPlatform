@@ -1,12 +1,17 @@
 {
-    "version": "1.0",
+    "version": "1.1",
     "plugins": ["atp_demo_plugin"],
     "pipeline": {
         "children": [
             {
                 "group": "producers",
                 "children": [
-                    { "module": "counter", "name": "ticks", "version": "1.0" }
+                    {
+                        "module": "counter",
+                        "name": "ticks",
+                        "version": "1.0",
+                        "properties": { "start_at": 100, "step": 5 }
+                    }
                 ],
                 "expose": { "outputs": { "numbers": "ticks.count" } }
             },

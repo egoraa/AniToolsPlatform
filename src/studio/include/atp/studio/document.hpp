@@ -172,20 +172,16 @@ class document {
     void add_module(const std::string& group_path,
                     const std::string& factory,
                     std::string name = {},
-                    std::optional<version> factory_version = {},
-                    std::string params = {}) {
+                    std::optional<version> factory_version = {}) {
         runtime::group_node& g = require_group(group_path);
         if (name.empty()) {
             name = factory;  // умолчание то же, что у decode
         }
         detail::check_name(name, "module name");
         require_free_name(g, name);
-        if (!params.empty()) {
-            params = parse_params(params);
-        }
         snapshot();
         runtime::child_node c;
-        c.module = runtime::module_node{factory, std::move(name), factory_version, std::move(params)};
+        c.module = runtime::module_node{factory, std::move(name), factory_version, {}};
         g.children.push_back(std::move(c));
     }
 
@@ -282,15 +278,37 @@ class document {
         g.connections.erase(g.connections.begin() + static_cast<std::ptrdiff_t>(index));
     }
 
-    void set_params(const std::string& group_path, const std::string& name, const std::string& params) {
-        runtime::group_node& g = require_group(group_path);
-        runtime::child_node* child = detail::find_child(g, name);
-        if (child == nullptr || !child->module) {
-            throw runtime::config_error("no module '" + name + "' in group '" + group_path + "'");
+    // Значение проперти в документе: скаляр по контракту валидатора.
+    // Правка на живом пайплайне — отдельный канал (session), документ —
+    // источник для сохранения и следующего запуска.
+    void set_property(const std::string& group_path,
+                      const std::string& name,
+                      const std::string& prop,
+                      nlohmann::json value) {
+        if (!value.is_number() && !value.is_string() && !value.is_boolean()) {
+            throw runtime::config_error("property '" + prop + "' must be a scalar (number, string or boolean)");
         }
-        std::string canonical = params.empty() ? std::string{} : parse_params(params);
+        runtime::module_node& m = require_module(group_path, name);
         snapshot();
-        child->module->params = std::move(canonical);
+        for (auto& [existing, v] : m.properties) {
+            if (existing == prop) {
+                v = std::move(value);
+                return;
+            }
+        }
+        m.properties.emplace_back(prop, std::move(value));
+    }
+
+    // Снятие значения — «вернуться к дефолту модуля»; отсутствие пары не
+    // ошибка (кнопка reset идемпотентна), снапшот только при изменении.
+    void clear_property(const std::string& group_path, const std::string& name, const std::string& prop) {
+        runtime::module_node& m = require_module(group_path, name);
+        const auto it = std::ranges::find_if(m.properties, [&](const auto& p) { return p.first == prop; });
+        if (it == m.properties.end()) {
+            return;
+        }
+        snapshot();
+        m.properties.erase(it);
     }
 
     void set_expose_input(const std::string& group_path, const std::string& alias, const std::string& port_path) {
@@ -431,6 +449,15 @@ class document {
         return *g;
     }
 
+    [[nodiscard]] runtime::module_node& require_module(const std::string& group_path, const std::string& name) {
+        runtime::group_node& g = require_group(group_path);
+        runtime::child_node* child = detail::find_child(g, name);
+        if (child == nullptr || !child->module) {
+            throw runtime::config_error("no module '" + name + "' in group '" + group_path + "'");
+        }
+        return *child->module;
+    }
+
     void require_free_name(const runtime::group_node& g, const std::string& name) const {
         for (const runtime::child_node& c : g.children) {
             if (detail::child_name(c) == name) {
@@ -444,16 +471,8 @@ class document {
     void require_port_child(runtime::group_node& g, const std::string& group_path, const std::string& port_path) {
         const std::string child = detail::port_path_child(port_path);
         if (detail::find_child(g, child) == nullptr) {
-            throw runtime::config_error("no child '" + child + "' in group '" + group_path + "' for '" + port_path + "'");
-        }
-    }
-
-    // params хранится каноничным компактным дампом — тем же, что у decode.
-    [[nodiscard]] static std::string parse_params(const std::string& params) {
-        try {
-            return nlohmann::json::parse(params).dump();
-        } catch (const nlohmann::json::parse_error& e) {
-            throw runtime::config_error(std::string("params is not valid JSON: ") + e.what());
+            throw runtime::config_error("no child '" + child + "' in group '" + group_path + "' for '" + port_path +
+                                        "'");
         }
     }
 

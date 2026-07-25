@@ -153,3 +153,34 @@ TEST(Module, DefaultIterateReportsIdle) {
     // Умолчание module<>: no-op-итерация и есть простой.
     EXPECT_EQ(m.iterate(std::stop_token{}), atp::work_status::idle);
 }
+
+namespace {
+
+struct counter_props : atp::io::properties {
+    atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
+};
+using counter_props_ports = atp::io::ports<atp::io::inputs, atp::io::outputs, counter_props>;
+
+class propertied_module : public atp::module<counter_props_ports, "propertied"> {};
+
+}  // namespace
+
+TEST(Module, PropertiesCovariantAccess) {
+    propertied_module m;
+    EXPECT_EQ(m.properties().step.get(), 1);  // конкретный тип видит секцию
+}
+
+TEST(Module, PropertiesReachableThroughBase) {
+    propertied_module m;
+    atp::module_base& base = m;
+    atp::io::property_base* p = base.properties().find("step");
+    ASSERT_NE(p, nullptr);
+    p->from_string("5");
+    EXPECT_EQ(m.properties().step.get(), 5);
+    EXPECT_TRUE(m.properties().step.changed());
+}
+
+TEST(Module, DefaultModuleHasEmptyProperties) {
+    atp::module<> m;
+    EXPECT_TRUE(m.properties().list().empty());
+}

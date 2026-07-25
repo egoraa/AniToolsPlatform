@@ -326,6 +326,20 @@ TEST(Watcher, QueuedRuleDrainsPerElement) {
     EXPECT_EQ(w.poll(), atp::io::work_status::idle);
 }
 
+TEST(Watcher, PropertyRuleFiresOnChange) {
+    atp::io::property<int> limit("limit", 10);
+    atp::io::watcher w;
+    std::vector<int> seen;
+    w.watch(limit, [&](const int& v) { seen.push_back(v); });
+
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // дефолт — не событие
+    limit(42);
+    EXPECT_EQ(w.poll(), atp::io::work_status::busy);
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // изменение обработано ровно раз
+    ASSERT_EQ(seen.size(), 1u);
+    EXPECT_EQ(seen[0], 42);
+}
+
 TEST(Watcher, PollWithoutRulesIsIdle) {
     atp::io::watcher w;
     EXPECT_EQ(w.poll(), atp::io::work_status::idle);

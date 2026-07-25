@@ -1,4 +1,5 @@
 #include <concepts>
+#include <string>
 #include <utility>
 
 #include <gtest/gtest.h>
@@ -17,12 +18,20 @@ struct node_out : atp::io::outputs {
 };
 using node_ports = atp::io::ports<node_in, node_out>;
 
+// Третья секция — проперти; объявляется тем же make<>, дефолт и теги уходят
+// конструктору проперти.
+struct prop_section : atp::io::properties {
+    atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
+    atp::io::property<std::string>& file = make<atp::io::property<std::string>>("file", "", atp::io::transient);
+};
+
 }  // namespace
 
 // Типы секций узел сообщает членами — по ним module<> объявляет
 // ковариантные inputs()/outputs().
 static_assert(std::same_as<node_ports::in_type, node_in>);
 static_assert(std::same_as<node_ports::out_type, node_out>);
+static_assert(std::same_as<node_ports::props_type, atp::io::properties>);
 static_assert(atp::io::ports_node<node_ports>);
 static_assert(atp::io::ports_node<atp::io::ports<>>);
 
@@ -66,4 +75,19 @@ TEST(Ports, MoveKeepsRefsAndConnections) {
     // назначение же.
     dst.in.get<atp::io::input<int>>("step")(7);
     EXPECT_EQ(dst.in.step.get(), 7);
+}
+
+TEST(Ports, ThirdSectionHoldsProperties) {
+    atp::io::ports<atp::io::inputs, atp::io::outputs, prop_section> node;
+    EXPECT_EQ(node.props.limit.get(), 10);
+    EXPECT_FALSE(node.props.file.persistent());
+    // type-erased доступ через реестр — той же механикой, что порты
+    EXPECT_EQ(node.props.at("limit").to_string(), "10");
+}
+
+TEST(Ports, TwoSectionFormStaysValid) {
+    // обратная совместимость: прежняя форма без секции пропертей
+    atp::io::ports<atp::io::inputs, atp::io::outputs> node;
+    EXPECT_TRUE(node.props.list().empty());
+    static_assert(atp::io::ports_node<atp::io::ports<>>);
 }

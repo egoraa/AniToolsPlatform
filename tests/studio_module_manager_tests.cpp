@@ -1,8 +1,12 @@
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <typeindex>
 #include <typeinfo>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -98,6 +102,73 @@ TEST(ModuleManager, DescribeProbesPortsAndSurvivesBrokenConstructors) {
     const atp::studio::module_info broken = atp::studio::module_manager::describe(bad);
     EXPECT_TRUE(broken.broken);
     EXPECT_NE(broken.error.find("broken constructor"), std::string::npos);
+}
+
+}  // namespace
+
+namespace {
+enum class fit { none, cover, contain };
+}  // namespace
+
+template <>
+struct atp::io::enum_names<fit> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{fit::none, "none"},
+        atp::io::enum_entry{fit::cover, "cover"},
+        atp::io::enum_entry{fit::contain, "contain"},
+    };
+};
+
+namespace {
+
+struct probe_props : atp::io::properties {
+    atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
+    atp::io::property<std::string>& tmp = make<atp::io::property<std::string>>("tmp", "", atp::io::transient);
+    atp::io::property<fit>& scaling = make<atp::io::property<fit>>("scaling", fit::cover);
+    // перечисление без enum-типа — в описании неотличимо от предыдущего
+    atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
+};
+class propertied_probe
+    : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, probe_props>, "propertied_probe"> {};
+
+TEST(StudioModuleManager, DescribeListsPropertyOptions) {
+    atp::module_factory<propertied_probe> factory("propertied_probe");
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+    const auto by_name = [&info](std::string_view name) {
+        return std::ranges::find_if(info.properties, [name](const auto& p) { return p.name == name; });
+    };
+
+    // Перечисление из таблицы имён типа: kind текстовый, набор — имена.
+    const auto scaling = by_name("scaling");
+    ASSERT_NE(scaling, info.properties.end());
+    EXPECT_EQ(scaling->kind, atp::io::property_kind::text);
+    EXPECT_EQ(scaling->default_value, "cover");
+    EXPECT_EQ(scaling->options, (std::vector<std::string>{"none", "cover", "contain"}));
+
+    // Перечисление из набора значений: описание такое же, но kind числовой —
+    // инспектор нарисует список, а в конфиг вернёт число, не строку.
+    const auto channels = by_name("channels");
+    ASSERT_NE(channels, info.properties.end());
+    EXPECT_EQ(channels->kind, atp::io::property_kind::number);
+    EXPECT_EQ(channels->options, (std::vector<std::string>{"1", "2", "6"}));
+
+    // У неограниченной проперти набор пуст — по нему и различаются виджеты.
+    EXPECT_TRUE(by_name("limit")->options.empty());
+}
+
+TEST(StudioModuleManager, DescribeListsProperties) {
+    atp::module_factory<propertied_probe> factory("propertied_probe");
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+    ASSERT_EQ(info.properties.size(), 4u);
+    // owned() не гарантирует порядок — найти по имени
+    const auto limit = std::ranges::find_if(info.properties, [](const auto& p) { return p.name == "limit"; });
+    ASSERT_NE(limit, info.properties.end());
+    EXPECT_EQ(limit->kind, atp::io::property_kind::number);
+    EXPECT_EQ(limit->default_value, "10");
+    EXPECT_TRUE(limit->persistent);
+    const auto tmp = std::ranges::find_if(info.properties, [](const auto& p) { return p.name == "tmp"; });
+    ASSERT_NE(tmp, info.properties.end());
+    EXPECT_FALSE(tmp->persistent);
 }
 
 }  // namespace

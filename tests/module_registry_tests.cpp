@@ -50,10 +50,17 @@ class handmade_module : public atp::module_base {
     const atp::io::outputs& outputs() const override {
         return outputs_;
     }
+    atp::io::properties& properties() override {
+        return properties_;
+    }
+    const atp::io::properties& properties() const override {
+        return properties_;
+    }
 
    private:
     atp::io::inputs inputs_;
     atp::io::outputs outputs_;
+    atp::io::properties properties_;
 };
 
 // Модуль с конфигом в конструкторе — для тестов вариадик-регистрации.

@@ -62,6 +62,12 @@ class module : public module_base {
     [[nodiscard]] const TPorts::out_type& outputs() const override {
         return io_.out;
     }
+    [[nodiscard]] TPorts::props_type& properties() override {
+        return io_.props;
+    }
+    [[nodiscard]] const TPorts::props_type& properties() const override {
+        return io_.props;
+    }
 
    private:
     TPorts io_;

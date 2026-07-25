@@ -170,7 +170,7 @@ class validator {
         }
         std::string child_name;
         if (is_module) {
-            check_keys(node, path, {"module", "name", "version", "params"});
+            check_keys(node, path, {"module", "name", "version", "properties"});
             if (check_name(node.at("module"), path + ".module")) {
                 child_name = node.at("module").get<std::string>();
             }
@@ -182,7 +182,21 @@ class validator {
                     error(path + ".version", "invalid version");
                 }
             }
-            // params — любой JSON-узел: интерпретация за фабрикой модуля
+            // Проперти — объект «имя → скаляр»: тип значения проверяется здесь,
+            // существование проперти у модуля — билдером (ему нужен реестр).
+            if (node.contains("properties")) {
+                const std::string ppath = path + ".properties";
+                if (!node.at("properties").is_object()) {
+                    error(ppath, "must be an object of name -> scalar");
+                } else {
+                    const nlohmann::json props = node.at("properties");  // items() держит ссылку
+                    for (const auto& [pname, pvalue] : props.items()) {
+                        if (!pvalue.is_number() && !pvalue.is_string() && !pvalue.is_boolean()) {
+                            error(ppath + "." + pname, "must be a scalar (number, string or boolean)");
+                        }
+                    }
+                }
+            }
         } else {
             check_keys(node, path, {"group", "children", "expose", "connections"});
             if (check_name(node.at("group"), path + ".group")) {

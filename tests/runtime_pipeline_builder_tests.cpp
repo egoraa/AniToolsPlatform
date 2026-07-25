@@ -1,3 +1,4 @@
+#include <array>
 #include <latch>
 #include <stop_token>
 #include <string>
@@ -22,6 +23,12 @@ struct drain_inputs : atp::io::inputs {
 using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
 using drain_ports = atp::io::ports<drain_inputs>;
 
+// Секция пропертей приёмника: значение приезжает из узла properties конфига.
+struct sink_props : atp::io::properties {
+    atp::io::property<std::string>& tag = make<atp::io::property<std::string>>("tag");
+};
+using sink_ports = atp::io::ports<drain_inputs, atp::io::outputs, sink_props>;
+
 // Источник шлёт одно значение — тесту хватает факта доставки.
 class one_shot_source : public atp::module<feed_ports, "one_shot"> {
    public:
@@ -38,17 +45,11 @@ class one_shot_source : public atp::module<feed_ports, "one_shot"> {
     bool sent_ = false;
 };
 
-// Приёмник с параметрами: сохраняет сырую строку и сигналит о доставке.
-class recording_sink : public atp::module<drain_ports, "recorder"> {
+// Приёмник с пропертью: значение читается прямо с живого модуля, и сигналит
+// о доставке.
+class recording_sink : public atp::module<sink_ports, "recorder"> {
    public:
-    // Снимок параметров — прямо из конструктора: build создаёт модуль через
-    // фабрику до всяких каскадов, тест проверяет доставку params без запуска.
-    explicit recording_sink(atp::module_config config) : config_(std::move(config)) {
-        last_params = config_.raw;
-    }
-
     static inline std::latch* delivered = nullptr;  // тест ставит перед стартом
-    static inline std::string last_params;          // фабрика создаёт модуль внутри build
 
     atp::work_status iterate(std::stop_token) override {
         if (inputs().value.try_pop()) {
@@ -59,10 +60,32 @@ class recording_sink : public atp::module<drain_ports, "recorder"> {
         }
         return atp::work_status::idle;
     }
-
-   private:
-    atp::module_config config_;
 };
+
+enum class overflow_policy { drop, block };
+
+}  // namespace
+
+// Таблица имён специализируется вне анонимного namespace.
+template <>
+struct atp::io::enum_names<overflow_policy> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{overflow_policy::drop, "drop"},
+        atp::io::enum_entry{overflow_policy::block, "block"},
+    };
+};
+
+namespace {
+
+struct limiter_props : atp::io::properties {
+    atp::io::property<int>& limit = make<atp::io::property<int>>("limit");
+    // перечисление на уровне типа — в конфиге имя строкой
+    atp::io::property<overflow_policy>& on_overflow =
+        make<atp::io::property<overflow_policy>>("on_overflow", overflow_policy::drop);
+    // перечисление на уровне экземпляра — в конфиге число
+    atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
+};
+class limit_sink : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, limiter_props>, "limiter"> {};
 
 atp::runtime::config make_config(const char* text) {
     const nlohmann::json doc = nlohmann::json::parse(text);
@@ -71,14 +94,14 @@ atp::runtime::config make_config(const char* text) {
     return atp::runtime::decode(doc);
 }
 
-TEST(PipelineBuilder, BuildsTreeParamsAndRuns) {
+TEST(PipelineBuilder, BuildsTreePropertiesAndRuns) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "1.0",
+        "version": "1.1",
         "pipeline": {
             "children": [
                 {"group": "left", "children": [{"module": "one_shot", "name": "src"}],
                  "expose": {"outputs": {"out": "src.value"}}},
-                {"group": "right", "children": [{"module": "recorder", "params": {"tag": "demo"}}],
+                {"group": "right", "children": [{"module": "recorder", "properties": {"tag": "demo"}}],
                  "expose": {"inputs": {"in": "recorder.value"}}}
             ],
             "connections": [{"from": "left.out", "to": "right.in"}]
@@ -97,8 +120,10 @@ TEST(PipelineBuilder, BuildsTreeParamsAndRuns) {
     ASSERT_NE(app.pipe.root().find_group("right"), nullptr);
     EXPECT_NE(app.pipe.root().find_group("right")->find_module("recorder"), nullptr);
 
-    // params дошли до конструктора модуля через фабрику
-    EXPECT_EQ(recording_sink::last_params, R"({"tag":"demo"})");
+    // значение проперти дошло из конфига до живого модуля
+    auto* rec = app.pipe.root().find_group("right")->find_module("recorder");
+    ASSERT_NE(rec, nullptr);
+    EXPECT_EQ(rec->properties().at("tag").to_string(), "demo");
 
     // конфиг раннера валиден: пайплайн реально запускается и доставляет
     std::latch delivered(1);
@@ -107,6 +132,95 @@ TEST(PipelineBuilder, BuildsTreeParamsAndRuns) {
     delivered.wait();
     app.runner.stop();
     recording_sink::delivered = nullptr;
+}
+
+TEST(PipelineBuilder, UnknownPropertyIsConfigError) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "recorder", "properties": {"ghost": 1}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<recording_sink>();
+    try {
+        atp::runtime::build(app, cfg, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("recorder"), std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("ghost"), std::string::npos);
+    }
+}
+
+TEST(PipelineBuilder, UnparsableValueIsConfigError) {
+    // tag у recorder — строковый, строка парсится всегда; отказ парсинга
+    // демонстрирует числовая проперть limiter'а
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"limit": "abc"}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    try {
+        atp::runtime::build(app, cfg, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("limiter"), std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("abc"), std::string::npos);
+    }
+}
+
+TEST(PipelineBuilder, EnumPropertyComesFromConfigAsName) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"on_overflow": "block"}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    atp::runtime::build(app, cfg, ".");
+    auto* m = app.pipe.root().find_module("limiter");
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->properties().at("on_overflow").to_string(), "block");
+}
+
+TEST(PipelineBuilder, UnknownEnumNameListsOptions) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"on_overflow": "explode"}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    try {
+        atp::runtime::build(app, cfg, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("explode"), std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("drop, block"), std::string::npos);  // подсказка от property
+    }
+}
+
+// Перечисление из чисел: значение в конфиге остаётся числом, а не строкой,
+// и вне набора отвергается тем же путём, что имя вне таблицы.
+TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    const atp::runtime::config ok = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"channels": 6}}]}
+    })");
+    atp::runtime::build(app, ok, ".");
+    EXPECT_EQ(app.pipe.root().find_module("limiter")->properties().at("channels").to_string(), "6");
+
+    atp::runtime::application other;
+    other.registry.add<limit_sink>();
+    const atp::runtime::config bad = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"channels": 3}}]}
+    })");
+    try {
+        atp::runtime::build(other, bad, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("1, 2, 6"), std::string::npos);
+    }
 }
 
 TEST(PipelineBuilder, WrapsPlatformErrorsWithConfigContext) {

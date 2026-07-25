@@ -118,6 +118,30 @@ TEST(ConfigValidator, AssignRules) {
     EXPECT_FALSE(check(doc).empty());
 }
 
+TEST(ConfigValidator, PropertiesMustBeScalarObject) {
+    const nlohmann::json doc = nlohmann::json::parse(R"({
+        "version": "1.1",
+        "pipeline": {"children": [
+            {"module": "m1", "properties": {"ok": 5, "bad": {"nested": 1}}},
+            {"module": "m2", "properties": [1, 2]}
+        ]}
+    })");
+    const auto errors = atp::runtime::validate(doc);
+    ASSERT_EQ(errors.size(), 2u);
+    EXPECT_NE(errors[0].find("properties.bad"), std::string::npos);
+    EXPECT_NE(errors[1].find("must be an object"), std::string::npos);
+}
+
+TEST(ConfigValidator, OldParamsKeyIsRejected) {
+    const nlohmann::json doc = nlohmann::json::parse(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "m", "params": {"x": 1}}]}
+    })");
+    const auto errors = atp::runtime::validate(doc);
+    ASSERT_EQ(errors.size(), 1u);
+    EXPECT_NE(errors[0].find("unknown key 'params'"), std::string::npos);
+}
+
 TEST(ConfigValidator, AggregatesAllErrors) {
     json doc = valid_config();
     doc["version"] = "2.0";

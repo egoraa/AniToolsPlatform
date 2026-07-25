@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <atp/io/input.hpp>
+#include <atp/io/property.hpp>
 #include <atp/io/queued_input.hpp>
 #include <atp/io/threading.hpp>
 
@@ -35,6 +36,13 @@ class watcher {
     template <typename T>
     void watch(queued_input<T>& in, std::type_identity_t<std::function<void(const T&)>> handler) {
         rules_.push_back(std::make_unique<queue_rule<T>>(in, std::move(handler)));
+    }
+
+    // property<T>: значение изменилось (см. property::take) → обработчик.
+    // Реакция на настройки декларируется рядом с правилами для входов.
+    template <typename T>
+    void watch(property<T>& prop, std::type_identity_t<std::function<void(const T&)>> handler) {
+        rules_.push_back(std::make_unique<property_rule<T>>(prop, std::move(handler)));
     }
 
     // Пасс по правилам в порядке регистрации; busy — хоть одно сработало.
@@ -86,6 +94,22 @@ class watcher {
             return work_status::busy;
         }
         queued_input<T>* in;
+        std::function<void(const T&)> handler;
+    };
+
+    template <typename T>
+    struct property_rule : rule_base {
+        property_rule(property<T>& prop, std::function<void(const T&)> handler)
+            : prop(&prop), handler(std::move(handler)) {}
+        work_status poll() override {
+            std::optional<T> value = prop->take();
+            if (!value) {
+                return work_status::idle;
+            }
+            handler(*value);
+            return work_status::busy;
+        }
+        property<T>* prop;
         std::function<void(const T&)> handler;
     };
 

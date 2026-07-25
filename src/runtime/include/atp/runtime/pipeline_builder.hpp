@@ -3,9 +3,12 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <atp/group.hpp>
 #include <atp/module_loader.hpp>
@@ -33,6 +36,38 @@ struct application {
 
 namespace detail {
 
+// JSON-скаляр → строка для property_base::from_string: строка как есть
+// (dump добавил бы кавычки), bool — словами (дефолт кодека), числа — dump
+// (каноничный текст). Симметрия обратного пути — забота studio (kind).
+inline std::string scalar_to_string(const nlohmann::json& value) {
+    if (value.is_string()) {
+        return value.get<std::string>();
+    }
+    if (value.is_boolean()) {
+        return value.get<bool>() ? "true" : "false";
+    }
+    return value.dump();
+}
+
+// Значения из конфига — до g.add и initialize: модуль в initialize уже
+// видит настройки. Неизвестное имя и непарсящееся значение — ошибки
+// конфига; контекст модуля добавит вызывающий. invalid_argument проперти
+// переводится в config_error как есть: её текст уже называет проперть и,
+// у enum, перечисляет допустимые имена.
+inline void apply_properties(module_base& m, const module_node& node) {
+    for (const auto& [name, value] : node.properties) {
+        io::property_base* prop = m.properties().find(name);
+        if (prop == nullptr) {
+            throw config_error("no property named '" + name + "'");
+        }
+        try {
+            prop->from_string(scalar_to_string(value));
+        } catch (const std::invalid_argument& e) {
+            throw config_error(e.what());
+        }
+    }
+}
+
 // Ошибки платформы оборачиваются контекстом конфига: пользователь видит,
 // какой узел собирался, а не только «no module named X».
 inline void build_group(group& g, const group_node& node, module_registry& registry) {
@@ -40,8 +75,9 @@ inline void build_group(group& g, const group_node& node, module_registry& regis
         if (c.module) {
             try {
                 module_ptr m = c.module->factory_version
-                                   ? registry.create(c.module->factory, *c.module->factory_version, c.module->params)
-                                   : registry.create(c.module->factory, c.module->params);
+                                   ? registry.create(c.module->factory, *c.module->factory_version)
+                                   : registry.create(c.module->factory);
+                apply_properties(*m, *c.module);
                 g.add(c.module->name, std::move(m));
             } catch (const std::exception& e) {
                 throw config_error("module '" + c.module->name + "' in group '" + std::string(g.get_name()) +

@@ -12,11 +12,12 @@ namespace {
 
 TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "1.0",
+        "version": "1.1",
         "plugins": ["p.dll"],
         "pipeline": {
             "children": [
-                {"module": "counter", "name": "ticks", "version": "1.0", "params": {"rate": 10}},
+                {"module": "counter", "name": "ticks", "version": "1.0",
+                 "properties": {"rate": 10, "file": "a.txt", "verbose": true}},
                 {"group": "sub", "children": [{"module": "printer"}],
                  "expose": {"inputs": {"in": "printer.value"}}}
             ],
@@ -28,7 +29,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     ASSERT_TRUE(atp::runtime::validate(doc).empty());
 
     const atp::runtime::config cfg = atp::runtime::decode(doc);
-    EXPECT_EQ(cfg.schema, (atp::version{1, 0}));
+    EXPECT_EQ(cfg.schema, (atp::version{1, 1}));
     ASSERT_EQ(cfg.plugins.size(), 1u);
 
     ASSERT_EQ(cfg.pipeline.children.size(), 2u);
@@ -36,7 +37,12 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     EXPECT_EQ(cfg.pipeline.children[0].module->factory, "counter");
     EXPECT_EQ(cfg.pipeline.children[0].module->name, "ticks");
     EXPECT_EQ(cfg.pipeline.children[0].module->factory_version, (atp::version{1, 0}));
-    EXPECT_EQ(cfg.pipeline.children[0].module->params, R"({"rate":10})");  // компактный dump
+    ASSERT_EQ(cfg.pipeline.children[0].module->properties.size(), 3u);
+    // порядок пар — порядок items() объекта (алфавитный у nlohmann)
+    EXPECT_EQ(cfg.pipeline.children[0].module->properties[0].first, "file");
+    EXPECT_EQ(cfg.pipeline.children[0].module->properties[0].second, nlohmann::json("a.txt"));
+    EXPECT_EQ(cfg.pipeline.children[0].module->properties[1].second, nlohmann::json(10));
+    EXPECT_EQ(cfg.pipeline.children[0].module->properties[2].second, nlohmann::json(true));
 
     ASSERT_TRUE(cfg.pipeline.children[1].group != nullptr);
     EXPECT_EQ(cfg.pipeline.children[1].group->name, "sub");
@@ -67,18 +73,20 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
     ASSERT_EQ(cfg.pipeline.children.size(), 1u);
     EXPECT_EQ(cfg.pipeline.children[0].module->name, "counter");  // дефолт — имя фабрики
     EXPECT_EQ(cfg.pipeline.children[0].module->factory_version, std::nullopt);
-    EXPECT_TRUE(cfg.pipeline.children[0].module->params.empty());
+    EXPECT_TRUE(cfg.pipeline.children[0].module->properties.empty());
 }
 
 TEST(ConfigEncode, RoundTripsCanonicalDocument) {
     // Канон: дефолты опущены, mode указан явно, алиасы expose в алфавитном
     // порядке (JSON-объект их сортирует) — encode выдаёт ровно этот документ.
+    // Скаляры пропертей обязаны сохранить свой тип: 10, а не "10".
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "1.0",
+        "version": "1.1",
         "plugins": ["p.dll"],
         "pipeline": {
             "children": [
-                {"module": "counter", "name": "ticks", "version": "1.0", "params": {"rate": 10}},
+                {"module": "counter", "name": "ticks", "version": "1.0",
+                 "properties": {"rate": 10, "file": "a.txt", "verbose": true}},
                 {"group": "sub", "children": [{"module": "printer"}],
                  "expose": {"inputs": {"in": "printer.value"}}}
             ],

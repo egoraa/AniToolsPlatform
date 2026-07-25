@@ -22,7 +22,9 @@ namespace atp {
 //    (module_config).
 // 7: наблюдение выходов — peek()/write_count() у output_base (снимок кэша
 //    и поколение записи для мониторинга; safe-экземпляры только).
-inline constexpr unsigned plugin_abi = 7;
+// 8: проперти модулей — третья секция ports<TIn, TOut, TProps>,
+//    module_base отдаёт properties() (реестр property_base).
+inline constexpr unsigned plugin_abi = 8;
 
 // Контракт плагина — два C-символа. Рукопожатие atp_abi_version —
 // единственный вызов, безопасный при любом рассогласовании: чистый C,

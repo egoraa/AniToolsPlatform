@@ -4,7 +4,7 @@
 
 **Цель:** третий вид декларируемых сущностей модуля — проперти: типизированные значения-настройки, редактируемые на лету (studio, `atp_app -p`), читаемые модулем pull-моделью; заменяют `params`/`module_config`.
 
-**Архитектура:** переиспользование io-машинерии (`io_base`, `io_registry`): `property_base`/`property<T>` + секция-реестр `properties`, третья секция узла `ports<TIn, TOut, TProps>`. Конвертация — трейт `property_codec<T>`. Конфиг: узел `properties` (JSON-скаляры) вместо `params`, схема 1.0 → 1.1. Спека: `.superpowers/specs/2026-07-24-module-properties-design.md` (локальный артефакт brainstorming, в git не входит; ключевые решения продублированы в этом плане).
+**Архитектура:** переиспользование io-машинерии (`io_base`, `io_registry`): `property_base`/`property<T>` + секция-реестр `properties`, третья секция узла `ports<TIn, TOut, TProps>`. Конвертация — трейт `property_codec<T>`. **Перечисление** — не отдельный вид проперти, а ограничение набором значений: непустой `property_base::options()` (канонические строки в порядке объявления). Объявляется двумя путями, для потребителей неразличимыми: таблица имён `enum_names<E>` — «перечисление на уровне типа» (C++ enum), `option_set`/`allowed(...)` в объявлении порта — «перечисление на уровне экземпляра» (любой тип: `int`, `std::string`, подмножество enum). `property_kind` при этом остаётся ровно тем, чем был, — JSON-типом значения. Конфиг: узел `properties` (JSON-скаляры) вместо `params`, схема 1.0 → 1.1. Спека: `.superpowers/specs/2026-07-24-module-properties-design.md` (локальный артефакт brainstorming, в git не входит; ключевые решения продублированы в этом плане).
 
 **Стек:** C++23, header-only, GoogleTest 1.17, nlohmann_json (только рантайм), Qt (studio GUI).
 
@@ -12,19 +12,21 @@
 
 - Комментарии в коде и общение — на русском; стиль `docs/code_style.md` + `.clang-format` (отступ 4, 120 колонок, фигурные скобки обязательны).
 - Платформа (`include/atp/`) не зависит от nlohmann_json; include-стиль `<atp/...>`.
-- Сборка и запуск тестов из shell — только в обёртке vcvars64 (см. «Команды» ниже).
+- Сборка и запуск тестов из shell — только пресетами CMake (см. «Команды» ниже); генератор «Visual Studio 17 2022» находит тулчейн сам, обёртка vcvars не нужна.
 - **Git-коммиты НЕ выполнять**: в конце каждой задачи — стоп-точка «показать изменения пользователю», коммитит пользователь сам. Шаги сборки/тестов разрешены самим фактом запуска этого плана.
 - Новые тест-файлы добавлять в `tests/CMakeLists.txt` (алфавитный список `add_executable(atp_tests ...)`).
 
 **Команды (единственный разрешённый способ собрать/прогнать):**
 
 ```powershell
-# сборка тестов
-cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1 && cmake --build cmake-build-debug --target atp_tests 2>&1'
+# конфигурация — один раз (и после добавления файлов в tests/CMakeLists.txt)
+cmake --preset windows-msvc
+# сборка всего
+cmake --build --preset windows-msvc-debug
 # запуск группы тестов
-cmake-build-debug\tests\atp_tests.exe --gtest_filter="PropertyCodec.*"
-# полная сборка + все тесты (финал задачи)
-cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1 && cmake --build cmake-build-debug 2>&1 && ctest --test-dir cmake-build-debug 2>&1'
+build\windows-msvc\tests\Debug\atp_tests.exe --gtest_filter="PropertyCodec.*"
+# полный прогон (финал задачи)
+build\windows-msvc\tests\Debug\atp_tests.exe --gtest_brief=1
 ```
 
 ---
@@ -137,7 +139,10 @@ TEST(PropertyCodec, UserSpecializationSatisfiesConcept) {
 namespace atp::io {
 
 // Вид значения проперти — подсказка сериализаторам, живущим над строкой:
-// рантайм по нему пишет в конфиг число, а не "число"; studio выбирает виджет.
+// рантайм по нему пишет в конфиг число, а не "число". Это JSON-тип и только:
+// «одно из набора» — свойство ортогональное (см. property_base::options()),
+// им ограничены бывают и числа, и строки, и enum, а тип записи от этого не
+// меняется. Виджет инспектор выбирает по обоим признакам.
 enum class property_kind { number, boolean, text };
 
 // Трейт конвертации значения проперти в строку и обратно. Primary-определения
@@ -242,6 +247,206 @@ concept property_value = requires(const T& value, std::string_view text) {
 
 ---
 
+### Task 1b: enum_names — перечисление на уровне типа
+
+**Files:**
+- Create: `include/atp/io/enum_names.hpp`
+- Create: `tests/enum_names_tests.cpp`
+- Modify: `tests/CMakeLists.txt` (строка `enum_names_tests.cpp` в алфавитный список)
+
+**Interfaces:**
+- Consumes: `property_codec`/`property_kind` (Task 1).
+- Produces: `atp::io::enum_entry<E> { E value; std::string_view name; }`; точка кастомизации `atp::io::enum_names<E>` (primary без определения); концепт `atp::io::named_enum<E>`; частичная специализация `property_codec<E>` для `named_enum` — `kind == property_kind::text` (имя варианта едет в конфиг строкой, как `mode` у потоков) плюс один статик сверх общего контракта кодека: `options() -> std::span<const std::string_view>` — допустимые имена в порядке объявления. Task 3 подхватывает его `requires`-проверкой, поэтому скалярных кодеков он не касается; проверку «значение внутри набора» делает там же `property<T>`, кодеку она не нужна.
+
+- [ ] **Step 1: написать падающие тесты**
+
+`tests/enum_names_tests.cpp`:
+
+```cpp
+#include <array>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+
+#include <gtest/gtest.h>
+
+#include <atp/io/enum_names.hpp>
+
+namespace {
+
+// Порядок вариантов намеренно не совпадает с алфавитным: таблица задаёт
+// порядок выпадающего списка, и он обязан сохраняться как объявлен.
+enum class blend { normal, add, multiply };
+
+// Enum без таблицы имён — проверка, что концепт его не пускает.
+enum class nameless { a, b };
+
+}  // namespace
+
+// Специализация в atp::io — тот же способ, что у property_codec<percent>.
+template <>
+struct atp::io::enum_names<blend> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{blend::normal, "normal"},
+        atp::io::enum_entry{blend::add, "add"},
+        atp::io::enum_entry{blend::multiply, "multiply"},
+    };
+};
+
+namespace {
+
+using blend_codec = atp::io::property_codec<blend>;
+
+TEST(EnumNames, ConceptAcceptsOnlyTabledEnums) {
+    static_assert(atp::io::named_enum<blend>);
+    static_assert(!atp::io::named_enum<nameless>);
+    static_assert(!atp::io::named_enum<int>);
+    static_assert(atp::io::property_value<blend>);  // общий контракт кодека выполнен
+}
+
+TEST(EnumNames, RoundTripsThroughNames) {
+    EXPECT_EQ(blend_codec::to_string(blend::multiply), "multiply");
+    EXPECT_EQ(blend_codec::from_string("add"), std::optional(blend::add));
+    EXPECT_EQ(blend_codec::kind, atp::io::property_kind::text);  // в конфиг имя едет строкой
+}
+
+TEST(EnumNames, UnknownNameIsRejected) {
+    EXPECT_EQ(blend_codec::from_string("screen"), std::nullopt);
+    EXPECT_EQ(blend_codec::from_string(""), std::nullopt);
+    EXPECT_EQ(blend_codec::from_string("Add"), std::nullopt);  // регистр значим, как у bool
+    EXPECT_EQ(blend_codec::from_string("1"), std::nullopt);    // числовая форма не принимается
+}
+
+TEST(EnumNames, OptionsKeepDeclarationOrder) {
+    const std::span<const std::string_view> options = blend_codec::options();
+    ASSERT_EQ(options.size(), 3u);
+    EXPECT_EQ(options[0], "normal");
+    EXPECT_EQ(options[1], "add");
+    EXPECT_EQ(options[2], "multiply");
+    static_assert(blend_codec::options().size() == 3);  // список доступен и на этапе компиляции
+}
+
+// Значение вне таблицы — ошибка модуля; кодек её не диагностирует (у него нет
+// имени проперти для сообщения), но и не выдумывает текст: пустая строка не
+// совпадёт ни с одним допустимым именем, и property<E> отвергнет запись.
+TEST(EnumNames, ValueOutsideTableHasNoText) {
+    EXPECT_EQ(blend_codec::to_string(static_cast<blend>(99)), "");
+}
+
+}  // namespace
+```
+
+- [ ] **Step 2: собрать, убедиться что сборка падает** (нет `enum_names.hpp`).
+
+- [ ] **Step 3: реализовать заголовок**
+
+`include/atp/io/enum_names.hpp`:
+
+```cpp
+#ifndef ANITOOLSPLATFORM_IO_ENUM_NAMES_HPP
+#define ANITOOLSPLATFORM_IO_ENUM_NAMES_HPP
+
+#include <array>
+#include <cstddef>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+
+#include <atp/io/property_codec.hpp>
+
+namespace atp::io {
+
+// Строка таблицы имён: значение enum и его текстовая форма. Имя — и токен
+// конфига, и метка в выпадающем списке studio: разделять их незачем, пока
+// у нас нет локализации (прецедент — "on_demand" у режимов потоков).
+template <typename E>
+struct enum_entry {
+    E value;
+    std::string_view name;
+};
+
+// Точка кастомизации: модуль специализирует её для своего enum, объявляя
+//     static constexpr std::array entries{enum_entry{E::a, "a"}, ...};
+// Primary-определения нет — enum без таблицы получает ошибку компиляции,
+// а не молчаливую деградацию до числового или текстового кодека.
+template <typename E>
+struct enum_names;
+
+template <typename E>
+concept named_enum = std::is_enum_v<E> && requires { enum_names<E>::entries; };
+
+namespace detail {
+
+// Имена отдельным массивом: options() отдаёт span, а entries хранит пары.
+// Переменная-шаблон своя в каждой DLL — как у erased_of<T>(), поэтому
+// сравнивается только содержимое string_view, никогда не адреса.
+template <named_enum E>
+inline constexpr auto enum_option_names = [] {
+    constexpr std::size_t count = std::tuple_size_v<std::remove_cvref_t<decltype(enum_names<E>::entries)>>;
+    std::array<std::string_view, count> names{};
+    for (std::size_t i = 0; i < count; ++i) {
+        names[i] = enum_names<E>::entries[i].name;
+    }
+    return names;
+}();
+
+}  // namespace detail
+
+// Кодек любого enum с таблицей имён. Поиск линейный: таблицы измеряются
+// единицами строк, а порядок объявления — единственный внятный порядок для
+// списка вариантов (сортировка или хеш-таблица его бы разрушили).
+template <named_enum E>
+struct property_codec<E> {
+    // Имя варианта — обычная строка: в конфиге enum неотличим от текстовой
+    // проперти, «одно из» выражает не kind, а непустой options().
+    static constexpr property_kind kind = property_kind::text;
+
+    static std::string to_string(const E& value) {
+        for (const enum_entry<E>& e : enum_names<E>::entries) {
+            if (e.value == value) {
+                return std::string(e.name);
+            }
+        }
+        return {};  // недостижимо: property<E> не пускает внутрь значение вне таблицы
+    }
+
+    static std::optional<E> from_string(std::string_view text) {
+        for (const enum_entry<E>& e : enum_names<E>::entries) {
+            if (e.name == text) {
+                return e.value;
+            }
+        }
+        return std::nullopt;
+    }
+
+    // Допустимые значения в порядке объявления — «перечисление на уровне
+    // типа»: property<E> перенесёт их в свой набор (Task 3), дальше они
+    // неотличимы от перечисленных через allowed(). Span смотрит в статику
+    // (у плагина — в его DLL, пришпиленную module_deleter'ом).
+    static constexpr std::span<const std::string_view> options() {
+        return detail::enum_option_names<E>;
+    }
+};
+
+}  // namespace atp::io
+
+#endif  // ANITOOLSPLATFORM_IO_ENUM_NAMES_HPP
+```
+
+- [ ] **Step 4: собрать и прогнать** `--gtest_filter="EnumNames.*"`. Ожидание: все PASS.
+
+Два места, где ожидание опирается на поведение компилятора, — проверить на первой же сборке, обходные пути известны и контракта не меняют:
+  - `enum_entry{blend::normal, "normal"}` — агрегатный CTAD (C++20). Если MSVC откажется выводить, писать `enum_entry<blend>{...}`.
+  - `!named_enum<nameless>` — концепт опирается на то, что обращение к члену неполного `enum_names<E>` даёт substitution failure, а не hard error. Если жёсткая ошибка всё-таки будет, определить primary пустым (`template <typename E> struct enum_names {};`): отсутствие таблицы всё равно останется ошибкой компиляции, только придёт она от `property_value<E>`, а не от самого `enum_names`.
+
+- [ ] **Step 5: стоп-точка** — показать пользователю дифф задачи (без коммита).
+
+---
+
 ### Task 2: io_registry::make — вариадик
 
 **Files:**
@@ -277,7 +482,7 @@ concept property_value = requires(const T& value, std::string_view text) {
 
 ---
 
-### Task 3: property_base + property\<T\>
+### Task 3: property_base + property\<T\> + перечисление на уровне экземпляра
 
 **Files:**
 - Create: `include/atp/io/property_base.hpp`
@@ -286,26 +491,58 @@ concept property_value = requires(const T& value, std::string_view text) {
 - Modify: `tests/CMakeLists.txt` (строка `property_tests.cpp` после `property_codec_tests.cpp`)
 
 **Interfaces:**
-- Consumes: `io_base` (name/type/lock из Task 0-контекста), `property_codec<T>`/`property_value`/`property_kind` (Task 1).
+- Consumes: `io_base` (name/type/lock из Task 0-контекста), `property_codec<T>`/`property_value`/`property_kind` (Task 1), статик `options()` enum-кодека (Task 1b).
 - Produces:
   - тег `atp::io::persistence {bool keep}`, константы `atp::io::persistent`/`atp::io::transient`;
-  - `atp::io::property_base : io_base` — `kind() -> property_kind`, `persistent() -> bool`, чистые виртуалы `to_string() const -> std::string`, `from_string(std::string_view)` (бросает `std::invalid_argument`), `default_string() const -> std::string`, `changed() const -> bool`;
-  - `atp::io::property<T>` — конструктор `(std::string name, T default_value = T{}, persistence = persistent, safety = safe)`, `operator()(U&&)`, `get() -> T`, `take() -> std::optional<T>`, overrides базы + `reset()`.
+  - `atp::io::option_set<TValue> { std::vector<TValue> values; }` и вокабуляр объявления `atp::io::allowed(values...)` (пустой набор запрещён на этапе компиляции);
+  - `atp::io::property_base : io_base` — `kind() -> property_kind`, `options() -> const std::vector<std::string>&` (пусто — ограничений нет; непусто — проперть-перечисление), `persistent() -> bool`, чистые виртуалы `to_string() const -> std::string`, `from_string(std::string_view)` (бросает `std::invalid_argument`), `default_string() const -> std::string`, `changed() const -> bool`;
+  - `atp::io::property<T>` — два конструктора: `(name, default = T{}, persistence = persistent, safety = safe)` и `(name, default, const option_set<TValue>&, persistence = persistent, safety = safe)`; `operator()(U&&)`, `get() -> T`, `take() -> std::optional<T>`, overrides базы + `reset()`.
+  - Единый инвариант перечисления: значение проперти всегда лежит в наборе, если набор объявлен. Набор наполняется из одного из двух источников — таблицы имён типа (enum) или `option_set` экземпляра, — после чего они неразличимы. Дефолт, типизированная запись и `from_string` проверяются одинаково (`std::invalid_argument` с перечнем допустимых значений), поэтому `to_string()` не бросает никогда и весь строковый слой (конфиг, `-p`, studio) безопасен.
 
 - [ ] **Step 1: написать падающие тесты**
 
 `tests/property_tests.cpp`:
 
 ```cpp
+#include <array>
 #include <atomic>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
+#include <atp/io/enum_names.hpp>
 #include <atp/io/property.hpp>
+
+namespace {
+
+// Enum-проперть: таблица имён рядом с enum, дальше всё как у скаляров.
+enum class blend { normal, add, multiply };
+
+// Enum, у которого нулевого варианта нет: проверка ловушки дефолта.
+enum class scale { half = 1, full = 2 };
+
+}  // namespace
+
+template <>
+struct atp::io::enum_names<blend> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{blend::normal, "normal"},
+        atp::io::enum_entry{blend::add, "add"},
+        atp::io::enum_entry{blend::multiply, "multiply"},
+    };
+};
+
+template <>
+struct atp::io::enum_names<scale> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{scale::half, "half"},
+        atp::io::enum_entry{scale::full, "full"},
+    };
+};
 
 namespace {
 
@@ -383,6 +620,111 @@ TEST(Property, TypeIndexMatchesValueType) {
     EXPECT_EQ(p.type(), std::type_index(typeid(int)));
 }
 
+TEST(Property, UnrestrictedPropertyHasNoOptions) {
+    atp::io::property<int> p("p");
+    EXPECT_TRUE(p.options().empty());
+    p(12345);  // без набора запись не ограничена ничем
+    EXPECT_EQ(p.get(), 12345);
+}
+
+TEST(Property, EnumPropertyWorksLikeAnyOther) {
+    atp::io::property<blend> mode("mode", blend::add);
+    EXPECT_EQ(mode.get(), blend::add);
+    mode(blend::multiply);
+    EXPECT_EQ(mode.take(), std::optional(blend::multiply));
+
+    atp::io::property_base& base = mode;
+    EXPECT_EQ(base.kind(), atp::io::property_kind::text);  // имя варианта — строка
+    EXPECT_EQ(base.to_string(), "multiply");
+    EXPECT_EQ(base.default_string(), "add");
+    base.from_string("normal");
+    EXPECT_EQ(mode.get(), blend::normal);
+}
+
+// Таблица имён типа наполняет набор экземпляра — дальше источник неразличим.
+TEST(Property, EnumTableBecomesTheOptionSet) {
+    atp::io::property<blend> mode("mode");
+    const atp::io::property_base& base = mode;
+    EXPECT_EQ(base.options(), (std::vector<std::string>{"normal", "add", "multiply"}));
+}
+
+TEST(Property, FromStringListsOptionsInErrorMessage) {
+    atp::io::property<blend> mode("mode");
+    try {
+        mode.from_string("screen");
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message = e.what();
+        EXPECT_NE(message.find("mode"), std::string::npos);
+        EXPECT_NE(message.find("screen"), std::string::npos);
+        EXPECT_NE(message.find("normal, add, multiply"), std::string::npos);
+    }
+    EXPECT_EQ(mode.get(), blend::normal);
+    EXPECT_FALSE(mode.changed());
+}
+
+// Инвариант «значение всегда внутри набора»: непредставимое отвергается на
+// входе, иначе to_string сломался бы у инспектора и при сохранении конфига.
+TEST(Property, EnumRejectsValueOutsideTable) {
+    atp::io::property<blend> mode("mode");
+    EXPECT_THROW(mode(static_cast<blend>(99)), std::invalid_argument);
+    EXPECT_EQ(mode.get(), blend::normal);  // отказ не трогает значение
+    EXPECT_FALSE(mode.changed());
+    EXPECT_THROW((atp::io::property<blend>("bad", static_cast<blend>(99))), std::invalid_argument);
+}
+
+// Дефолт по умолчанию — T{}, у enum это значение 0. Нет нулевого варианта в
+// таблице — конструктор откажет сразу, а не отдаст проперть в непредставимом
+// состоянии; автор модуля обязан назвать дефолт явно.
+TEST(Property, EnumWithoutZeroVariantDemandsExplicitDefault) {
+    EXPECT_THROW((atp::io::property<scale>("scale")), std::invalid_argument);
+    EXPECT_NO_THROW((atp::io::property<scale>("scale", scale::full)));
+}
+
+// Перечисление без enum-типа: набор объявлен в месте объявления порта.
+TEST(Property, AllowedRestrictsScalarProperty) {
+    atp::io::property<int> channels("channels", 2, atp::io::allowed(1, 2, 6));
+    EXPECT_EQ(channels.options(), (std::vector<std::string>{"1", "2", "6"}));
+    EXPECT_EQ(channels.kind(), atp::io::property_kind::number);  // в конфиг всё равно числом
+    channels(6);
+    EXPECT_EQ(channels.get(), 6);
+    EXPECT_THROW(channels(3), std::invalid_argument);
+    EXPECT_EQ(channels.get(), 6);  // отказ не трогает значение
+}
+
+TEST(Property, AllowedRestrictsTextPropertyAndFromString) {
+    atp::io::property<std::string> codec("codec", "h264", atp::io::allowed("h264", "h265", "av1"));
+    codec.from_string("av1");
+    EXPECT_EQ(codec.get(), "av1");
+    try {
+        codec.from_string("vp9");  // парсится (строка), но вне набора
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message = e.what();
+        EXPECT_NE(message.find("vp9"), std::string::npos);
+        EXPECT_NE(message.find("h264, h265, av1"), std::string::npos);
+    }
+    EXPECT_EQ(codec.get(), "av1");
+}
+
+TEST(Property, DefaultOutsideAllowedSetIsRejected) {
+    EXPECT_THROW((atp::io::property<int>("channels", 3, atp::io::allowed(1, 2, 6))), std::invalid_argument);
+}
+
+// Набор экземпляра сужает таблицу типа: модуль поддерживает не все варианты.
+TEST(Property, AllowedNarrowsEnumTableToSubset) {
+    atp::io::property<blend> mode("mode", blend::add, atp::io::allowed(blend::add, blend::multiply));
+    EXPECT_EQ(mode.options(), (std::vector<std::string>{"add", "multiply"}));
+    EXPECT_THROW(mode(blend::normal), std::invalid_argument);  // в таблице есть, в наборе нет
+}
+
+// Каноничность сравнения: "007" разбирается в 7, и именно 7 ищется в наборе.
+TEST(Property, MembershipIsCheckedOnCanonicalText) {
+    atp::io::property<int> level("level", 7, atp::io::allowed(7, 8));
+    level.from_string("007");
+    EXPECT_EQ(level.get(), 7);
+}
+
 // Конкурентная запись/чтение под дефолтной блокировкой: TSan-подобной
 // проверки у нас нет, тест ловит хотя бы рваные значения и крэши.
 TEST(Property, ConcurrentWritesAndReadsDoNotTear) {
@@ -417,8 +759,10 @@ TEST(Property, ConcurrentWritesAndReadsDoNotTear) {
 
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <typeindex>
 #include <utility>
+#include <vector>
 
 #include <atp/io/io_base.hpp>
 #include <atp/io/property_codec.hpp>
@@ -436,6 +780,27 @@ struct persistence {
 inline constexpr persistence persistent{true};
 inline constexpr persistence transient{false};
 
+// Набор допустимых значений — «перечисление на уровне экземпляра»: тип
+// проперти остаётся обычным (int, std::string, да и enum), а список вариантов
+// объявляется там же, где сам порт. Хранит значения, а не строки: в строки их
+// переводит кодек проперти, чтобы сравнение шло по канонической форме.
+template <typename TValue>
+struct option_set {
+    std::vector<TValue> values;
+};
+
+// Вокабуляр объявления:
+//     make<property<int>>("channels", 2, allowed(1, 2, 6));
+//     make<property<std::string>>("codec", "h264", allowed("h264", "h265"));
+// Пустой набор отвергается на этапе компиляции: «перечисление ни из чего»
+// молча означало бы отсутствие ограничения — ровно противоположный смысл.
+template <typename... TValues>
+    requires(sizeof...(TValues) > 0)
+[[nodiscard]] auto allowed(TValues&&... values) {
+    using value_type = std::common_type_t<std::decay_t<TValues>...>;
+    return option_set<value_type>{{static_cast<value_type>(std::forward<TValues>(values))...}};
+}
+
 // Type-erased база проперти — в одном ряду с input_base/output_base:
 // имя, typeid(T) и синхронизация — из io_base. Здесь — строковый доступ
 // (builder, CLI и studio правят значение, не зная T), вид значения для
@@ -443,12 +808,29 @@ inline constexpr persistence transient{false};
 // выходам — это отдельный вид сущности со своим реестром (properties).
 class property_base : public io_base {
    public:
-    property_base(std::string name, std::type_index type, property_kind kind, persistence p, safety s)
-        : io_base(std::move(name), type, s), kind_(kind), persistent_(p.keep) {}
+    property_base(std::string name,
+                  std::type_index type,
+                  property_kind kind,
+                  std::vector<std::string> options,
+                  persistence p,
+                  safety s)
+        : io_base(std::move(name), type, s), kind_(kind), options_(std::move(options)), persistent_(p.keep) {}
 
     [[nodiscard]] property_kind kind() const noexcept {
         return kind_;
     }
+
+    // Допустимые значения в канонической строковой форме, в порядке
+    // объявления. Пусто — ограничений нет; непусто — проперть-перечисление:
+    // инспектор рисует выпадающий список, а запись вне набора отвергается.
+    // Откуда набор взялся (таблица имён enum-типа или option_set экземпляра),
+    // потребителям знать незачем — здесь эти два пути уже сошлись.
+    // Хранится копией: набор экземпляра живёт в самой проперти, а не в
+    // статике кодека, и после конструктора не меняется.
+    [[nodiscard]] const std::vector<std::string>& options() const noexcept {
+        return options_;
+    }
+
     [[nodiscard]] bool persistent() const noexcept {
         return persistent_;
     }
@@ -469,6 +851,7 @@ class property_base : public io_base {
 
    private:
     property_kind kind_;
+    std::vector<std::string> options_;  // пусто у неограниченных пропертей — без аллокации
     bool persistent_;
 };
 
@@ -483,19 +866,57 @@ class property_base : public io_base {
 #ifndef ANITOOLSPLATFORM_IO_PROPERTY_HPP
 #define ANITOOLSPLATFORM_IO_PROPERTY_HPP
 
+#include <algorithm>
 #include <concepts>
+#include <cstddef>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <typeinfo>
 #include <utility>
+#include <vector>
 
 #include <atp/io/property_base.hpp>
 #include <atp/io/property_codec.hpp>
 #include <atp/io/threading.hpp>
 
 namespace atp::io {
+
+namespace detail {
+
+// Набор, заданный типом: options() объявляет только enum-кодек (таблица имён,
+// см. enum_names.hpp) — requires-проверка избавляет скалярные кодеки от знания
+// о нём. Заголовок enum_names.hpp здесь не нужен: специализацию приносит TU
+// автора модуля.
+template <property_value T>
+std::vector<std::string> type_options() {
+    if constexpr (requires { property_codec<T>::options(); }) {
+        std::vector<std::string> result;
+        result.reserve(property_codec<T>::options().size());
+        for (std::string_view name : property_codec<T>::options()) {
+            result.emplace_back(name);
+        }
+        return result;
+    } else {
+        return {};
+    }
+}
+
+// Набор, заданный экземпляром: значения приводятся к T и печатаются кодеком —
+// дальше проверка вхождения сравнивает канонические строки, поэтому "007"
+// найдётся среди allowed(7, 8), а 7 и 7.0 не разъедутся.
+template <property_value T, typename TValue>
+std::vector<std::string> render_options(const option_set<TValue>& allowed) {
+    std::vector<std::string> result;
+    result.reserve(allowed.values.size());
+    for (const TValue& value : allowed.values) {
+        result.push_back(property_codec<T>::to_string(T(value)));
+    }
+    return result;
+}
+
+}  // namespace detail
 
 // Типизированная проперть: значение-настройка модуля с дефолтом. В отличие
 // от входа значение есть всегда — get() не бросает никогда. Запись зеркалит
@@ -506,15 +927,34 @@ namespace atp::io {
 template <property_value T>
 class property : public property_base {
    public:
+    // База конструируется первой, поэтому checked() уже вправе звать name() и
+    // options(): сообщение об отвергнутом дефолте называет проперть и варианты.
+    // Дефолт по умолчанию — T{}: у enum это значение 0, и если такого варианта
+    // в таблице нет, конструктор откажет — дефолт называется явно.
     explicit property(std::string name, T default_value = T{}, persistence p = persistent, safety s = safe)
-        : property_base(std::move(name), typeid(T), property_codec<T>::kind, p, s),
-          default_(default_value),
-          value_(std::move(default_value)) {}
+        : property_base(std::move(name), typeid(T), property_codec<T>::kind, detail::type_options<T>(), p, s),
+          default_(checked(std::move(default_value))),
+          value_(default_) {}
+
+    // Перечисление на уровне экземпляра: набор объявлен здесь же, у порта.
+    // Набор типа (таблица имён enum) при этом заменяется, а не дополняется —
+    // так модуль сужает enum до поддерживаемого им подмножества.
+    template <typename TValue>
+        requires std::constructible_from<T, const TValue&>
+    property(std::string name,
+             T default_value,
+             const option_set<TValue>& allowed,
+             persistence p = persistent,
+             safety s = safe)
+        : property_base(std::move(name), typeid(T), property_codec<T>::kind,
+                        detail::render_options<T>(allowed), p, s),
+          default_(checked(std::move(default_value))),
+          value_(default_) {}
 
     template <typename U>
         requires std::constructible_from<T, U>
     void operator()(U&& value) {
-        T incoming(std::forward<U>(value));  // конструирование вне замка
+        T incoming = checked(T(std::forward<U>(value)));  // конструирование и проверка вне замка
         auto guard = lock();
         value_ = std::move(incoming);
         changed_ = true;
@@ -554,13 +994,18 @@ class property : public property_base {
         return property_codec<T>::to_string(value_);
     }
 
+    // Два разных отказа: строка не разобралась либо разобралась в значение вне
+    // набора. Проверка вхождения — та же, что у типизированной записи: обойти
+    // ограничение через строковый путь нельзя.
     void from_string(std::string_view text) override {
         std::optional<T> parsed = property_codec<T>::from_string(text);  // парсинг вне замка
         if (!parsed) {
-            throw std::invalid_argument("property '" + name() + "': cannot parse '" + std::string(text) + "'");
+            throw std::invalid_argument("property '" + name() + "': cannot parse '" + std::string(text) + "'" +
+                                        options_hint());
         }
+        T incoming = checked(std::move(*parsed));
         auto guard = lock();
-        value_ = std::move(*parsed);
+        value_ = std::move(incoming);
         changed_ = true;
     }
 
@@ -569,6 +1014,37 @@ class property : public property_base {
     }
 
    private:
+    // Список вариантов — единственная подсказка, по которой автор конфига
+    // поймёт, что писать; собирается здесь на всех потребителей сразу
+    // (конфиг, -p, studio) и пуст у неограниченных пропертей.
+    [[nodiscard]] std::string options_hint() const {
+        if (options().empty()) {
+            return {};
+        }
+        std::string hint = " (expected one of: ";
+        for (std::size_t i = 0; i < options().size(); ++i) {
+            hint += (i == 0 ? "" : ", ") + options()[i];
+        }
+        return hint + ")";
+    }
+
+    // Единственная проверка вхождения в набор — через неё проходят дефолт,
+    // типизированная запись и from_string. Сравнение по канонической строке:
+    // так один и тот же код обслуживает и таблицу имён enum (значение вне
+    // таблицы печатается пустой строкой и не совпадёт ни с чем), и набор
+    // значений любого другого типа. У неограниченной проперти набор пуст —
+    // ни сравнения, ни печати, ни аллокации.
+    [[nodiscard]] T checked(T value) const {
+        if (!options().empty()) {
+            const std::string text = property_codec<T>::to_string(value);
+            if (std::ranges::find(options(), text) == options().end()) {
+                throw std::invalid_argument("property '" + name() + "': value '" + text + "' is not allowed" +
+                                            options_hint());
+            }
+        }
+        return value;
+    }
+
     T default_;  // после конструктора не меняется
     T value_;
     bool changed_ = false;
@@ -688,6 +1164,7 @@ namespace atp::io {
 // и тот же паттерн объявления секции, дефолт и теги уходят конструктору:
 //     property<int>& limit = make<property<int>>("limit", 10);
 //     property<std::string>& file = make<property<std::string>>("file", "", transient);
+//     property<int>& channels = make<property<int>>("channels", 2, allowed(1, 2, 6));
 class properties : public detail::io_registry<property_base> {
    public:
     properties() : io_registry("property") {}
@@ -751,7 +1228,9 @@ concept ports_node =
 inline constexpr unsigned plugin_abi = 8;
 ```
 
-`io.hpp` — в алфавитный список include добавить `<atp/io/properties.hpp>`, `<atp/io/property.hpp>`, `<atp/io/property_base.hpp>`, `<atp/io/property_codec.hpp>`.
+`io.hpp` — в алфавитный список include добавить `<atp/io/enum_names.hpp>`, `<atp/io/properties.hpp>`, `<atp/io/property.hpp>`, `<atp/io/property_base.hpp>`, `<atp/io/property_codec.hpp>`.
+
+(Отдельного ABI-бампа под перечисления не нужно: `property_base::options()` и второй конструктор `property<T>` въезжают в тот же переход 7 → 8.)
 
 - [ ] **Step 4: реализовать overrides у group** — `src/runtime/include/atp/group.hpp`: группа наследует `module_base` и без новой пары виртуалов не скомпилируется. Рядом с её overrides `inputs()`/`outputs()` добавить:
 
@@ -960,14 +1439,92 @@ TEST(PipelineBuilder, UnparsableValueIsConfigError) {
 }
 ```
 
-Рядом с `recording_sink` объявить второй тест-модуль:
+Рядом с `recording_sink` объявить второй тест-модуль (он же носитель enum-проперти):
 
 ```cpp
+enum class overflow_policy { drop, block };
+
+}  // namespace  — таблица имён специализируется вне анонимного namespace
+
+template <>
+struct atp::io::enum_names<overflow_policy> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{overflow_policy::drop, "drop"},
+        atp::io::enum_entry{overflow_policy::block, "block"},
+    };
+};
+
+namespace {
+
 struct limiter_props : atp::io::properties {
     atp::io::property<int>& limit = make<atp::io::property<int>>("limit");
+    // перечисление на уровне типа — в конфиге имя строкой
+    atp::io::property<overflow_policy>& on_overflow =
+        make<atp::io::property<overflow_policy>>("on_overflow", overflow_policy::drop);
+    // перечисление на уровне экземпляра — в конфиге число
+    atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
 };
 class limit_sink
     : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, limiter_props>, "limiter"> {};
+```
+
+И три теста пути перечислений через конфиг (кода в билдере они не требуют — значение приезжает своим JSON-типом и проверяется самой пропертью):
+
+```cpp
+TEST(PipelineBuilder, EnumPropertyComesFromConfigAsName) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"on_overflow": "block"}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    atp::runtime::build(app, cfg, ".");
+    auto* m = app.pipe.root().find_module("limiter");
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->properties().at("on_overflow").to_string(), "block");
+}
+
+TEST(PipelineBuilder, UnknownEnumNameListsOptions) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"on_overflow": "explode"}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    try {
+        atp::runtime::build(app, cfg, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("explode"), std::string::npos);
+        EXPECT_NE(std::string(e.what()).find("drop, block"), std::string::npos);  // подсказка от property
+    }
+}
+
+// Перечисление из чисел: значение в конфиге остаётся числом, а не строкой,
+// и вне набора отвергается тем же путём, что имя вне таблицы.
+TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    const atp::runtime::config ok = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"channels": 6}}]}
+    })");
+    atp::runtime::build(app, ok, ".");
+    EXPECT_EQ(app.pipe.root().find_module("limiter")->properties().at("channels").to_string(), "6");
+
+    atp::runtime::application other;
+    other.registry.add<limit_sink>();
+    const atp::runtime::config bad = make_config(R"({
+        "version": "1.1",
+        "pipeline": {"children": [{"module": "limiter", "properties": {"channels": 3}}]}
+    })");
+    try {
+        atp::runtime::build(other, bad, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("1, 2, 6"), std::string::npos);
+    }
+}
 ```
 
 `tests/studio_document_tests.cpp:140-141` — оба `set_params`-ожидания удалить (замена появится в Task 10).
@@ -1050,14 +1607,20 @@ inline std::string scalar_to_string(const nlohmann::json& value) {
 
 // Значения из конфига — до g.add и initialize: модуль в initialize уже
 // видит настройки. Неизвестное имя и непарсящееся значение — ошибки
-// конфига; контекст модуля добавит вызывающий.
+// конфига; контекст модуля добавит вызывающий. invalid_argument проперти
+// переводится в config_error как есть: её текст уже называет проперть и,
+// у enum, перечисляет допустимые имена.
 inline void apply_properties(module_base& m, const module_node& node) {
     for (const auto& [name, value] : node.properties) {
         io::property_base* prop = m.properties().find(name);
         if (prop == nullptr) {
             throw config_error("no property named '" + name + "'");
         }
-        prop->from_string(scalar_to_string(value));
+        try {
+            prop->from_string(scalar_to_string(value));
+        } catch (const std::invalid_argument& e) {
+            throw config_error(e.what());
+        }
     }
 }
 ```
@@ -1187,8 +1750,24 @@ TEST(ModuleFactory, BoundArgsReachEveryInstance) {
 
 namespace {
 
+enum class trace_level { off, brief, full };
+
+}  // namespace
+
+template <>
+struct atp::io::enum_names<trace_level> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{trace_level::off, "off"},
+        atp::io::enum_entry{trace_level::brief, "brief"},
+        atp::io::enum_entry{trace_level::full, "full"},
+    };
+};
+
+namespace {
+
 struct target_props : atp::io::properties {
     atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
+    atp::io::property<trace_level>& trace = make<atp::io::property<trace_level>>("trace");
 };
 class target_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
 
@@ -1222,6 +1801,23 @@ TEST(PropertyOverride, AppliesThroughGroupTree) {
 
     atp::runtime::apply_property_override(root, {"sub.mod", "limit", "42"});
     EXPECT_EQ(m->properties().limit.get(), 42);
+}
+
+// Enum отдельного кода не требует — имя приезжает строкой и парсится самой
+// пропертью; тест фиксирует, что и подсказка из сообщения доезжает до -p.
+TEST(PropertyOverride, EnumValueIsTakenByName) {
+    atp::group root("root");
+    auto* m = new target_module();
+    root.add("mod", atp::module_ptr(m, {}));
+
+    atp::runtime::apply_property_override(root, {"mod", "trace", "full"});
+    EXPECT_EQ(m->properties().trace.get(), trace_level::full);
+    try {
+        atp::runtime::apply_property_override(root, {"mod", "trace", "verbose"});
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("off, brief, full"), std::string::npos);
+    }
 }
 
 TEST(PropertyOverride, BadPathsAndValuesAreConfigErrors) {
@@ -1388,25 +1984,66 @@ inline void apply_property_override(group& root, const property_override& o) {
 - Modify: `tests/studio_module_manager_tests.cpp`
 
 **Interfaces:**
-- Consumes: `property_base::{kind, persistent, default_string}` (Task 3), `properties().owned()` (Task 4).
-- Produces: `atp::studio::property_info { std::string name; io::property_kind kind; std::string default_value; bool persistent; }`; поле `std::vector<property_info> properties;` в `module_info` (после `outputs`). Task 12 строит по нему виджеты.
+- Consumes: `property_base::{kind, options, persistent, default_string}` (Task 3), `properties().owned()` (Task 4).
+- Produces: `atp::studio::property_info { std::string name; io::property_kind kind; std::string default_value; std::vector<std::string> options; bool persistent; }`; поле `std::vector<property_info> properties;` в `module_info` (после `outputs`). Task 12 строит по нему виджеты: непустой `options` → выпадающий список, `kind` → как разбирать введённое обратно в JSON. Набор копируется — описание переживает временный модуль-зонд, с которого снято.
 
 - [ ] **Step 1: написать падающий тест** — в `tests/studio_module_manager_tests.cpp` рядом с существующими describe-тестами (найти `TEST(...describe...)` / `module_manager::describe` в файле и повторить их стиль объявления тест-модуля):
 
 ```cpp
 namespace {
+enum class fit { none, cover, contain };
+}  // namespace
+
+template <>
+struct atp::io::enum_names<fit> {
+    static constexpr std::array entries{
+        atp::io::enum_entry{fit::none, "none"},
+        atp::io::enum_entry{fit::cover, "cover"},
+        atp::io::enum_entry{fit::contain, "contain"},
+    };
+};
+
+namespace {
 struct probe_props : atp::io::properties {
     atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
     atp::io::property<std::string>& tmp = make<atp::io::property<std::string>>("tmp", "", atp::io::transient);
+    atp::io::property<fit>& scaling = make<atp::io::property<fit>>("scaling", fit::cover);
+    // перечисление без enum-типа — в описании неотличимо от предыдущего
+    atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
 };
 class propertied_probe
     : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, probe_props>, "propertied_probe"> {};
 }  // namespace
 
+TEST(StudioModuleManager, DescribeListsPropertyOptions) {
+    atp::module_factory<propertied_probe> factory("propertied_probe");
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+    const auto by_name = [&info](std::string_view name) {
+        return std::ranges::find_if(info.properties, [name](const auto& p) { return p.name == name; });
+    };
+
+    // Перечисление из таблицы имён типа: kind текстовый, набор — имена.
+    const auto scaling = by_name("scaling");
+    ASSERT_NE(scaling, info.properties.end());
+    EXPECT_EQ(scaling->kind, atp::io::property_kind::text);
+    EXPECT_EQ(scaling->default_value, "cover");
+    EXPECT_EQ(scaling->options, (std::vector<std::string>{"none", "cover", "contain"}));
+
+    // Перечисление из набора значений: описание такое же, но kind числовой —
+    // инспектор нарисует список, а в конфиг вернёт число, не строку.
+    const auto channels = by_name("channels");
+    ASSERT_NE(channels, info.properties.end());
+    EXPECT_EQ(channels->kind, atp::io::property_kind::number);
+    EXPECT_EQ(channels->options, (std::vector<std::string>{"1", "2", "6"}));
+
+    // У неограниченной проперти набор пуст — по нему и различаются виджеты.
+    EXPECT_TRUE(by_name("limit")->options.empty());
+}
+
 TEST(StudioModuleManager, DescribeListsProperties) {
     atp::module_factory<propertied_probe> factory("propertied_probe");
     const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
-    ASSERT_EQ(info.properties.size(), 2u);
+    ASSERT_EQ(info.properties.size(), 4u);
     // owned() не гарантирует порядок — найти по имени
     const auto limit = std::ranges::find_if(info.properties, [](const auto& p) { return p.name == "limit"; });
     ASSERT_NE(limit, info.properties.end());
@@ -1425,8 +2062,9 @@ TEST(StudioModuleManager, DescribeListsProperties) {
 ```cpp
 struct property_info {
     std::string name;
-    io::property_kind kind;        // подсказка виджету инспектора
-    std::string default_value;     // дефолт строкой — сравнение при сохранении
+    io::property_kind kind;                 // подсказка виджету инспектора
+    std::string default_value;              // дефолт строкой — сравнение при сохранении
+    std::vector<std::string> options;       // непусто у enum: элементы выпадающего списка
     bool persistent = true;
 };
 ```
@@ -1441,7 +2079,8 @@ struct property_info {
 
 ```cpp
             for (io::property_base* p : probe->properties().owned()) {
-                info.properties.push_back({p->name(), p->kind(), p->default_string(), p->persistent()});
+                info.properties.push_back(
+                    {p->name(), p->kind(), p->default_string(), p->options(), p->persistent()});
             }
 ```
 
@@ -1702,6 +2341,8 @@ namespace detail {
 // Строка проперти → JSON-скаляр по kind: числа и bool возвращаются в
 // конфиг своим типом, не строкой (обратная сторона scalar_to_string
 // builder'а). to_string кодека канонична — parse не откажет; text — как есть.
+// Ограниченность набором на тип записи не влияет: перечисление из чисел
+// остаётся числом, из имён enum — строкой.
 [[nodiscard]] inline nlohmann::json property_value_to_json(const io::property_base& p) {
     switch (p.kind()) {
         case io::property_kind::number:
@@ -1858,22 +2499,44 @@ void inspector_widget::build_property_rows(const runtime::module_node& m) {
 ```cpp
 namespace {
 
-// Редактор значения: boolean — чекбокс, number/text — строка ввода.
+// Редактор значения. Первым делом смотрим на набор: непустой — выпадающий
+// список независимо от kind (произвольное значение вводить нельзя, вариант
+// выбирается). Прецедент комбобокса по фиксированному списку в файле уже
+// есть: режимы потоков, inspector_widget.cpp:199. Без набора решает kind:
+// boolean — чекбокс, остальное — строка ввода.
 struct property_editor {
     QWidget* widget = nullptr;
-    QCheckBox* check = nullptr;  // заполнен только для boolean
-    QLineEdit* line = nullptr;   // заполнен для number/text
+    QCheckBox* check = nullptr;  // заполнен для boolean без набора
+    QComboBox* combo = nullptr;  // заполнен для любой проперти с набором
+    QLineEdit* line = nullptr;   // заполнен для number/text без набора
     atp::io::property_kind kind = atp::io::property_kind::text;
 
     [[nodiscard]] std::string text() const {
-        return check != nullptr ? (check->isChecked() ? "true" : "false") : line->text().toStdString();
+        if (combo != nullptr) {
+            return combo->currentText().toStdString();  // текст пункта каноничен: его дал to_string
+        }
+        if (check != nullptr) {
+            return check->isChecked() ? "true" : "false";
+        }
+        return line->text().toStdString();
     }
 };
 
 property_editor* make_editor(const atp::studio::property_info& p, const QString& current, QWidget* parent) {
     auto* editor = new property_editor;  // время жизни — связки connect; хранить в векторе строк
     editor->kind = p.kind;
-    if (p.kind == atp::io::property_kind::boolean) {
+    if (!p.options.empty()) {
+        editor->combo = new QComboBox(parent);
+        for (const std::string& option : p.options) {
+            editor->combo->addItem(QString::fromStdString(option));
+        }
+        // setCurrentText на редактируемом комбобоксе завёл бы левый пункт;
+        // findText отдаёт -1 на рассинхроне документа с описанием модуля —
+        // тогда остаётся первый вариант, а Set перезапишет значение явно.
+        const int index = editor->combo->findText(current);
+        editor->combo->setCurrentIndex(index < 0 ? 0 : index);
+        editor->widget = editor->combo;
+    } else if (p.kind == atp::io::property_kind::boolean) {
         editor->check = new QCheckBox(parent);
         editor->check->setChecked(current == "true");
         editor->widget = editor->check;
@@ -1923,7 +2586,7 @@ nlohmann::json editor_to_json(const property_editor& e) {
 
 (+ include `<atp/studio/property_sync.hpp>`.)
 
-- [ ] **Step 4: собрать всё** (цель по умолчанию собирает и studio при включённом `ATP_BUILD_STUDIO`); полный прогон тестов — PASS. GUI-часть — ручная проверка пользователем (студия: правка проперти в остановленном и запущенном состоянии, сохранение на ходу).
+- [ ] **Step 4: собрать всё** (цель по умолчанию собирает и studio при включённом `ATP_BUILD_STUDIO`); полный прогон тестов — PASS. GUI-часть — ручная проверка пользователем (студия: правка проперти в остановленном и запущенном состоянии, выпадающий список у обеих проперти-перечислений — enum и набора значений, сохранение на ходу).
 - [ ] **Step 5: стоп-точка** — дифф пользователю + список ручных проверок из Step 4.
 
 ---
@@ -1934,7 +2597,7 @@ nlohmann::json editor_to_json(const property_editor& e) {
 - Modify: `.claude/CLAUDE.md` (раздел «Архитектура»)
 - Modify: `docs/architecture.md`
 
-- [ ] **Step 1: CLAUDE.md** — в списке io-заголовков добавить пункты `property_codec.hpp`/`property_base.hpp`/`property.hpp`/`properties.hpp` (по образцу соседних: 1-3 предложения о контракте каждого); в пункте `ports.hpp` — третья секция `props`; в `module.hpp`/`module_base.hpp` — `properties()`; в `watcher.hpp` — правило пропертей; удалить упоминания `module_config` (пункты `module_factory*`, `plugin.hpp`); в разделе рантайма — `property_override.hpp`, схема конфига 1.1, узел `properties`; у studio — property_info/`property_sync.hpp`.
+- [ ] **Step 1: CLAUDE.md** — в списке io-заголовков добавить пункты `property_codec.hpp`/`enum_names.hpp`/`property_base.hpp`/`property.hpp`/`properties.hpp` (по образцу соседних: 1-3 предложения о контракте каждого). Отдельно — понятие перечисления: непустой `property_base::options()`, два способа его объявить (таблица имён `enum_names<E>` для enum-типа, `allowed(...)` в объявлении порта для любого другого) и инвариант «значение всегда внутри набора»; подчеркнуть, что `property_kind` — только JSON-тип и виджет по нему выбирается лишь у пропертей без набора. В пункте `ports.hpp` — третья секция `props`; в `module.hpp`/`module_base.hpp` — `properties()`; в `watcher.hpp` — правило пропертей; удалить упоминания `module_config` (пункты `module_factory*`, `plugin.hpp`); в разделе рантайма — `property_override.hpp`, схема конфига 1.1, узел `properties`; у studio — property_info/`property_sync.hpp`.
 - [ ] **Step 2: docs/architecture.md** — те же правки: `grep -n "module_config\|params" docs/architecture.md` и переписать найденные абзацы под проперти.
 - [ ] **Step 3: стоп-точка** — дифф пользователю; предложить финальный полный прогон и коммит (пользователь делает сам).
 
@@ -1942,4 +2605,4 @@ nlohmann::json editor_to_json(const property_editor& e) {
 
 ## Порядок и зависимости
 
-Задачи 1→2→3→4→5 — платформа, строго последовательно. 6→7 — рантайм-свап (6 требует 4). 8 — после 7 (create() без параметров). 9, 10 — независимы после 6, можно в любом порядке. 11 — после 8 и 10. 12 — после 9, 10, 11. 13 — последней.
+Задачи 1→1b→2→3→4→5 — платформа, строго последовательно (1b нужна Task 3: `property<T>` переносит `options()` enum-кодека в набор экземпляра). 6→7 — рантайм-свап (6 требует 4). 8 — после 7 (create() без параметров). 9, 10 — независимы после 6, можно в любом порядке. 11 — после 8 и 10. 12 — после 9, 10, 11. 13 — последней.

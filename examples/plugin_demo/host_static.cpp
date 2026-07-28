@@ -1,13 +1,13 @@
 #include <iostream>
 #include <stop_token>
 
-#include "counter_modules.hpp"
+#include "demo_modules.hpp"
 
-// Монолит: модуль слинкован в исполняемый файл, main сам зовёт регистрацию.
+// Monolith: the module is linked into the executable and main calls the registration itself.
 int main() {
     atp::module_registry registry;
     atp::module_registrar registrar{registry};
-    demo::register_counter_modules(registrar);
+    demo::register_demo_modules(registrar);
 
     std::cout << "monolith modules:\n";
     for (const auto* factory : registry.list()) {

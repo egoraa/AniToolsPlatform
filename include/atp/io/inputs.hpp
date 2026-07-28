@@ -8,11 +8,13 @@
 
 namespace atp::io {
 
-// Реестр входов; владеет ими. Наследник объявляет входы ссылками:
-//     input<int>& number = make<input<int>>("number");
-//     input<int>& fast = make<input<int>>("fast", unsafe);
-//     queued_input<int>& events = make<queued_input<int>>("events");
-// Вся механика (make/get/at/find/remove/list) — в detail::io_registry.
+/// Owning registry of inputs. An heir declares them as reference members:
+///
+///     input<int>& number = make<input<int>>("number");
+///     input<int>& fast = make<input<int>>("fast", unsafe);
+///     queued_input<int>& events = make<queued_input<int>>("events");
+///
+/// All the machinery (make/get/at/find/remove/list) lives in detail::io_registry.
 class inputs : public detail::io_registry<input_base> {
    public:
     inputs() : io_registry("input") {}

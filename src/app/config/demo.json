@@ -1,19 +1,43 @@
 {
-    "version": "1.0",
-    "plugins": ["libatp_demo_plugin.dll"],
+    "version": "2.0",
+    "plugins": ["atp_demo_plugin"],
     "pipeline": {
-        "children": [
+        "modules": [
             {
                 "group": "producers",
-                "children": [
-                    { "module": "counter", "name": "ticks", "version": "1.0" }
+                "modules": [
+                    {
+                        "module": "counter",
+                        "name": "ticks",
+                        "version": "1.0",
+                        "properties": { "start_at": 100, "step": 5 }
+                    },
+                    {
+                        "module": "scaler",
+                        "name": "scale",
+                        "properties": { "gain": 0.25 }
+                    }
                 ],
-                "expose": { "outputs": { "numbers": "ticks.count" } }
+                "connections": [
+                    { "from": "ticks.count", "to": "scale.count" }
+                ],
+                "expose": {
+                    "outputs": {
+                        "numbers": "ticks.count",
+                        "labels": "ticks.label",
+                        "measures": "scale.value",
+                        "samples": "scale.sample"
+                    }
+                }
             },
             { "$include": "demo_consumers.json" }
         ],
         "connections": [
-            { "from": "producers.numbers", "to": "consumers.numbers" }
+            { "from": "producers.numbers", "to": "consumers.numbers" },
+            { "from": "producers.labels", "to": "consumers.labels" },
+            { "from": "producers.labels", "to": "consumers.probe" },
+            { "from": "producers.measures", "to": "consumers.measures" },
+            { "from": "producers.samples", "to": "consumers.samples" }
         ]
     },
     "threads": [

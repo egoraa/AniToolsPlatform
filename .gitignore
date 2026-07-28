@@ -1,6 +1,9 @@
 cmake-build-*/
+build/
 .idea/
 .superpowers/
 external/
 .claude/
 .mcp.json
+*.layout.json
+aqtinstall.log

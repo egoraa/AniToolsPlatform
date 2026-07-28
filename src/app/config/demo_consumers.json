@@ -1,7 +1,22 @@
 {
     "group": "consumers",
-    "children": [
-        { "module": "printer", "params": { "label": "count" } }
+    "modules": [
+        {
+            "module": "printer",
+            "properties": {
+                "tag": "demo",
+                "format": "bracketed",
+                "verbose": true
+            }
+        }
     ],
-    "expose": { "inputs": { "numbers": "printer.value" } }
+    "expose": {
+        "inputs": {
+            "numbers": "printer.value",
+            "labels": "printer.label",
+            "measures": "printer.measure",
+            "samples": "printer.sample",
+            "probe": "printer.probe"
+        }
+    }
 }

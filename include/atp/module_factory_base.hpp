@@ -2,7 +2,6 @@
 #define ANITOOLSPLATFORM_MODULE_FACTORY_BASE_HPP
 
 #include <memory>
-#include <string>
 #include <string_view>
 
 #include <atp/module_base.hpp>
@@ -10,10 +9,9 @@
 
 namespace atp {
 
-// Type-erased фабрика модуля — в одном ряду с module_base. Владелец —
-// module_registry; имя задаётся в точке регистрации (возможны алиасы
-// одного типа под разными именами), поэтому хранится в фабрике, а не
-// выводится из типа модуля.
+/// Type-erased module factory, the peer of module_base. Owned by module_registry; the name is
+/// fixed at registration time (one type may be aliased under several names), so it is stored in the
+/// factory rather than derived from the module type.
 class module_factory_base {
    public:
     virtual ~module_factory_base() = default;
@@ -21,21 +19,19 @@ class module_factory_base {
     module_factory_base(const module_factory_base&) = delete;
     module_factory_base& operator=(const module_factory_base&) = delete;
 
+    /// Name this factory was registered under.
     [[nodiscard]] virtual std::string_view name() const noexcept = 0;
+
+    /// Version of the modules it creates.
     [[nodiscard]] virtual version get_version() const noexcept = 0;
 
-    // module_ptr безопасен и через границу плагина: деструктор модуля —
-    // код той библиотеки, где он создан, а пин в делетере не даёт ей
-    // выгрузиться, пока модуль жив.
-    // Основной путь создания: config — сырой текст параметров экземпляра
-    // (узел params конфига пайплайна), пустая строка — параметров нет.
-    // Интерпретацию строки определяет фабрика (см. module_config).
-    [[nodiscard]] virtual module_ptr create(const std::string& config) const = 0;
-
-    // Сахар для вызывающих без параметров (реестр, тесты, group).
-    [[nodiscard]] module_ptr create() const {
-        return create(std::string{});
-    }
+    /// Creates a module instance. Takes no parameters: per-instance settings are module properties,
+    /// applied on top of the finished object (see runtime::apply_properties).
+    ///
+    /// module_ptr is safe across a plugin boundary — the module's destructor is code of the library
+    /// that created it, and the pin in the deleter keeps that library loaded while the module
+    /// lives.
+    [[nodiscard]] virtual module_ptr create() const = 0;
 
    protected:
     module_factory_base() = default;

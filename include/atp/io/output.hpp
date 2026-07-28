@@ -19,33 +19,26 @@
 
 namespace atp::io {
 
-// Выход: push-рассылка подключённым входам + кэш последнего значения.
-// Запись out(value) доставляет значение каждому подключённому входу через
-// протокол input_base::deliver и запоминает его в кэше — для инспекции
-// через get() и доставки поздним подписчикам при connect(in, replay).
-// Совместимость входа проверяет сам вход своим accepts() — один раз при
-// подключении; кастов иерархии нет вовсе. Универсальный input<std::any>
-// принимает значение любого выхода — упаковка в std::any происходит при
-// доставке.
-// Потокобезопасность — как у входа: выбирается тегом safety в точке
-// создания. Рассылка идёт вне замка выхода: вход берёт свой мьютекс сам,
-// вложенных замков нет; доставка — только store на стороне входа,
-// пользовательский код на потоке пишущего не исполняется. Порядок доставки
-// при конкурентных записях не гарантируется. Время жизни подключённых
-// входов — на вызывающем: соединение разрывается disconnect() до
-// уничтожения входа.
+/// Output: push delivery to the connected inputs plus a cache of the last written value.
+///
+/// Compatibility is decided by the input itself through accepts(), once per connect; there are no
+/// hierarchy casts at all. Delivery runs outside the output's lock — every input takes its own
+/// mutex, so locks never nest, and only store() runs on the writer's thread. The delivery order
+/// under concurrent writes is not guaranteed. Connected inputs are owned by the caller:
+/// disconnect() before destroying an input.
 template <typename T>
 class output : public output_base {
    public:
+    /// @param name output name, unique within its registry
+    /// @param s whether this instance serialises access
     explicit output(std::string name, safety s = safe) : output_base(std::move(name), typeid(T), s) {}
 
-    // Запись с perfect forwarding — зеркало input::operator():
-    // T конструируется вне замка; под замком — снапшот списка рассылки
-    // и копия в кэш; сама доставка — уже без замка, каждый вход копирует
-    // значение внутри своего deliver().
+    /// Writes a value: caches it and delivers it to every connected input.
     template <typename U>
         requires std::constructible_from<T, U>
     void operator()(U&& value) {
+        // Under the lock — only the subscriber snapshot and the cache update; delivery itself
+        // runs unlocked, and each input copies the value inside its own deliver().
         T incoming(std::forward<U>(value));
         std::vector<input_base*> targets;
         {
@@ -59,22 +52,30 @@ class output : public output_base {
         }
     }
 
-    // Типизированное подключение: несовпадение типов — ошибка компиляции.
-    // Базовые type-erased перегрузки скрыты намеренно (см. output_base).
+    /// Connects a typed input; a type mismatch is a compile error. The type-erased base overloads
+    /// are hidden deliberately (see output_base).
+    /// @throws std::runtime_error if the input is already connected
     void connect(input<T>& in) {
         attach(in, false);
     }
+
+    /// Connects a typed input and immediately delivers the cached value, if there is one.
+    /// @throws std::runtime_error if the input is already connected
     void connect(input<T>& in, replay_t) {
         attach(in, true);
     }
 
-    // Универсальный вход подключается к любому выходу статически;
-    // requires исключает конфликт с парой выше при T == std::any.
+    /// A universal input connects to any output statically; the requires clause keeps this pair
+    /// from clashing with the typed one when T is std::any.
+    /// @throws std::runtime_error if the input is already connected
     void connect(input<std::any>& in)
         requires(!std::same_as<T, std::any>)
     {
         attach(in, false);
     }
+
+    /// Connects a universal input and immediately delivers the cached value, if there is one.
+    /// @throws std::runtime_error if the input is already connected
     void connect(input<std::any>& in, replay_t)
         requires(!std::same_as<T, std::any>)
     {
@@ -101,13 +102,15 @@ class output : public output_base {
         return targets_.size();
     }
 
+    /// Whether nothing has been written yet.
     [[nodiscard]] bool empty() const {
         auto guard = lock();
         return !value_.has_value();
     }
 
-    // Возвращает копию кэша: ссылка наружу была бы гонкой — другой поток
-    // может перезаписать значение в любой момент.
+    /// Copy of the cached value; a reference would be a race, since another thread may overwrite
+    /// it at any moment.
+    /// @throws std::runtime_error if nothing has been written yet
     [[nodiscard]] T get() const {
         auto guard = lock();
         if (!value_) {
@@ -118,7 +121,7 @@ class output : public output_base {
 
     [[nodiscard]] std::optional<std::any> peek() const override {
         if (!thread_safe()) {
-            return std::nullopt;  // контракт наблюдаемости — см. output_base
+            return std::nullopt;  // observability contract — see output_base
         }
         auto guard = lock();
         if (!value_) {
@@ -135,16 +138,15 @@ class output : public output_base {
         return writes_;
     }
 
-    // Чистит только кэш: соединения остаются, для их разрыва —
-    // disconnect_all().
+    /// Clears the cache only; connections survive — use disconnect_all() to break them.
     void reset() override {
         auto guard = lock();
         value_.reset();
     }
 
    private:
-    // Общий путь подключения: под замком — проверка дубликата, добавление
-    // и снапшот кэша для replay; доставка кэша — уже вне замка.
+    // Shared connect path: duplicate check, registration and the replay snapshot under the lock;
+    // the replay delivery itself happens unlocked.
     void attach(input_base& in, bool deliver_cached) {
         std::optional<T> snapshot;
         {
@@ -162,11 +164,9 @@ class output : public output_base {
         }
     }
 
-    // Рантайм-проверка совместимости — на стороне входа: accepts()
-    // зовётся один раз при подключении, доставка идёт без проверок.
-    // Контраст с точным typeid в реестре сохраняется: реестру нужен
-    // конкретный вид входа, а выходу подходит всё, что согласилось
-    // принимать T (наследники input<T>, универсальный input<std::any>).
+    // The runtime compatibility check lives on the input's side: unlike the registry, which needs
+    // an exact input kind, an output accepts anything that agreed to take T (heirs of input<T>,
+    // the universal input<std::any>).
     void do_connect(input_base& in, bool deliver_cached) override {
         if (!in.accepts(typeid(T))) {
             throw std::runtime_error("input '" + in.name() + "' is not compatible with output '" + name() + "'");

@@ -8,8 +8,8 @@
 
 namespace {
 
-// Чистые интерфейсы — единственное, что разделяют поставщик и потребитель.
-// Защищённый деструктор: разрушение — забота владельца, не справочника.
+// Pure interfaces are all the provider and the consumer share. The destructor is protected:
+// destruction is the owner's business, not the directory's.
 struct greeter {
     virtual std::string greet() const = 0;
 
@@ -42,9 +42,9 @@ struct both_impl : greeter, counter {
     int value_ = 0;
 };
 
-// Поставщик: публикует себя как интерфейс в initialize, снимает в stop.
-// Контекст даётся только в initialize — кому он нужен в stop, сохраняет ссылку.
-class greeter_module : public atp::module<atp::io::inputs, atp::io::outputs, "greeter">, public greeter {
+// Provider: publishes itself as an interface in initialize and withdraws it in stop. The context is
+// given in initialize only, so whoever needs it in stop keeps a reference.
+class greeter_module : public atp::module<atp::io::ports<>, "greeter">, public greeter {
    public:
     void initialize(atp::module_context& context) override {
         context_ = &context;
@@ -61,9 +61,9 @@ class greeter_module : public atp::module<atp::io::inputs, atp::io::outputs, "gr
     atp::module_context* context_ = nullptr;
 };
 
-// Потребитель: ищет соседа только в start — порядок initialize не важен.
-// Ссылку на контекст запоминает в initialize, ищет по ней в start.
-class consumer_module : public atp::module<atp::io::inputs, atp::io::outputs, "consumer"> {
+// Consumer: looks the peer up in start only, which makes the initialize order irrelevant. The
+// context reference is stored in initialize and used in start.
+class consumer_module : public atp::module<atp::io::ports<>, "consumer"> {
    public:
     void initialize(atp::module_context& context) override {
         context_ = &context;
@@ -96,7 +96,7 @@ TEST(ServiceDirectory, FindReturnsNullptrForUnknownInterface) {
     atp::service_directory directory;
     greeter_impl impl;
     directory.provide<greeter>("hello", impl);
-    // имя есть, но под другим интерфейсом ничего не публиковалось
+    // the name exists, but nothing was published under this interface
     EXPECT_EQ(directory.find<counter>("hello"), nullptr);
 }
 
@@ -169,7 +169,7 @@ TEST(ServiceDirectory, RemoveReturnsFalseWhenMissing) {
     directory.provide<greeter>("hello", impl);
     EXPECT_FALSE(directory.remove("missing"));
     EXPECT_FALSE(directory.remove<counter>("hello"));
-    // сама запись при этом не пострадала
+    // the entry itself came through unharmed
     EXPECT_NE(directory.find<greeter>("hello"), nullptr);
 }
 
@@ -178,15 +178,15 @@ TEST(ServiceDirectory, ModulePublishesInInitializeConsumerFindsInStart) {
     atp::module_context context{services};
     greeter_module provider;
     consumer_module consumer;
-    // потребитель инициализируется раньше поставщика — двухфазность
-    // publish/lookup делает порядок initialize неважным
+    // the consumer initialises before the provider: the publish/lookup split makes the initialize
+    // order irrelevant
     consumer.initialize(context);
     provider.initialize(context);
     consumer.start();
     provider.start();
     EXPECT_EQ(consumer.greeting, "hello from module");
 
-    // симметричное снятие публикаций в stop
+    // publications are withdrawn symmetrically in stop
     provider.stop();
     EXPECT_EQ(services.find<greeter>("greeter"), nullptr);
 }

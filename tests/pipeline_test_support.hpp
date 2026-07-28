@@ -14,8 +14,8 @@
 
 namespace atp_tests {
 
-// Журнал событий жизненного цикла — общий для теста и модулей-зондов.
-// Потокобезопасен: iterate пишут потоки пула.
+// Lifecycle event log shared by the test and the probe modules. Thread-safe: iterate is written by
+// the pool threads.
 struct probe_event {
     std::string module;
     std::string phase;  // "initialize" / "start" / "iterate" / "stop"
@@ -34,7 +34,7 @@ class event_log {
         return events_;
     }
 
-    // Имена модулей в порядке событий заданной фазы — для проверки каскадов.
+    // Module names in event order for one phase — the material for checking the cascades.
     [[nodiscard]] std::vector<std::string> order_of(const std::string& phase) const {
         std::vector<std::string> result;
         for (const probe_event& e : snapshot()) {
@@ -45,7 +45,7 @@ class event_log {
         return result;
     }
 
-    // Поток, писавший iterate модуля (первое событие); id{} — не итерировался.
+    // Thread that wrote the module's first iterate event; id{} means it never iterated.
     [[nodiscard]] std::thread::id iterate_thread(const std::string& module) const {
         for (const probe_event& e : snapshot()) {
             if (e.module == module && e.phase == "iterate") {
@@ -60,9 +60,9 @@ class event_log {
     std::vector<probe_event> events_;
 };
 
-// Модуль-зонд: пишет фазы в журнал, по указанию бросает из фазы,
-// сигналит latch-ем о первом iterate — тесты ждут без sleep.
-class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+// Probe module: writes its phases into the log, throws from a phase on demand and signals the first
+// iterate through a latch, so the tests wait without sleeping.
+class probe_module : public atp::module<> {
    public:
     probe_module(event_log& log, std::string name) : log_(&log), name_(std::move(name)) {}
 
@@ -70,8 +70,8 @@ class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
         return name_;
     }
 
-    std::latch* first_iterate = nullptr;  // не владеет; nullptr — не сигналить
-    std::string throw_in;                 // фаза, из которой бросить (после записи в журнал)
+    std::latch* first_iterate = nullptr;  // not owned; nullptr means do not signal
+    std::string throw_in;                 // phase to throw from, after the log entry
 
     void initialize(atp::module_context&) override {
         hit("initialize");
@@ -85,7 +85,7 @@ class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
             first_iterate->count_down();
         }
         hit("iterate");
-        return atp::work_status::busy;  // журнал пишется каждый вызов — это работа
+        return atp::work_status::busy;  // writing the log on every call is work
     }
     void stop() override {
         hit("stop");
@@ -101,7 +101,7 @@ class probe_module : public atp::module<atp::io::inputs, atp::io::outputs> {
 
     event_log* log_;
     std::string name_;
-    bool signaled_ = false;  // latch сигналится один раз; поле читает только поток группы
+    bool signaled_ = false;  // the latch fires once; only the group's thread reads this field
 };
 
 }  // namespace atp_tests

@@ -18,7 +18,7 @@ namespace {
 using atp_tests::event_log;
 using atp_tests::probe_module;
 
-// Пайплайн: root[a, stage[b, deep[c]], d] — каскады и раскладка.
+// Pipeline root[a, stage[b, deep[c]], d] — the material for cascades and layout.
 struct rig {
     atp::pipeline pipe;
     event_log log;
@@ -63,20 +63,20 @@ TEST(PipelineRunner, StartFailureStopsInitializedInReverse) {
     atp::pipeline_runner runner;
     EXPECT_THROW(runner.start(r.pipe), std::runtime_error);
     EXPECT_FALSE(runner.running());
-    // initialize прошли все, start дошёл до c — root.stop() получают все,
-    // в обратном порядке (stop корректен после initialize без start)
+    // Everyone passed initialize and start reached c, so root.stop() reaches everyone in reverse
+    // order — stop is correct after initialize without start.
     std::vector<std::string> reversed{"d", "c", "b", "a"};
     EXPECT_EQ(r.log.order_of("stop"), reversed);
-    EXPECT_TRUE(r.log.order_of("iterate").empty());  // потоки не создавались
+    EXPECT_TRUE(r.log.order_of("iterate").empty());  // no threads were created
 }
 
 TEST(PipelineRunner, AssignmentsPlaceGroupsOnNamedThreads) {
     rig r;
     std::latch ticked(4);
-    r.a->first_iterate = &ticked;  // root → первый объявленный поток
-    r.b->first_iterate = &ticked;  // stage → "aux" (явно)
-    r.c->first_iterate = &ticked;  // deep не назначен → inline у stage
-    r.d->first_iterate = &ticked;  // ждём всех: stop() между a и d срезал бы пасс корня
+    r.a->first_iterate = &ticked;  // root → the first declared thread
+    r.b->first_iterate = &ticked;  // stage → "aux", explicitly
+    r.c->first_iterate = &ticked;  // deep is unassigned → inline in stage
+    r.d->first_iterate = &ticked;  // wait for all: a stop() between a and d would cut the root pass
 
     atp::pipeline_runner runner;
     runner.add_thread("main");
@@ -90,17 +90,24 @@ TEST(PipelineRunner, AssignmentsPlaceGroupsOnNamedThreads) {
     auto stage_thread = r.log.iterate_thread("b");
     EXPECT_NE(root_thread, std::thread::id{});
     EXPECT_NE(stage_thread, std::thread::id{});
-    EXPECT_NE(root_thread, stage_thread);                // разные потоки
-    EXPECT_EQ(r.log.iterate_thread("c"), stage_thread);  // inline наследует поток stage
+    EXPECT_NE(root_thread, stage_thread);                // different threads
+    EXPECT_EQ(r.log.iterate_thread("c"), stage_thread);  // an inline group inherits stage's thread
     EXPECT_EQ(r.log.iterate_thread("d"), root_thread);
 }
 
 TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnImplicitMain) {
     rig r;
-    std::latch ticked(1);
+    // Wait for all four rather than one: a probe signals its latch at the start of its iterate, so
+    // waking up mid-pass says nothing about the other children, and a stop() between c and d would
+    // cut the root pass short (a group's iterate checks the stop token before every child),
+    // leaving d without a log entry. The entries do arrive: stop() joins the threads.
+    std::latch ticked(4);
+    r.a->first_iterate = &ticked;
+    r.b->first_iterate = &ticked;
     r.c->first_iterate = &ticked;
+    r.d->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;  // ни одного add_thread
+    atp::pipeline_runner runner;  // not a single add_thread
     runner.start(r.pipe);
     ticked.wait();
     runner.stop();
@@ -114,14 +121,16 @@ TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnImplicitMain) {
 TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsWithThreadNames) {
     atp::pipeline pipe;
 
-    struct out_ports : atp::io::outputs {
+    struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
     };
-    struct in_ports : atp::io::inputs {
+    struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value", atp::io::unsafe);
     };
-    class producer : public atp::module<atp::io::inputs, out_ports> {};
-    class consumer : public atp::module<in_ports, atp::io::outputs> {};
+    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::io::ports<in_section>;
+    class producer : public atp::module<producer_ports> {};
+    class consumer : public atp::module<consumer_ports> {};
 
     atp::group& left = pipe.root().add_group("left");
     left.make<producer>("p");
@@ -140,12 +149,12 @@ TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsWithThreadNames) {
         split.start(pipe);
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
-        const std::string what = error.what();  // имена потоков — в диагностике
+        const std::string what = error.what();  // the thread names belong in the diagnostics
         EXPECT_NE(what.find("producing"), std::string::npos);
         EXPECT_NE(what.find("consuming"), std::string::npos);
     }
 
-    atp::pipeline_runner together;  // те же группы на одном потоке — ок
+    atp::pipeline_runner together;  // the same groups on one thread are fine
     together.start(pipe);
     together.stop();
 }
@@ -154,32 +163,33 @@ TEST(PipelineRunner, ConfigurationErrors) {
     rig r;
     atp::pipeline_runner runner;
     runner.add_thread("main");
-    EXPECT_THROW(runner.add_thread("main"), std::runtime_error);  // дубликат имени
+    EXPECT_THROW(runner.add_thread("main"), std::runtime_error);  // duplicate name
     EXPECT_THROW(runner.add_thread("t", {atp::thread_mode::throttled, {}}),
-                 std::invalid_argument);  // период обязателен
+                 std::invalid_argument);  // the period is required
     EXPECT_THROW(runner.add_thread("s", {atp::thread_mode::on_demand, std::chrono::milliseconds(5)}),
-                 std::invalid_argument);                                      // период запрещён
-    EXPECT_THROW(runner.assign(*r.stage, "nowhere"), std::invalid_argument);  // неизвестное имя — сразу
+                 std::invalid_argument);                                      // the period is forbidden
+    EXPECT_THROW(runner.assign(*r.stage, "nowhere"), std::invalid_argument);  // unknown name, rejected at once
 
     atp::group stranger("stranger");
     runner.assign(stranger, "main");
-    EXPECT_THROW(runner.start(r.pipe), std::invalid_argument);  // назначение вне дерева
+    EXPECT_THROW(runner.start(r.pipe), std::invalid_argument);  // an assignment outside the tree
 }
 
-// Сбой валидации не должен оставлять в раннере следов: переназначение
-// и повторный start обязаны работать (инвариант «не running — состояние
-// чистое», проверяемый снаружи через переиспользование).
+// A failed validation must leave no traces in the runner: reassigning and starting again have to
+// work — the "not running means clean state" invariant, observed from outside through reuse.
 TEST(PipelineRunner, FailedValidationLeavesRunnerReusable) {
     atp::pipeline pipe;
 
-    struct out_ports : atp::io::outputs {
+    struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
     };
-    struct in_ports : atp::io::inputs {
+    struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value", atp::io::unsafe);
     };
-    class producer : public atp::module<atp::io::inputs, out_ports> {};
-    class consumer : public atp::module<in_ports, atp::io::outputs> {};
+    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::io::ports<in_section>;
+    class producer : public atp::module<producer_ports> {};
+    class consumer : public atp::module<consumer_ports> {};
 
     atp::group& left = pipe.root().add_group("left");
     left.make<producer>("p");
@@ -194,10 +204,10 @@ TEST(PipelineRunner, FailedValidationLeavesRunnerReusable) {
     runner.add_thread("consuming");
     runner.assign(left, "producing");
     runner.assign(right, "consuming");
-    EXPECT_THROW(runner.start(pipe), std::runtime_error);  // unsafe вход через границу потоков
+    EXPECT_THROW(runner.start(pipe), std::runtime_error);  // an unsafe input across a thread boundary
     EXPECT_FALSE(runner.running());
 
-    runner.assign(right, "producing");  // переназначение: обе группы на одном потоке — валидно
+    runner.assign(right, "producing");  // reassigned: both groups on one thread, which is valid
     runner.start(pipe);
     EXPECT_TRUE(runner.running());
     runner.stop();
@@ -214,8 +224,10 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
     struct drain_inputs : atp::io::inputs {
         atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
     };
-    // Источник молчит до отмашки теста; потребитель считает пассы.
-    class gated_source : public atp::module<atp::io::inputs, feed_outputs> {
+    using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
+    using drain_ports = atp::io::ports<drain_inputs>;
+    // The source stays silent until the test says go; the consumer counts passes.
+    class gated_source : public atp::module<feed_ports> {
        public:
         std::atomic<bool> go{false};
         atp::work_status iterate(std::stop_token) override {
@@ -226,7 +238,7 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
             return atp::work_status::busy;
         }
     };
-    class counting_sink : public atp::module<drain_inputs, atp::io::outputs> {
+    class counting_sink : public atp::module<drain_ports> {
        public:
         std::latch* delivered = nullptr;
         std::atomic<int> passes{0};
@@ -256,15 +268,15 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
     runner.assign(right, "consuming");
     runner.start(pipe);
 
-    // Окно простоя: sleep уместен — тест наблюдает темп простаивающего
-    // потока, будить его нечем и незачем.
+    // An idle window: sleeping is appropriate here — the test observes the pace of an idling
+    // thread, and there is nothing to wake it with, nor any reason to.
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     const int idle_passes = sink.passes.load();
     src.go = true;
     delivered.wait();
     runner.stop();
 
-    // Busy-loop дал бы миллионы пассов за 100 мс; backoff — десятки.
+    // A busy loop would yield millions of passes in 100 ms; the backoff yields dozens.
     EXPECT_LT(idle_passes, 1000);
 }
 
@@ -277,9 +289,11 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
     struct drain_inputs : atp::io::inputs {
         atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
     };
-    // Источник спинится и стреляет по отмашке — его собственная латентность
-    // из замера исключена, меряется только пробуждение потребителя.
-    class gated_source : public atp::module<atp::io::inputs, feed_outputs> {
+    using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
+    using drain_ports = atp::io::ports<drain_inputs>;
+    // The source spins and fires on command, so its own latency is out of the measurement and only
+    // the consumer's wake-up is timed.
+    class gated_source : public atp::module<feed_ports> {
        public:
         std::atomic<bool> go{false};
         atp::work_status iterate(std::stop_token) override {
@@ -290,7 +304,7 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
             return atp::work_status::busy;
         }
     };
-    class counting_sink : public atp::module<drain_inputs, atp::io::outputs> {
+    class counting_sink : public atp::module<drain_ports> {
        public:
         std::atomic<int> received{0};
         atp::work_status iterate(std::stop_token) override {
@@ -313,15 +327,15 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
 
     atp::pipeline_runner runner;
     runner.add_thread("producing", {atp::thread_mode::spinning});
-    runner.add_thread("consuming");  // on_demand — его и будим
+    runner.add_thread("consuming");  // on_demand — this is the one being woken
     runner.assign(left, "producing");
     runner.assign(right, "consuming");
     runner.start(pipe);
 
-    // Раунд: дать потребителю уйти в глубокий backoff (потолок 10 мс), затем
-    // доставить и померить, когда заметил. Без пробуждения средний раунд —
-    // ~5-10 мс, сумма ~100-200 мс; с пробуждением — единицы мс на все раунды.
-    // Порог посередине: границы щедрые — ловим порядок величины, не шум.
+    // One round: let the consumer sink into a deep backoff (capped at 10 ms), then deliver and
+    // measure when it noticed. Without wake-ups a round averages ~5-10 ms and the total ~100-200 ms;
+    // with them the whole set takes single-digit milliseconds. The threshold sits in between:
+    // generous bounds catching the order of magnitude rather than the noise.
     constexpr int rounds = 20;
     std::chrono::steady_clock::duration total{};
     for (int i = 0; i < rounds; ++i) {
@@ -344,9 +358,9 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
     atp::pipeline pipe;
     std::latch ticked(2);
 
-    // Первый пасс каждого потока гарантируется латчем: без него праздный
-    // поток мог бы не успеть до stop() и его passes были бы нулевыми.
-    class counting_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+    // The latch guarantees the first pass of every thread: without it an idle thread might not make
+    // it before stop() and its pass count would be zero.
+    class counting_module : public atp::module<> {
        public:
         std::latch* first = nullptr;
         atp::work_status status = atp::work_status::idle;
@@ -368,7 +382,7 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
     idle.first = &ticked;
 
     atp::pipeline_runner runner;
-    EXPECT_TRUE(runner.stats().empty());  // до первого запуска счётчиков нет
+    EXPECT_TRUE(runner.stats().empty());  // no counters before the first run
 
     runner.add_thread("working");
     runner.add_thread("idling");
@@ -386,17 +400,17 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
     EXPECT_GE(stats[0].busy_passes, 1u);
     EXPECT_LE(stats[0].busy_passes, stats[0].passes);
     EXPECT_GE(stats[1].passes, 1u);
-    EXPECT_EQ(stats[1].busy_passes, 0u);  // праздный поток busy не репортит
+    EXPECT_EQ(stats[1].busy_passes, 0u);  // an idle thread reports no busy passes
 }
 
 TEST(PipelineRunner, ThrottledPacesIterations) {
     atp::pipeline pipe;
-    class counting_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+    class counting_module : public atp::module<> {
        public:
         std::atomic<int> passes{0};
         atp::work_status iterate(std::stop_token) override {
             ++passes;
-            return atp::work_status::busy;  // busy не разгоняет throttled — темп задаёт период
+            return atp::work_status::busy;  // busy does not speed a throttled thread up
         }
     };
     atp::group& g = pipe.root().add_group("paced");
@@ -409,19 +423,19 @@ TEST(PipelineRunner, ThrottledPacesIterations) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     runner.stop();
 
-    // ~10 тиков за 200 мс; границы щедрые — ловим порядок величины, не шум.
+    // ~10 ticks in 200 ms; generous bounds catching the order of magnitude rather than the noise.
     EXPECT_GT(m.passes.load(), 2);
     EXPECT_LT(m.passes.load(), 40);
 }
 
 TEST(PipelineRunner, SpinningThreadIteratesWithoutSleep) {
     atp::pipeline pipe;
-    class idle_counter : public atp::module<atp::io::inputs, atp::io::outputs> {
+    class idle_counter : public atp::module<> {
        public:
         std::atomic<int> passes{0};
         atp::work_status iterate(std::stop_token) override {
             ++passes;
-            return atp::work_status::idle;  // spinning игнорирует idle — не спит
+            return atp::work_status::idle;  // a spinning thread ignores idle and never sleeps
         }
     };
     atp::group& g = pipe.root().add_group("hot");
@@ -434,7 +448,7 @@ TEST(PipelineRunner, SpinningThreadIteratesWithoutSleep) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     runner.stop();
 
-    EXPECT_GT(m.passes.load(), 1000);  // idle-модуль, но поток крутится
+    EXPECT_GT(m.passes.load(), 1000);  // an idle module, yet the thread keeps spinning
 }
 
 TEST(PipelineRunner, IterateFailureStopsPipelineAndWaitRethrows) {
@@ -446,17 +460,17 @@ TEST(PipelineRunner, IterateFailureStopsPipelineAndWaitRethrows) {
     runner.add_thread("aux");
     runner.assign(*r.stage, "aux");
     runner.start(r.pipe);
-    EXPECT_THROW(runner.wait(), std::runtime_error);  // первопричина — из b
+    EXPECT_THROW(runner.wait(), std::runtime_error);  // the root cause came from b
     EXPECT_FALSE(runner.running());
     EXPECT_NE(runner.error(), nullptr);
-    // каскад stop прошёл всем в обратном порядке, несмотря на ошибку
+    // the stop cascade reached everyone in reverse order despite the error
     std::vector<std::string> reversed{"d", "c", "b", "a"};
     EXPECT_EQ(r.log.order_of("stop"), reversed);
 }
 
 TEST(PipelineRunner, FirstErrorWins) {
     rig r;
-    r.a->throw_in = "iterate";  // оба бросают; ошибка ровно одна — первая
+    r.a->throw_in = "iterate";  // both throw; exactly one error is kept — the first
     r.b->throw_in = "iterate";
 
     atp::pipeline_runner runner;
@@ -465,7 +479,7 @@ TEST(PipelineRunner, FirstErrorWins) {
     runner.assign(*r.stage, "aux");
     runner.start(r.pipe);
     EXPECT_THROW(runner.wait(), std::runtime_error);
-    EXPECT_NE(runner.error(), nullptr);  // слот заполнен один раз
+    EXPECT_NE(runner.error(), nullptr);  // the slot is filled once
 }
 
 TEST(PipelineRunner, StopIsIdempotentAndErrorIsClean) {
@@ -477,27 +491,27 @@ TEST(PipelineRunner, StopIsIdempotentAndErrorIsClean) {
     runner.start(r.pipe);
     ticked.wait();
     runner.stop();
-    runner.stop();  // второй вызов — no-op
+    runner.stop();  // the second call is a no-op
     EXPECT_EQ(runner.error(), nullptr);
 }
 
 TEST(PipelineRunner, WaitAfterStopRethrowsPendingError) {
     rig r;
     std::latch reached(1);
-    r.a->first_iterate = &reached;  // зонд сигналит latch до броска (см. probe_module)
+    r.a->first_iterate = &reached;  // the probe signals the latch before throwing
     r.a->throw_in = "iterate";
 
     atp::pipeline_runner runner;
     runner.start(r.pipe);
     reached.wait();
-    runner.stop();                                    // не бросает; после join ошибка захвачена
-    EXPECT_THROW(runner.wait(), std::runtime_error);  // stop() не съел первопричину
+    runner.stop();                                    // never throws; the error is captured after the join
+    EXPECT_THROW(runner.wait(), std::runtime_error);  // stop() did not swallow the root cause
     EXPECT_NE(runner.error(), nullptr);
 }
 
 TEST(PipelineRunner, WaitOnIdleRunnerIsNoOp) {
     atp::pipeline_runner runner;
-    runner.wait();  // не стартовал, ошибки нет — сразу возврат
+    runner.wait();  // never started and no error — returns at once
     EXPECT_EQ(runner.error(), nullptr);
 }
 
@@ -508,7 +522,7 @@ TEST(PipelineRunner, SecondWaitRethrowsSameError) {
     atp::pipeline_runner runner;
     runner.start(r.pipe);
     EXPECT_THROW(runner.wait(), std::runtime_error);
-    EXPECT_THROW(runner.wait(), std::runtime_error);  // ошибка хранится до следующего start()
+    EXPECT_THROW(runner.wait(), std::runtime_error);  // the error is kept until the next start()
 }
 
 TEST(PipelineRunner, DestructorStopsRunningPipeline) {
@@ -528,13 +542,15 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
     atp::pipeline pipe;
     std::latch delivered(1);
 
-    struct out_ports : atp::io::outputs {
+    struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
     };
-    struct in_ports : atp::io::inputs {
-        atp::io::input<int>& value = make<atp::io::input<int>>("value");  // safe — умолчание
+    struct in_section : atp::io::inputs {
+        atp::io::input<int>& value = make<atp::io::input<int>>("value");  // safe is the default
     };
-    class producer : public atp::module<atp::io::inputs, out_ports> {
+    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::io::ports<in_section>;
+    class producer : public atp::module<producer_ports> {
        public:
         atp::work_status iterate(std::stop_token) override {
             if (sent_) {
@@ -548,10 +564,10 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
        private:
         bool sent_ = false;
     };
-    class consumer : public atp::module<in_ports, atp::io::outputs> {
+    class consumer : public atp::module<consumer_ports> {
        public:
         std::latch* delivered = nullptr;
-        std::atomic<int> received{0};  // watcher изымает значение (take) — вход после poll пуст
+        std::atomic<int> received{0};  // the watcher takes the value, so the input is empty after poll
         void initialize(atp::module_context&) override {
             watcher_.watch(inputs().value, [this](const int& value) {
                 received = value;

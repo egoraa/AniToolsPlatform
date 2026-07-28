@@ -9,36 +9,43 @@
 #include <vector>
 
 #include <atp/io/input.hpp>
+#include <atp/io/property.hpp>
 #include <atp/io/queued_input.hpp>
 #include <atp/io/threading.hpp>
 
 namespace atp::io {
 
-// Опросный наблюдатель: правила «вход → обработчик», проверяемые вызовом
-// poll() с потока модуля. Замена when(): та же эргономика «колбэк на
-// значение», но обработчик исполняется там, где живёт модуль, — гонок
-// с iterate нет by construction. НЕ потокобезопасен: watch() — фаза
-// настройки (initialize), poll() — поток модуля; опрашивать следует
-// собственные входы модуля-владельца.
+/// Polling watcher: "input → handler" rules checked by a poll() call from the module's own thread.
+/// It gives the ergonomics of a value callback while running the handler where the module lives, so
+/// races with iterate are excluded by construction. Not thread-safe: watch() belongs to the setup
+/// phase (initialize) and poll() to the module thread; watch the owning module's own ports.
 class watcher {
    public:
-    // input<T>: появилось значение → изъять (take) и вызвать обработчик.
-    // type_identity_t выключает вывод T из обработчика: T задаёт вход,
-    // а лямбда просто конвертируется в std::function.
+    /// Rule for an input: a value arrived → take it and call the handler.
+    /// type_identity_t switches off deducing T from the handler — T is fixed by the input, and the
+    /// lambda merely converts to std::function.
     template <typename T>
     void watch(input<T>& in, std::type_identity_t<std::function<void(const T&)>> handler) {
         rules_.push_back(std::make_unique<value_rule<T>>(in, std::move(handler)));
     }
 
-    // queued_input<T>: обработчик на каждый элемент; изъятие — drain()
-    // одним замком на пасс (дешевле поэлементного take базовой перегрузки).
+    /// Rule for a queueing input: the handler runs per element, and the queue is taken with
+    /// drain(), one lock per pass — cheaper than the element-wise take of the base overload.
     template <typename T>
     void watch(queued_input<T>& in, std::type_identity_t<std::function<void(const T&)>> handler) {
         rules_.push_back(std::make_unique<queue_rule<T>>(in, std::move(handler)));
     }
 
-    // Пасс по правилам в порядке регистрации; busy — хоть одно сработало.
-    // Возврат отдаётся прямо из iterate: return watcher_.poll();
+    /// Rule for a property: the value changed (see property::take) → the handler runs. Reacting to
+    /// settings is declared next to the rules for inputs.
+    template <typename T>
+    void watch(property<T>& prop, std::type_identity_t<std::function<void(const T&)>> handler) {
+        rules_.push_back(std::make_unique<property_rule<T>>(prop, std::move(handler)));
+    }
+
+    /// Runs one pass over the rules in registration order.
+    /// @return busy if at least one rule fired; hand it straight back from iterate:
+    ///         `return watcher_.poll();`
     [[nodiscard]] work_status poll() {
         work_status pass = work_status::idle;
         for (const auto& rule : rules_) {
@@ -50,8 +57,8 @@ class watcher {
     }
 
    private:
-    // Правила полиморфны: будущие виды («значение изменилось», предикаты,
-    // батч-обработчик очереди целиком) — новые перегрузки watch без ломки.
+    // Rules are polymorphic, so future kinds (predicates, a whole-queue batch handler) are new
+    // watch overloads rather than a redesign.
     struct rule_base {
         virtual ~rule_base() = default;
         virtual work_status poll() = 0;
@@ -86,6 +93,22 @@ class watcher {
             return work_status::busy;
         }
         queued_input<T>* in;
+        std::function<void(const T&)> handler;
+    };
+
+    template <typename T>
+    struct property_rule : rule_base {
+        property_rule(property<T>& prop, std::function<void(const T&)> handler)
+            : prop(&prop), handler(std::move(handler)) {}
+        work_status poll() override {
+            std::optional<T> value = prop->take();
+            if (!value) {
+                return work_status::idle;
+            }
+            handler(*value);
+            return work_status::busy;
+        }
+        property<T>* prop;
         std::function<void(const T&)> handler;
     };
 

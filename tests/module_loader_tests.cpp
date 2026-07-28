@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <stop_token>
@@ -10,13 +11,13 @@
 #include <atp/module.hpp>
 #include <atp/module_loader.hpp>
 
-// Пути к тестовым плагинам приходят из CMake (см. tests/CMakeLists.txt).
+// The test plugin paths come from CMake (see tests/CMakeLists.txt).
 
 namespace {
 
-// Хостовая версия имени, которое регистрирует и тестовый плагин (2.0), —
-// для проверки, что выгрузка плагина не задевает чужие версии.
-class host_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
+// A host-side version of the name the test plugin also registers (as 2.0), to check that unloading
+// the plugin leaves other versions alone.
+class host_module : public atp::module<atp::io::ports<>, "", atp::version{1, 0}> {};
 
 }  // namespace
 
@@ -29,7 +30,7 @@ TEST(ModuleLoader, LoadsAndRegisters) {
     auto module = registry.create("plugin_module");
     ASSERT_NE(module, nullptr);
     EXPECT_EQ(module->get_version(), atp::version(2, 0));
-    module.reset();  // порядок не обязателен (пин), но локальный объект чистим сами
+    module.reset();  // the pin makes the order optional, but tidy up the local object anyway
 }
 
 TEST(ModuleLoader, VersionAvailableWithoutInstantiation) {
@@ -45,20 +46,20 @@ TEST(ModuleLoader, UnloadRemovesFactories) {
         EXPECT_NE(registry.find("plugin_module"), nullptr);
         EXPECT_NE(registry.find("plugin_alias"), nullptr);
     }
-    // после разрушения загрузчика его фабрик в реестре нет
+    // once the loader is destroyed its factories are gone from the registry
     EXPECT_EQ(registry.find("plugin_module"), nullptr);
     EXPECT_EQ(registry.find("plugin_alias"), nullptr);
 }
 
 TEST(ModuleLoader, UnloadKeepsHostVersionOfSameName) {
     atp::module_registry registry;
-    registry.add<host_module>("plugin_module");  // хостовая 1.0
+    registry.add<host_module>("plugin_module");  // the host's own 1.0
     {
         atp::module_loader loader{ATP_TEST_PLUGIN, registry};
-        // пока плагин загружен, последняя версия имени — плагинная 2.0
+        // while the plugin is loaded, the latest version of the name is its 2.0
         EXPECT_EQ(registry.at("plugin_module").get_version(), atp::version(2, 0));
     }
-    // выгрузка сняла только пару ("plugin_module", 2.0); хостовая 1.0 на месте
+    // unloading withdrew only ("plugin_module", 2.0); the host's 1.0 is still there
     ASSERT_NE(registry.find("plugin_module"), nullptr);
     EXPECT_EQ(registry.at("plugin_module").get_version(), atp::version(1, 0));
 }
@@ -70,11 +71,11 @@ TEST(ModuleLoader, ModuleOutlivesLoader) {
         atp::module_loader loader{ATP_TEST_PLUGIN, registry};
         module = registry.create("plugin_module");
     }
-    // Загрузчик мёртв, но модуль пинит библиотеку — код доступен.
+    // The loader is gone, but the module pins the library, so its code is still mapped.
     ASSERT_NE(module, nullptr);
     EXPECT_EQ(module->get_version(), atp::version(2, 0));
     module->iterate(std::stop_token{});
-    module.reset();  // последний пин: здесь библиотека выгружается физически
+    module.reset();  // the last pin: this is where the library is physically unloaded
 }
 
 TEST(ModuleLoader, FactoriesRemovedOnUnloadEvenWithLiveModule) {
@@ -84,8 +85,16 @@ TEST(ModuleLoader, FactoriesRemovedOnUnloadEvenWithLiveModule) {
         atp::module_loader loader{ATP_TEST_PLUGIN, registry};
         module = registry.create("plugin_module");
     }
-    EXPECT_EQ(registry.find("plugin_module"), nullptr);  // фабрик уже нет
-    EXPECT_NE(module, nullptr);                          // а модуль жив
+    EXPECT_EQ(registry.find("plugin_module"), nullptr);  // the factories are gone
+    EXPECT_NE(module, nullptr);                          // the module lives on
+}
+
+TEST(ModuleLoader, LoadsPathWithoutExtensionAppendingPlatformOne) {
+    atp::module_registry registry;
+    std::filesystem::path bare(ATP_TEST_PLUGIN);
+    bare.replace_extension();  // ".../test_plugin" — the cross-platform way to write a config
+    atp::module_loader loader(bare, registry);
+    EXPECT_NE(registry.find("plugin_module"), nullptr);
 }
 
 TEST(ModuleLoader, MissingFileThrows) {
@@ -122,7 +131,7 @@ TEST(ModuleLoader, MoveConstructorTransfersOwnership) {
     atp::module_loader second{std::move(first)};
     EXPECT_NE(registry.find("plugin_module"), nullptr);
     EXPECT_EQ(second.modules().size(), 2u);
-}  // разрушение обоих: пустой first ничего не снимает, second выгружает
+}  // both are destroyed: the emptied first withdraws nothing, the second unloads
 
 TEST(ModuleLoader, MoveAssignmentUnloadsTarget) {
     atp::module_registry first_registry;
@@ -131,7 +140,7 @@ TEST(ModuleLoader, MoveAssignmentUnloadsTarget) {
     atp::module_loader target{ATP_TEST_PLUGIN, second_registry};
 
     target = std::move(source);
-    // target сначала снял свои фабрики из second_registry, затем принял source
+    // target first withdrew its own factories from second_registry, then took over source
     EXPECT_EQ(second_registry.find("plugin_module"), nullptr);
     EXPECT_NE(first_registry.find("plugin_module"), nullptr);
 }

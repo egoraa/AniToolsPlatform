@@ -1,0 +1,25 @@
+/// @file
+/// Namespace documentation. It lives apart from the headers because doxygen drops an undocumented
+/// namespace together with everything declared directly in it — the free functions, enums and
+/// constants that are part of the API. The `detail` namespaces are deliberately left undocumented,
+/// which keeps their internals out of the reference.
+
+/// The platform SDK: modules, their ports, factories, the registry and the plugin contract.
+namespace atp {
+
+/// The io layer: inputs, outputs and properties, their registries and the polling watcher.
+namespace io {}
+
+/// Loading a pipeline from a config: the schema, the validator, the typed model and the builder.
+namespace runtime {}
+
+/// The studio core, independent of any GUI toolkit: the editable document, the module manager and
+/// the run session.
+namespace studio {
+
+/// The Qt layer of studio: the main window, the canvas and the docked panels.
+namespace ui {}
+
+}  // namespace studio
+
+}  // namespace atp

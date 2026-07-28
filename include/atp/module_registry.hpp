@@ -16,22 +16,22 @@
 
 namespace atp {
 
-// Контракт «модуль объявляет собственное имя»: статический член module_name,
-// конвертируемый в string_view и непустой (module<> порождает его из NTTP;
-// модуль мимо шаблона объявляет руками). Анонимный модуль (пустое имя)
-// концепту не удовлетворяет — такой регистрируется только явным add<M>(name).
+/// Contract "the module declares a name of its own": a static module_name member convertible to
+/// string_view and non-empty (module<> derives it from the NTTP; a module written outside the
+/// template declares it by hand). An anonymous module does not satisfy the concept and can only be
+/// registered through an explicit add<M>(name).
 template <typename T>
 concept has_module_name = requires {
     { T::module_name } -> std::convertible_to<std::string_view>;
 } && (!std::string_view{T::module_name}.empty());
 
-// Реестр фабрик модулей; владеет ими. Одно имя может держать несколько
-// версий: ключ фабрики — пара (имя, версия), версия берётся из самой
-// фабрики. Запрос без версии означает последнюю (наибольшую) версию.
-// API — сознательное зеркало io-реестров (at/find/remove/list, те же
-// контракты ошибок), но без переиспользования detail::registry: тот
-// привязан к io_base и сигнатуре конструктора (name, safety).
-// НЕ потокобезопасен — регистрация относится к фазе настройки.
+/// Owning registry of module factories. One name may hold several versions: a factory is keyed by
+/// the pair (name, version), the version being taken from the factory itself, and a request without
+/// a version means the latest (highest) one.
+///
+/// The API deliberately mirrors the io registries (at/find/remove/list, the same error contracts)
+/// without reusing detail::io_registry, which is tied to io_base and the (name, safety) constructor
+/// signature. Not thread-safe — registration belongs to the setup phase.
 class module_registry {
    public:
     module_registry() = default;
@@ -39,38 +39,41 @@ class module_registry {
     module_registry(const module_registry&) = delete;
     module_registry& operator=(const module_registry&) = delete;
 
-    // Имя из самого модуля — контракт has_module_name.
+    /// Registers a module under the name it declares itself (contract has_module_name).
+    /// @throws std::runtime_error if this name and version are already registered
     template <std::derived_from<module_base> M>
-        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) && has_module_name<M>
+        requires std::constructible_from<M> && has_module_name<M>
     module_factory_base& add() {
-        // явный <M>: без него unqualified add(std::string) ушёл бы
-        // в перегрузку add(unique_ptr) и не скомпилировался
+        // Explicit <M>: without it the unqualified add(std::string) would resolve to the
+        // add(unique_ptr) overload and fail to compile.
         return add<M>(std::string{M::module_name});
     }
 
-    // Сахар: типовая фабрика. Имя задаётся здесь, в точке регистрации, —
-    // один тип можно зарегистрировать под алиасами; args — конфиг
-    // конструктора модуля, связывается с фабрикой.
+    /// Registers a module under an explicit name, so one type may be registered under aliases.
+    /// @param name registration name
+    /// @param args constructor arguments bound to the factory
+    /// @throws std::runtime_error if this name and version are already registered
     template <std::derived_from<module_base> M, typename... TArgs>
-        requires std::constructible_from<M, const std::decay_t<TArgs>&...> ||
-                 std::constructible_from<M, const module_config&, const std::decay_t<TArgs>&...>
+        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
         return add(
             std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name), std::forward<TArgs>(args)...));
     }
 
-    // Общий путь — для нестандартных фабрик. Дубликат — совпадение
-    // и имени, и версии; одно имя с разными версиями — норма.
+    /// Registers a ready-made factory — the shared path, also open to non-standard factories. A
+    /// duplicate means both the name and the version match; one name with several versions is
+    /// normal.
+    /// @throws std::invalid_argument on a null factory
+    /// @throws std::runtime_error if this name and version are already registered
     module_factory_base& add(std::unique_ptr<module_factory_base> factory) {
         if (!factory) {
             throw std::invalid_argument("null module factory");
         }
         module_factory_base& ref = *factory;
-        // Пустая внутренняя map при новом имени не «повисает»: следом
-        // try_emplace обязательно вставляет в неё первую версию.
+        // An empty inner map for a fresh name cannot linger: try_emplace right below always
+        // inserts the first version. On a duplicate try_emplace moves nothing, so factory keeps
+        // ownership and ref stays valid for the error message.
         auto& versions = registry_[std::string(ref.name())];
-        // try_emplace: при дубликате аргументы не переносятся — factory
-        // остаётся владельцем, ref валидна для текста ошибки.
         auto [it, inserted] = versions.try_emplace(ref.get_version(), std::move(factory));
         if (!inserted) {
             throw std::runtime_error("duplicate module '" + std::string(ref.name()) + "' version '" +
@@ -79,24 +82,20 @@ class module_registry {
         return ref;
     }
 
-    // Без версии — последняя (наибольшая) зарегистрированная.
+    /// Creates a module of the latest (highest) registered version of this name.
+    /// @throws std::runtime_error if the name is unknown
     [[nodiscard]] module_ptr create(const std::string& name) const {
         return at(name).create();
     }
 
-    // С версией — точное совпадение (1.2 == 1.2.0: дополнение нулями).
+    /// Creates a module of an exact version (1.2 == 1.2.0: zero padding).
+    /// @throws std::runtime_error if the name or the version is unknown
     [[nodiscard]] module_ptr create(const std::string& name, const version& v) const {
         return at(name, v).create();
     }
 
-    [[nodiscard]] module_ptr create(const std::string& name, const std::string& config) const {
-        return at(name).create(config);
-    }
-    [[nodiscard]] module_ptr create(const std::string& name, const version& v, const std::string& config) const {
-        return at(name, v).create(config);
-    }
-
-    // Пара в духе std::map: at() бросает, find() возвращает nullptr.
+    /// Factory of the latest registered version of this name.
+    /// @throws std::runtime_error if the name is unknown
     [[nodiscard]] module_factory_base& at(const std::string& name) const {
         module_factory_base* factory = find(name);
         if (!factory) {
@@ -105,7 +104,9 @@ class module_registry {
         return *factory;
     }
 
-    // Различает два случая: имя не найдено / имя есть, версии нет.
+    /// Factory of an exact version.
+    /// @throws std::runtime_error if the name is unknown, or the name has no such version — the two
+    ///         cases carry different messages
     [[nodiscard]] module_factory_base& at(const std::string& name, const version& v) const {
         auto it = registry_.find(name);
         if (it == registry_.end()) {
@@ -118,15 +119,16 @@ class module_registry {
         return *found->second;
     }
 
+    /// Factory of the latest registered version of this name; nullptr if the name is unknown.
     [[nodiscard]] module_factory_base* find(const std::string& name) const {
         auto it = registry_.find(name);
         if (it == registry_.end()) {
             return nullptr;
         }
-        // инвариант «внутренняя map не пуста» делает rbegin() безопасным
-        return it->second.rbegin()->second.get();
+        return it->second.rbegin()->second.get();  // the "inner map is never empty" invariant
     }
 
+    /// Factory of an exact version; nullptr if the name or the version is unknown.
     [[nodiscard]] module_factory_base* find(const std::string& name, const version& v) const {
         auto it = registry_.find(name);
         if (it == registry_.end()) {
@@ -136,8 +138,8 @@ class module_registry {
         return found == it->second.end() ? nullptr : found->second.get();
     }
 
-    // Версии имени по возрастанию; неизвестное имя — пустой вектор
-    // (в духе find, не at: перечисление — не ошибка).
+    /// Versions registered under a name, ascending; an unknown name yields an empty vector —
+    /// enumerating is not an error.
     [[nodiscard]] std::vector<version> versions(const std::string& name) const {
         std::vector<version> result;
         auto it = registry_.find(name);
@@ -151,13 +153,15 @@ class module_registry {
         return result;
     }
 
-    // Снять все версии имени.
+    /// Removes every version registered under a name.
+    /// @return false if the name was unknown
     bool remove(const std::string& name) {
         return registry_.erase(name) > 0;
     }
 
-    // Снять одну версию. Опустевшая запись имени стирается целиком —
-    // поддержка инварианта «внутренняя map не пуста» (см. registry_).
+    /// Removes a single version. An entry left without versions is erased whole, keeping the
+    /// "inner map is never empty" invariant.
+    /// @return false if there was no such name or version
     bool remove(const std::string& name, const version& v) {
         auto it = registry_.find(name);
         if (it == registry_.end()) {
@@ -172,6 +176,7 @@ class module_registry {
         return true;
     }
 
+    /// Every registered factory, all names and versions alike.
     [[nodiscard]] std::vector<const module_factory_base*> list() const {
         std::vector<const module_factory_base*> result;
         for (const auto& [name, versions] : registry_) {
@@ -183,18 +188,18 @@ class module_registry {
     }
 
    private:
-    // Имя → версии по возрастанию (operator<=> у version). Инвариант:
-    // внутренняя map никогда не пуста — при удалении последней версии
-    // стирается вся запись имени, find(name) не находит имя-пустышку.
+    // Name → versions ascending (version::operator<=>). Invariant: the inner map is never empty —
+    // removing the last version erases the whole name entry, so find(name) never turns up a hollow
+    // one.
     std::unordered_map<std::string, std::map<version, std::unique_ptr<module_factory_base>>> registry_;
 };
 
 namespace detail {
 
-// Обёртка фабрики плагина: create() пересаживает модуль на делетер с пином
-// библиотеки — модуль удерживает её от выгрузки. Порядок членов критичен:
-// pin_ объявлен раньше inner_, поэтому внутренняя фабрика (её vtable — в
-// плагине) разрушается раньше отпускания пина.
+// Wrapper around a plugin factory: create() re-seats the module onto a deleter pinning the
+// library, so the module holds it against unloading. Member order matters — pin_ is declared before
+// inner_, so the inner factory (whose vtable lives in the plugin) is destroyed before the pin is
+// released.
 class pinned_factory final : public module_factory_base {
    public:
     pinned_factory(std::unique_ptr<module_factory_base> inner, std::shared_ptr<void> pin)
@@ -206,10 +211,8 @@ class pinned_factory final : public module_factory_base {
     [[nodiscard]] version get_version() const noexcept override {
         return inner_->get_version();
     }
-    using module_factory_base::create;  // сахар create() не должен прятаться за override
-
-    [[nodiscard]] module_ptr create(const std::string& config) const override {
-        module_ptr m = inner_->create(config);
+    [[nodiscard]] module_ptr create() const override {
+        module_ptr m = inner_->create();
         return module_ptr(m.release(), module_deleter{pin_});
     }
 
@@ -220,45 +223,52 @@ class pinned_factory final : public module_factory_base {
 
 }  // namespace detail
 
-// Тонкая обёртка «реестр + пары (имя, версия), зарегистрированные через
-// неё». Функции регистрации модулей принимают её, а не реестр напрямую, —
-// так module_loader знает, какие фабрики принесла его библиотека,
-// и может снять их при выгрузке, не задевая чужие версии тех же имён.
-// Класс конкретный (не виртуальный): header-only платформа
-// инстанцируется в каждом участнике заново.
+/// Thin wrapper over a registry that also remembers the (name, version) pairs registered through
+/// it. Module registration functions take this rather than the registry itself, so that
+/// module_loader knows which factories its own library brought and can withdraw them on unload
+/// without touching other versions of the same names. A concrete class, not a virtual one: the
+/// header-only platform is instantiated afresh in every participant.
 class module_registrar {
    public:
-    // Пин — библиотека плагина: фабрики заворачиваются так, что каждый
-    // созданный модуль удерживает её от выгрузки. Монолитная регистрация
-    // (без пина) не меняется.
+    /// @param registry registry the factories go into
+    /// @param pin plugin library to pin: the factories are wrapped so that every module created
+    ///        holds it against unloading. Monolithic registration passes no pin.
     explicit module_registrar(module_registry& registry, std::shared_ptr<void> pin = {})
         : registry_(&registry), pin_(std::move(pin)) {}
 
-    // имя из типа — тот же контракт has_module_name, что у module_registry
+    /// Registers a module under the name it declares itself (contract has_module_name).
+    /// @throws std::runtime_error if this name and version are already registered
     template <std::derived_from<module_base> M>
-        requires(std::constructible_from<M> || std::constructible_from<M, const module_config&>) && has_module_name<M>
+        requires std::constructible_from<M> && has_module_name<M>
     module_factory_base& add() {
         return add<M>(std::string{M::module_name});
     }
 
+    /// Registers a module under an explicit name.
+    /// @param name registration name
+    /// @param args constructor arguments bound to the factory
+    /// @throws std::runtime_error if this name and version are already registered
     template <std::derived_from<module_base> M, typename... TArgs>
-        requires std::constructible_from<M, const std::decay_t<TArgs>&...> ||
-                 std::constructible_from<M, const module_config&, const std::decay_t<TArgs>&...>
+        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
         return add(
             std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name), std::forward<TArgs>(args)...));
     }
 
+    /// Registers a ready-made factory, wrapping it into the pin when there is one.
+    /// @throws std::invalid_argument on a null factory
+    /// @throws std::runtime_error if this name and version are already registered
     module_factory_base& add(std::unique_ptr<module_factory_base> factory) {
         if (pin_) {
             factory = std::make_unique<detail::pinned_factory>(std::move(factory), pin_);
         }
-        // пара (имя, версия) запоминается только после успешной регистрации
+        // The pair is recorded only after a successful registration.
         module_factory_base& ref = registry_->add(std::move(factory));
         registered_.emplace_back(std::string(ref.name()), ref.get_version());
         return ref;
     }
 
+    /// Pairs registered through this registrar, in registration order.
     [[nodiscard]] const std::vector<std::pair<std::string, version>>& registered() const {
         return registered_;
     }

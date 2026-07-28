@@ -11,48 +11,53 @@
 
 namespace atp::io {
 
-// Тег «доставить кэш при подключении» — в стиле safety/unsafe:
-//     out.connect(in, replay);
+/// Tag requesting delivery of the cached value on connect: `out.connect(in, replay)`.
 struct replay_t {};
 inline constexpr replay_t replay{};
 
-// Type-erased база выхода: именно её указатели хранит реестр outputs,
-// с ней же работает будущая машинерия соединений (подключение по именам).
-// Совместимость типов проверяется в рантайме внутри do_connect —
-// несовместимый вход отклоняется исключением. В самом output<T> эти
-// перегрузки намеренно скрыты типизированными: у конкретного выхода
-// ошибка типа ловится компилятором, рантайм-путь доступен через базу.
+/// Type-erased base of an output: what the outputs registry stores and what the connect-by-name
+/// machinery works with.
+///
+/// Type compatibility is checked at runtime inside do_connect, an incompatible input is rejected
+/// with an exception. output<T> deliberately hides these overloads behind typed ones, so that a
+/// concrete output catches type errors at compile time while the runtime path stays available
+/// through this base.
 class output_base : public io_base {
    public:
     using io_base::io_base;
 
-    // Только связь: кэш новому входу не доставляется.
+    /// Connects an input without replaying the cached value.
+    /// @throws std::runtime_error if the input does not accept this output's type
     void connect(input_base& in) {
         do_connect(in, false);
     }
 
-    // Связь + немедленная доставка кэша, если он есть.
+    /// Connects an input and immediately delivers the cached value, if there is one.
+    /// @throws std::runtime_error if the input does not accept this output's type
     void connect(input_base& in, replay_t) {
         do_connect(in, true);
     }
 
-    // Разрыв по адресу входа; false — вход не был подключён.
+    /// Breaks the connection to @p in, identified by address.
+    /// @return false if the input was not connected
     virtual bool disconnect(const input_base& in) = 0;
+
+    /// Breaks all connections of this output.
     virtual void disconnect_all() = 0;
 
+    /// Number of currently connected inputs.
     [[nodiscard]] virtual std::size_t connections() const = 0;
 
-    // Наблюдение для инструментов (мониторинг studio): type-erased снимок
-    // кэша и поколение записи (по изменению между опросами подсвечивается
-    // активность связи). Наблюдаемы только safe-экземпляры — чтение идёт
-    // под замком выхода; у unsafe чтение снаружи было бы гонкой, поэтому
-    // ответ — «ненаблюдаем»: peek() — nullopt, write_count() — 0.
+    /// Type-erased snapshot of the cached value, for tooling. Reading happens under the output's
+    /// lock, so only safe instances are observable; an unsafe one reports nullopt.
     [[nodiscard]] virtual std::optional<std::any> peek() const = 0;
+
+    /// Write generation, for tooling: a change between polls means the link was active. Unsafe
+    /// instances are not observable and report 0.
     [[nodiscard]] virtual std::uint64_t write_count() const = 0;
 
    private:
-    // Единственная точка подключения: наследник проверяет совместимость
-    // входа и добавляет его в список рассылки.
+    // Single connection point: the heir checks compatibility and adds the input to its list.
     virtual void do_connect(input_base& in, bool deliver_cached) = 0;
 };
 

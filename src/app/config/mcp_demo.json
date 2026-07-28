@@ -1,0 +1,30 @@
+{
+    "pipeline": {
+        "modules": [
+            {
+                "module": "counter",
+                "properties": {
+                    "start_at": "100",
+                    "step": "5"
+                }
+            },
+            {
+                "module": "printer",
+                "properties": {
+                    "format": "bracketed",
+                    "tag": "mcp"
+                }
+            }
+        ],
+        "connections": [
+            {
+                "from": "counter.count",
+                "to": "printer.value"
+            }
+        ]
+    },
+    "plugins": [
+        "atp_demo_plugin"
+    ],
+    "version": "2.0"
+}

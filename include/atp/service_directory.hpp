@@ -12,25 +12,22 @@
 
 namespace atp {
 
-// Невладеющий справочник сервисов: «кто (имя поставщика) какие интерфейсы
-// предоставляет». Модуль публикует свои интерфейсы в initialize(), соседи
-// находят их в start() — двухфазность publish/lookup делает порядок
-// инициализации модулей неважным. Ключ — пара (имя, тип интерфейса):
-// один поставщик может публиковать несколько интерфейсов, один интерфейс —
-// публиковаться под разными именами.
-//
-// Типобезопасность без dynamic_cast: указатель хранится
-// как void*, но достаётся только под тем же статическим типом TService,
-// под которым положили, — совпадение проверяется по type_index, поэтому
-// обратный static_cast корректен по построению. Та же дисциплина, что у
-// input_base::accepts()/deliver(): никаких кастов по иерархии.
-//
-// Время жизни — контракт на вызывающем, как у io-соединений: публикации
-// снимаются (remove) до разрушения сервиса — обычное место для этого stop().
-// НЕ потокобезопасен — фаза настройки, как io-реестры. Это касается только
-// самого справочника: найденный интерфейс соседи зовут из своих потоков
-// (iterate), поэтому в многопоточном пайплайне потокобезопасность
-// ОПУБЛИКОВАННОГО интерфейса — на его авторе.
+/// Non-owning directory of services: which provider (by name) offers which interfaces. A module
+/// publishes its interfaces in initialize() and peers look them up in start(), so the publish and
+/// lookup phases make module initialisation order irrelevant. The key is the pair (name, interface
+/// type): one provider may publish several interfaces, and one interface may be published under
+/// several names.
+///
+/// Type safety without dynamic_cast: the pointer is stored as void* but can only be retrieved under
+/// the same static type it was stored with, the match being guarded by type_index, which makes the
+/// reverse static_cast correct by construction — the same discipline as
+/// input_base::accepts()/deliver().
+///
+/// Lifetime is the caller's contract, as with io connections: publications are removed before the
+/// service is destroyed, normally in stop(). Not thread-safe — a setup-phase entity like the io
+/// registries. That covers the directory alone: peers call a discovered interface from their own
+/// threads, so in a multi-threaded pipeline the thread safety of the PUBLISHED interface is its
+/// author's business.
 class service_directory {
    public:
     service_directory() = default;
@@ -38,19 +35,21 @@ class service_directory {
     service_directory(const service_directory&) = delete;
     service_directory& operator=(const service_directory&) = delete;
 
-    // Публикация интерфейса под именем поставщика. TService указывается
-    // явно (provide<camera_control>(...)): вывод из аргумента подставил бы
-    // конкретный класс модуля вместо интерфейса, и потребитель не нашёл бы
-    // запись. const-тип отвергается: typeid стирает const, и публикация
-    // provide<const T> молча столкнулась бы с provide<T>.
+    /// Publishes an interface under a provider name. TService is spelled out explicitly
+    /// (provide<camera_control>(...)): deducing it from the argument would substitute the concrete
+    /// module class instead of the interface, and no consumer would find the entry. A const type is
+    /// rejected, since typeid strips const and provide<const T> would silently collide with
+    /// provide<T>.
+    /// @throws std::invalid_argument on an empty name
+    /// @throws std::runtime_error if this provider already published this interface
     template <typename TService>
         requires(!std::is_const_v<TService>)
     void provide(const std::string& name, TService& service) {
         if (name.empty()) {
             throw std::invalid_argument("empty service provider name");
         }
-        // Пустая внутренняя map при новом имени не «повисает»: следом
-        // try_emplace обязательно вставляет первую запись (как в module_registry).
+        // An empty inner map for a fresh name cannot linger: try_emplace right below always
+        // inserts the first entry.
         auto& services = entries_[name];
         auto [it, inserted] = services.try_emplace(std::type_index(typeid(TService)), std::addressof(service));
         if (!inserted) {
@@ -58,8 +57,9 @@ class service_directory {
         }
     }
 
-    // Пара в духе std::map: at() бросает, find() возвращает nullptr.
-    // at различает два случая: имени нет / имя есть, интерфейса нет.
+    /// Looks an interface up by provider name.
+    /// @throws std::runtime_error if there is no such provider, or it publishes no such interface —
+    ///         the two cases carry different messages
     template <typename TService>
     [[nodiscard]] TService& at(const std::string& name) const {
         auto it = entries_.find(name);
@@ -73,6 +73,7 @@ class service_directory {
         return *static_cast<TService*>(found->second);
     }
 
+    /// Looks an interface up by provider name; nullptr if the provider or the interface is missing.
     template <typename TService>
     [[nodiscard]] TService* find(const std::string& name) const {
         auto it = entries_.find(name);
@@ -83,13 +84,15 @@ class service_directory {
         return found == it->second.end() ? nullptr : static_cast<TService*>(found->second);
     }
 
-    // Снять все публикации имени — обычный путь в stop().
+    /// Removes every publication of a name — the usual thing to do in stop().
+    /// @return false if the name published nothing
     bool remove(const std::string& name) {
         return entries_.erase(name) > 0;
     }
 
-    // Снять одну публикацию. Опустевшая запись имени стирается целиком —
-    // поддержка инварианта «внутренняя map не пуста» (см. entries_).
+    /// Removes a single publication. An entry left without interfaces is erased whole, keeping the
+    /// "inner map is never empty" invariant.
+    /// @return false if there was no such publication
     template <typename TService>
     bool remove(const std::string& name) {
         auto it = entries_.find(name);
@@ -106,9 +109,8 @@ class service_directory {
     }
 
    private:
-    // Имя поставщика → его интерфейсы. Инвариант: внутренняя map никогда
-    // не пуста — при снятии последнего интерфейса стирается вся запись
-    // имени, find(name) не находит имя-пустышку (как в module_registry).
+    // Provider name → its interfaces. Invariant: the inner map is never empty — removing the last
+    // interface erases the whole name entry, so find(name) never turns up a hollow one.
     std::unordered_map<std::string, std::map<std::type_index, void*>> entries_;
 };
 

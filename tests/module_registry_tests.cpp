@@ -13,21 +13,21 @@
 
 namespace {
 
-class alpha_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{1, 0}> {};
+class alpha_module : public atp::module<atp::io::ports<>, "", atp::version{1, 0}> {};
 
-class beta_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class beta_module : public atp::module<> {};
 
-// вторая версия того же по смыслу модуля — для тестов мультиверсионности
-class alpha_v2_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 0}> {};
+// a second version of what is conceptually the same module, for the multi-version tests
+class alpha_v2_module : public atp::module<atp::io::ports<>, "", atp::version{2, 0}> {};
 
-// второй безверсионный тип (default_version, как beta_module) — для
-// проверки, что дубликат определяется парой (имя, версия), а не типом
-class gamma_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+// a second version-less type (default_version, like beta_module), to check that a duplicate is
+// decided by the (name, version) pair rather than by the type
+class gamma_module : public atp::module<> {};
 
-// модуль со встроенным именем — для add<M>() без аргумента
-class named_module : public atp::module<atp::io::inputs, atp::io::outputs, "named", atp::version{1, 0}> {};
+// a module with a built-in name, for the argument-less add<M>()
+class named_module : public atp::module<atp::io::ports<>, "named", atp::version{1, 0}> {};
 
-// модуль мимо шаблона module<>: контракт — статический член, не NTTP
+// a module written outside module<>: the contract is a static member, not an NTTP
 class handmade_module : public atp::module_base {
    public:
     static constexpr std::string_view module_name = "handmade";
@@ -50,14 +50,21 @@ class handmade_module : public atp::module_base {
     const atp::io::outputs& outputs() const override {
         return outputs_;
     }
+    atp::io::properties& properties() override {
+        return properties_;
+    }
+    const atp::io::properties& properties() const override {
+        return properties_;
+    }
 
    private:
     atp::io::inputs inputs_;
     atp::io::outputs outputs_;
+    atp::io::properties properties_;
 };
 
-// Модуль с конфигом в конструкторе — для тестов вариадик-регистрации.
-class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+// A module configured through its constructor, for the variadic registration tests.
+class configured_module : public atp::module<> {
    public:
     explicit configured_module(int value) : value_(value) {}
 
@@ -69,9 +76,9 @@ class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> 
     int value_;
 };
 
-// requires-выражение вне шаблона GCC проверяет жёстко (не SFINAE),
-// поэтому невозможность вызова проверяется через концепты: подстановка
-// параметра — уже immediate context, отказ разрешения даёт false.
+// GCC checks a requires-expression outside a template strictly rather than through SFINAE, so the
+// impossibility of a call is verified with concepts: substituting the parameter is already an
+// immediate context, and a failed resolution yields false.
 template <typename M>
 concept registry_adds_by_own_name = requires(atp::module_registry r) { r.add<M>(); };
 
@@ -80,8 +87,8 @@ concept registrar_adds_by_own_name = requires(atp::module_registrar r) { r.add<M
 
 }  // namespace
 
-// Анонимный модуль (module_name пуст) не проходит constraint add<M>()
-// без аргумента — регистрация только под явным именем.
+// An anonymous module (empty module_name) fails the constraint of the argument-less add<M>(): it
+// can only be registered under an explicit name.
 static_assert(!registry_adds_by_own_name<beta_module>);
 static_assert(!registrar_adds_by_own_name<beta_module>);
 static_assert(registry_adds_by_own_name<named_module>);
@@ -104,7 +111,7 @@ TEST(ModuleRegistry, AddReturnsFactoryReference) {
 TEST(ModuleRegistry, SameNameDifferentVersionsCoexist) {
     atp::module_registry registry;
     registry.add<alpha_module>("proc");     // 1.0
-    registry.add<alpha_v2_module>("proc");  // 2.0 — не дубликат
+    registry.add<alpha_v2_module>("proc");  // 2.0 is not a duplicate
     EXPECT_EQ(registry.list().size(), 2u);
 }
 
@@ -112,25 +119,25 @@ TEST(ModuleRegistry, DuplicateNameAndVersionThrows) {
     atp::module_registry registry;
     registry.add<alpha_module>("dup");
     try {
-        registry.add<alpha_module>("dup");  // та же версия 1.0
+        registry.add<alpha_module>("dup");  // the same version 1.0
         FAIL() << "expected std::runtime_error";
     } catch (const std::runtime_error& error) {
         EXPECT_NE(std::string(error.what()).find("duplicate module 'dup' version '1.0'"), std::string::npos);
     }
-    // неудачная регистрация не портит существующую
+    // a failed registration does not spoil the existing one
     EXPECT_EQ(registry.at("dup").get_version(), atp::version(1, 0));
 }
 
 TEST(ModuleRegistry, DuplicateDefaultVersionThrows) {
     atp::module_registry registry;
     registry.add<beta_module>("dup");
-    // другой тип, но та же default_version — дубликат пары (имя, версия)
+    // another type but the same default_version — a duplicate (name, version) pair
     EXPECT_THROW(registry.add<gamma_module>("dup"), std::runtime_error);
 }
 
 TEST(ModuleRegistry, CreateWithoutVersionReturnsLatest) {
     atp::module_registry registry;
-    registry.add<alpha_v2_module>("proc");  // регистрируем «не по порядку»
+    registry.add<alpha_v2_module>("proc");  // registered out of order
     registry.add<alpha_module>("proc");
     auto module = registry.create("proc");
     ASSERT_NE(module, nullptr);
@@ -157,7 +164,7 @@ TEST(ModuleRegistry, CreateExactVersion) {
 TEST(ModuleRegistry, CreateExactVersionIgnoresZeroPadding) {
     atp::module_registry registry;
     registry.add<alpha_module>("proc");  // 1.0
-    // 1.0 == 1.0.0 — дополнение нулями, тот же ключ
+    // 1.0 == 1.0.0 — zero padding makes it the same key
     EXPECT_NE(registry.create("proc", atp::version(1, 0, 0)), nullptr);
 }
 
@@ -195,7 +202,7 @@ TEST(ModuleRegistry, FindWithVersion) {
 
 TEST(ModuleRegistry, VersionsSortedAscending) {
     atp::module_registry registry;
-    registry.add<alpha_v2_module>("proc");  // регистрируем «не по порядку»
+    registry.add<alpha_v2_module>("proc");  // registered out of order
     registry.add<alpha_module>("proc");
     EXPECT_EQ(registry.versions("proc"), (std::vector<atp::version>{atp::version(1, 0), atp::version(2, 0)}));
 }
@@ -233,9 +240,9 @@ TEST(ModuleRegistry, RemoveVersionKeepsOthers) {
     registry.add<alpha_module>("proc");     // 1.0
     registry.add<alpha_v2_module>("proc");  // 2.0
     EXPECT_TRUE(registry.remove("proc", atp::version(2, 0)));
-    // «последняя» пересчитана — осталась 1.0
+    // "the latest" was recomputed and is 1.0 again
     EXPECT_EQ(registry.at("proc").get_version(), atp::version(1, 0));
-    // повторное снятие той же версии — false
+    // removing the same version again yields false
     EXPECT_FALSE(registry.remove("proc", atp::version(2, 0)));
 }
 
@@ -243,7 +250,7 @@ TEST(ModuleRegistry, RemoveLastVersionErasesName) {
     atp::module_registry registry;
     registry.add<alpha_module>("proc");
     EXPECT_TRUE(registry.remove("proc", atp::version(1, 0)));
-    // имя без версий не должно находиться
+    // a name without versions must not be found
     EXPECT_EQ(registry.find("proc"), nullptr);
     EXPECT_TRUE(registry.versions("proc").empty());
 }
@@ -310,7 +317,7 @@ TEST(ModuleRegistry, AliasOnTopOfOwnName) {
     atp::module_registry registry;
     registry.add<named_module>();
     registry.add<named_module>("alias");
-    // обе записи живут независимо — собственное имя и алиас
+    // both entries live independently: the own name and the alias
     EXPECT_NE(registry.create("named"), nullptr);
     EXPECT_NE(registry.create("alias"), nullptr);
 }
@@ -325,7 +332,7 @@ TEST(ModuleRegistrar, AddWithoutNameRecordsPair) {
 
 TEST(ModuleRegistry, HandmadeModuleNameContract) {
     atp::module_registry registry;
-    // контракт add<M>() — статический член module_name, а не сам шаблон
+    // the add<M>() contract is the static module_name member, not the template itself
     registry.add<handmade_module>();
     EXPECT_NE(registry.create("handmade"), nullptr);
     EXPECT_EQ(registry.at("handmade").get_version(), atp::default_version);
@@ -335,7 +342,7 @@ TEST(ModuleRegistrar, FailedAddIsNotRecorded) {
     atp::module_registry registry;
     atp::module_registrar registrar{registry};
     registrar.add<alpha_module>("dup");
-    // тот же тип — та же версия 1.0, дубликат пары (имя, версия)
+    // the same type means the same version 1.0 — a duplicate (name, version) pair
     EXPECT_THROW(registrar.add<alpha_module>("dup"), std::runtime_error);
     EXPECT_EQ(registrar.registered(), (std::vector<std::pair<std::string, atp::version>>{{"dup", atp::version(1, 0)}}));
 }

@@ -2,12 +2,12 @@
 
 #include <atp/version.hpp>
 
-// Compile-time доступ: структурный тип обязан сравниваться в constexpr.
+// Compile-time access: a structural type has to compare in constexpr.
 static_assert(atp::version{1, 2} == atp::version{1, 2, 0});
 static_assert(atp::version{1, 2, 3} < atp::version{1, 10});
 static_assert(atp::default_version == atp::version{0, 0, 1});
 
-// Сахар ver<"...">: разбор строки целиком на этапе компиляции.
+// The ver<"..."> sugar: the string is parsed entirely at compile time.
 static_assert(atp::ver<"1.2.3"> == atp::version{1, 2, 3});
 static_assert(atp::ver<"1.2"> == atp::version{1, 2});
 static_assert(atp::ver<"1.2">.count == 2);
@@ -46,7 +46,7 @@ TEST(Version, CountIsPreservedButIgnoredInComparison) {
     atp::version v{1, 2};
     EXPECT_EQ(v.count, 2u);
     EXPECT_EQ(atp::version(1, 2, 0).count, 3u);
-    EXPECT_EQ(v, atp::version(1, 2, 0));  // count различен, версии равны
+    EXPECT_EQ(v, atp::version(1, 2, 0));  // different count, equal versions
 }
 
 TEST(Version, FourPartsSupported) {

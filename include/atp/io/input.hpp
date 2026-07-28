@@ -15,40 +15,40 @@
 
 namespace atp::io {
 
-// Базовый вход и одновременно вход «последнее значение побеждает».
-// От него наследуются остальные виды входов (см. queued_input): единственная
-// точка расширения — защищённый virtual store(), куда operator() кладёт
-// принятое значение. Приём type-erased значений от выходов — через протокол
-// accepts/deliver (см. input_base). Потокобезопасен по умолчанию; блокировка
-// отключается тегом unsafe в конструкторе (см. safety). Чтение — pull-only:
-// get() — копия состояния, take() — изъятие события; реакция на новые
-// значения — опросом с потока потребителя (см. watcher). Доставка не
-// исполняет пользовательский код — на потоке пишущего только store под замком.
+/// Base input and, at the same time, the "last value wins" input.
+///
+/// Other input kinds derive from it (see queued_input); the single extension point is the
+/// protected virtual store(), where operator() puts the accepted value. Reading is pull-only:
+/// get() copies the state, take() removes an event; reacting to new values is done by polling
+/// from the consumer thread (see watcher). Delivery runs no user code — the writer's thread only
+/// executes store() under the lock.
 template <typename T>
 class input : public input_base {
    public:
+    /// @param name input name, unique within its registry
+    /// @param s whether this instance serialises access
     explicit input(std::string name, safety s = safe) : input_base(std::move(name), typeid(T), s) {}
 
-    // Одиночное значение с perfect forwarding: принимает и lvalue,
-    // и rvalue, а также всё, из чего T конструируется неявно.
+    /// Writes a value into the input. Accepts lvalues, rvalues and anything T is constructible
+    /// from.
     template <typename U>
         requires std::constructible_from<T, U>
     void operator()(U&& value) {
-        // Конструируем T вне замка — критическая секция только на store().
+        // Construct T outside the lock: the critical section covers store() only.
         T incoming(std::forward<U>(value));
         auto guard = lock();
-        store(std::move(incoming));  // virtual: наследник решает, куда положить
+        store(std::move(incoming));
     }
 
-    // Универсальный запрос «пусто ли»: у base — нет ли значения, у
-    // наследников (см. queued_input) — своя трактовка через override.
+    /// Whether the input holds nothing to read. Heirs reinterpret it for their own storage.
     [[nodiscard]] virtual bool empty() const {
         auto guard = lock();
         return !value_.has_value();
     }
 
-    // Возвращает копию: ссылка наружу была бы гонкой — другой поток
-    // может перезаписать значение в любой момент.
+    /// Copy of the stored value; a reference would be a race, since another thread may overwrite
+    /// it at any moment.
+    /// @throws std::runtime_error if the input has no value
     [[nodiscard]] T get() const {
         auto guard = lock();
         if (!value_) {
@@ -57,11 +57,10 @@ class input : public input_base {
         return *value_;
     }
 
-    // Изъятие значения: optional пуст, если писем не было. Пара к get():
-    // get() — вход-«состояние» (читается многократно), take() — вход-«событие»
-    // (каждое значение обрабатывается ровно раз). virtual: наследник изымает
-    // из своего хранилища (queued_input отдаёт голову очереди) — в отличие от
-    // невиртуального get(), take через ссылку на базу работает у всех входов.
+    /// Removes and returns the pending value, nullopt if there was none. The counterpart of
+    /// get(): a "state" input is read many times with get(), an "event" input handles every value
+    /// exactly once with take(). Virtual, so taking through a base reference works for every input
+    /// kind (queued_input hands out the queue head).
     [[nodiscard]] virtual std::optional<T> take() {
         auto guard = lock();
         std::optional<T> out = std::move(value_);
@@ -83,29 +82,24 @@ class input : public input_base {
     }
 
    protected:
-    // Точка расширения: куда положить принятое значение. По умолчанию —
-    // «последнее значение побеждает». Вызывается под замком.
+    /// Extension point deciding where an accepted value goes; "last value wins" by default.
+    /// Called under the lock.
     virtual void store(T&& value) {
         value_.emplace(std::move(value));
     }
 
    private:
-    // Протокол доставки (см. input_base). Типизированный вход принимает
-    // ровно свой T; input<std::any> универсален — принимает всё и
-    // упаковывает значение через meta.box. Обе ветки решаются на этапе
-    // компиляции, полной специализации для std::any не требуется;
-    // queued_input наследует протокол как есть.
+    // Both delivery branches are resolved at compile time, so no full specialisation for
+    // std::any is needed; queued_input inherits the protocol as is.
     void do_deliver(const void* value, const erased_type& meta) override {
         if constexpr (std::same_as<T, std::any>) {
-            // any→any — без двойной упаковки
             if (meta.type == typeid(std::any)) {
-                (*this)(*static_cast<const std::any*>(value));
+                (*this)(*static_cast<const std::any*>(value));  // any→any — no double boxing
             } else {
                 (*this)(meta.box(value));
             }
         } else {
-            // meta.type == typeid(T) — протокольная гарантия выхода
-            (*this)(*static_cast<const T*>(value));
+            (*this)(*static_cast<const T*>(value));  // meta.type == typeid(T) — output's guarantee
         }
     }
 

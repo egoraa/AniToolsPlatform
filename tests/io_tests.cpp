@@ -6,6 +6,7 @@
 #include <thread>
 #include <typeindex>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -50,7 +51,7 @@ TEST(Input, AcceptsLvalueWithoutMoving) {
     std::string hello = "Hello";
     in(hello);
     EXPECT_EQ(in.get(), "Hello");
-    EXPECT_EQ(hello, "Hello");  // lvalue не перемещён
+    EXPECT_EQ(hello, "Hello");  // the lvalue was not moved from
 }
 
 TEST(Input, ResetClearsValue) {
@@ -67,7 +68,7 @@ TEST(Input, TakeRemovesValue) {
     ASSERT_TRUE(taken.has_value());
     EXPECT_EQ(*taken, 7);
     EXPECT_TRUE(in.empty());
-    EXPECT_EQ(in.take(), std::nullopt);  // второй take — уже пусто
+    EXPECT_EQ(in.take(), std::nullopt);  // the second take finds nothing
 }
 
 TEST(Input, TakeOnEmptyReturnsNullopt) {
@@ -107,7 +108,7 @@ TEST(InputDeliverProtocol, AnyToAnyIsNotDoubleBoxed) {
     atp::io::input<std::any> in{"in_any"};
     std::any v = 42;
     in.deliver(&v, atp::io::input_base::erased_of<std::any>());
-    // Внутри должен лежать исходный int, а не std::any(std::any(42))
+    // Inside there must be the original int, not std::any(std::any(42)).
     EXPECT_EQ(in.get().type(), typeid(int));
     EXPECT_EQ(std::any_cast<int>(in.get()), 42);
 }
@@ -145,7 +146,7 @@ TEST(InputNotifier, DeliveryNotifies) {
     EXPECT_EQ(n.count, 1);
     EXPECT_EQ(in.get(), 7);
 
-    in.set_notifier(nullptr);  // снятый уведомитель молчит
+    in.set_notifier(nullptr);  // a cleared notifier stays silent
     out(8);
     EXPECT_EQ(n.count, 1);
 }
@@ -157,7 +158,7 @@ TEST(InputNotifier, ReplayDeliveryNotifiesLateSubscriber) {
     atp::io::input<int> in("in");
     counting_notifier n;
     in.set_notifier(&n);
-    out.connect(in, atp::io::replay);  // доставка кэша — тоже доставка
+    out.connect(in, atp::io::replay);  // replaying the cache counts as a delivery
 
     EXPECT_EQ(n.count, 1);
     EXPECT_EQ(in.get(), 5);
@@ -167,13 +168,13 @@ TEST(InputNotifier, DirectWriteDoesNotNotify) {
     atp::io::input<int> in("in");
     counting_notifier n;
     in.set_notifier(&n);
-    in(3);  // прямая запись — не доставка от выхода, сигналить нечего
+    in(3);  // a direct write is not a delivery from an output, so nothing is signalled
     EXPECT_EQ(n.count, 0);
 }
 
 TEST(OutputPeek, SafeOutputExposesCacheAndGeneration) {
     atp::io::output<int> out("out");
-    atp::io::output_base& base = out;  // мониторинг работает через type-erased базу
+    atp::io::output_base& base = out;  // monitoring works through the type-erased base
     EXPECT_EQ(base.peek(), std::nullopt);
     EXPECT_EQ(base.write_count(), 0u);
 
@@ -181,7 +182,7 @@ TEST(OutputPeek, SafeOutputExposesCacheAndGeneration) {
     out(42);
     const std::optional<std::any> snapshot = base.peek();
     ASSERT_TRUE(snapshot.has_value());
-    EXPECT_EQ(std::any_cast<int>(*snapshot), 42);  // кэш — последнее значение
+    EXPECT_EQ(std::any_cast<int>(*snapshot), 42);  // the cache holds the last value
     EXPECT_EQ(base.write_count(), 2u);
 }
 
@@ -190,14 +191,14 @@ TEST(OutputPeek, ResetClearsCacheButKeepsGeneration) {
     out(7);
     out.reset();
     EXPECT_EQ(out.peek(), std::nullopt);
-    EXPECT_EQ(out.write_count(), 1u);  // поколение — счётчик записей, не наличие кэша
+    EXPECT_EQ(out.write_count(), 1u);  // the generation counts writes, not the presence of a cache
 }
 
 TEST(OutputPeek, UnsafeOutputIsNotObservable) {
     atp::io::output<int> out("out", atp::io::unsafe);
     out(7);
-    // Контракт наблюдаемости: unsafe снаружи не читается — гонка. Ответ
-    // «ненаблюдаем», а не рискованное значение.
+    // Observability contract: an unsafe instance cannot be read from outside without a race, so the
+    // answer is "not observable" rather than a risky value.
     EXPECT_EQ(out.peek(), std::nullopt);
     EXPECT_EQ(out.write_count(), 0u);
 }
@@ -246,13 +247,13 @@ TEST(QueuedInput, AcceptsLvalueWithoutMoving) {
     std::string hello = "Hello";
     in(hello);
     EXPECT_EQ(in.pop(), "Hello");
-    EXPECT_EQ(hello, "Hello");  // lvalue не перемещён
+    EXPECT_EQ(hello, "Hello");  // the lvalue was not moved from
 }
 
 TEST(QueuedInput, MetadataMatchesSignature) {
     atp::io::queued_input<int> in{"q_int"};
     EXPECT_EQ(in.name(), "q_int");
-    // Сигнатура та же, что у input<int>: вид входа не влияет на type()
+    // The signature matches input<int>: the input kind does not affect type().
     EXPECT_EQ(in.type(), std::type_index(typeid(int)));
 }
 
@@ -292,8 +293,8 @@ TEST(QueuedInput, TakePopsHead) {
     q(1);
     q(2);
     atp::io::input<int>& as_base = q;
-    // Виртуальность: через ссылку на базу изымается голова очереди,
-    // а не пустой value_ базы (контраст с невиртуальным get()).
+    // Virtual dispatch: through a base reference the queue head is taken, not the base's empty
+    // value_ — in contrast with the non-virtual get().
     EXPECT_EQ(as_base.take(), std::optional<int>(1));
     EXPECT_EQ(q.size(), 1u);
 }
@@ -303,12 +304,12 @@ TEST(Watcher, FiresHandlerOnFreshValue) {
     atp::io::watcher w;
     int observed = 0;
     w.watch(in, [&](const int& v) { observed = v; });
-    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // писем не было
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // nothing has arrived
     in(7);
     EXPECT_EQ(w.poll(), atp::io::work_status::busy);
     EXPECT_EQ(observed, 7);
-    EXPECT_TRUE(in.empty());                          // значение изъято правилом
-    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // повторно не срабатывает
+    EXPECT_TRUE(in.empty());                          // the rule took the value
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // it does not fire twice
 }
 
 TEST(Watcher, QueuedRuleDrainsPerElement) {
@@ -325,6 +326,20 @@ TEST(Watcher, QueuedRuleDrainsPerElement) {
     EXPECT_EQ(w.poll(), atp::io::work_status::idle);
 }
 
+TEST(Watcher, PropertyRuleFiresOnChange) {
+    atp::io::property<int> limit("limit", 10);
+    atp::io::watcher w;
+    std::vector<int> seen;
+    w.watch(limit, [&](const int& v) { seen.push_back(v); });
+
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // the default is not an event
+    limit(42);
+    EXPECT_EQ(w.poll(), atp::io::work_status::busy);
+    EXPECT_EQ(w.poll(), atp::io::work_status::idle);  // the change was handled exactly once
+    ASSERT_EQ(seen.size(), 1u);
+    EXPECT_EQ(seen[0], 42);
+}
+
 TEST(Watcher, PollWithoutRulesIsIdle) {
     atp::io::watcher w;
     EXPECT_EQ(w.poll(), atp::io::work_status::idle);
@@ -336,10 +351,10 @@ TEST(Watcher, HandlerRunsOnPollingThread) {
     std::thread::id handler_thread{};
     w.watch(in, [&](const int&) { handler_thread = std::this_thread::get_id(); });
     {
-        std::jthread writer([&in] { in(7); });  // запись с чужого потока
+        std::jthread writer([&in] { in(7); });  // written from another thread
     }
     EXPECT_EQ(w.poll(), atp::io::work_status::busy);
-    EXPECT_EQ(handler_thread, std::this_thread::get_id());  // обработчик — на потоке poll
+    EXPECT_EQ(handler_thread, std::this_thread::get_id());  // the handler ran on the polling thread
 }
 
 TEST(QueuedInput, ConcurrentProducersLoseNothing) {
@@ -396,7 +411,7 @@ TEST(InputsRegistry, AtByNameReturnsMetadata) {
 TEST(InputsRegistry, GetInputAliasesField) {
     test_inputs ins;
     ins.get<atp::io::input<int>>("input1")(100);
-    EXPECT_EQ(ins.input1.get(), 100);  // то же поле, не копия
+    EXPECT_EQ(ins.input1.get(), 100);  // the same field, not a copy
 }
 
 TEST(InputsRegistry, WrongTypeThrows) {
@@ -427,8 +442,8 @@ TEST(InputsRegistry, SafetyIsNotPartOfTheType) {
     atp::io::inputs ins;
     ins.make<atp::io::input<int>>("safe");
     ins.make<atp::io::input<int>>("fast", atp::io::unsafe);
-    // Политика блокировки — рантайм-свойство экземпляра: доступ по имени
-    // одинаков для обоих входов и на политику не смотрит
+    // The locking policy is a runtime property of the instance: lookup by name is identical for
+    // both inputs and does not care about it.
     ins.get<atp::io::input<int>>("safe")(1);
     ins.get<atp::io::input<int>>("fast")(2);
     EXPECT_EQ(ins.get<atp::io::input<int>>("safe").get(), 1);
@@ -438,7 +453,7 @@ TEST(InputsRegistry, SafetyIsNotPartOfTheType) {
 TEST(InputsRegistry, KindMismatchThrows) {
     test_inputs ins;
     ins.make<atp::io::queued_input<int>>("q");
-    // Сигнатуры совпадают (typeid(int)), но вид входа разный
+    // The value types match (typeid(int)) but the input kinds differ.
     EXPECT_THROW((void)ins.get<atp::io::queued_input<int>>("input1"), std::runtime_error);
     EXPECT_THROW((void)ins.get<atp::io::input<int>>("q"), std::runtime_error);
 }
@@ -483,6 +498,19 @@ TEST(InputsRegistry, DynamicInputCanBeRemoved) {
     EXPECT_FALSE(ins.remove("extra"));
 }
 
+TEST(InputsRegistry, MoveKeepsPortsAlive) {
+    struct movable_inputs : atp::io::inputs {
+        atp::io::input<int>& number = make<atp::io::input<int>>("number");
+    };
+    movable_inputs src;
+    src.number(41);
+    movable_inputs dst{std::move(src)};
+    // Ports live on the heap: the map moved, the port object did not. The destination's reference
+    // member points at the same object as the registry entry.
+    EXPECT_EQ(dst.find("number"), static_cast<atp::io::input_base*>(&dst.number));
+    EXPECT_EQ(dst.number.get(), 41);
+}
+
 TEST(Output, MetadataCarriesNameAndType) {
     atp::io::output<int> out{"out_int"};
     EXPECT_EQ(out.name(), "out_int");
@@ -508,7 +536,7 @@ TEST(Output, AcceptsLvalueWithoutMoving) {
     std::string hello = "Hello";
     out(hello);
     EXPECT_EQ(out.get(), "Hello");
-    EXPECT_EQ(hello, "Hello");  // lvalue не перемещён
+    EXPECT_EQ(hello, "Hello");  // the lvalue was not moved from
 }
 
 TEST(Output, DeliversToAllConnectedInputs) {
@@ -521,7 +549,7 @@ TEST(Output, DeliversToAllConnectedInputs) {
     out(7);
     EXPECT_EQ(a.get(), 7);
     EXPECT_EQ(b.get(), 7);
-    EXPECT_EQ(out.get(), 7);  // кэш обновлён вместе с рассылкой
+    EXPECT_EQ(out.get(), 7);  // the cache is updated along with the delivery
 }
 
 TEST(Output, DeliversToQueuedInput) {
@@ -543,7 +571,7 @@ TEST(Output, ResetClearsCacheButKeepsConnections) {
     out.reset();
     EXPECT_TRUE(out.empty());
     EXPECT_EQ(out.connections(), 1u);
-    out(2);  // соединение пережило reset — доставка работает
+    out(2);  // the connection survived the reset and delivery still works
     EXPECT_EQ(in.get(), 2);
 }
 
@@ -561,10 +589,10 @@ TEST(Output, DisconnectStopsDelivery) {
     out.connect(in);
     out(1);
     EXPECT_TRUE(out.disconnect(in));
-    EXPECT_FALSE(out.disconnect(in));  // повторный разрыв — уже не был подключён
+    EXPECT_FALSE(out.disconnect(in));  // disconnecting twice: it was no longer connected
     out(2);
-    EXPECT_EQ(in.get(), 1);   // после разрыва доставки нет
-    EXPECT_EQ(out.get(), 2);  // кэш при этом обновляется
+    EXPECT_EQ(in.get(), 1);   // no delivery after the disconnect
+    EXPECT_EQ(out.get(), 2);  // the cache is updated regardless
 }
 
 TEST(Output, DisconnectAllDropsEveryConnection) {
@@ -607,10 +635,10 @@ TEST(Output, TypeErasedConnectChecksCompatibility) {
     test_outputs outs;
     test_inputs ins;
     atp::io::output_base& out = outs.at("out1");
-    out.connect(ins.at("input1"));  // int → int: совместимо
+    out.connect(ins.at("input1"));  // int → int: compatible
     outs.out1(5);
     EXPECT_EQ(ins.input1.get(), 5);
-    // int → string: несовместимо, рантайм-проверка отклоняет
+    // int → string: incompatible, the runtime check rejects it.
     EXPECT_THROW(out.connect(ins.at("input2")), std::runtime_error);
 }
 
@@ -618,8 +646,8 @@ TEST(Output, TypeErasedConnectAcceptsQueuedInput) {
     atp::io::inputs ins;
     atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q");
     atp::io::output<int> out{"out_int"};
-    // Выходу подходит любой наследник input<int> — в отличие от реестра,
-    // где get<> требует точный вид входа
+    // Any heir of input<int> suits the output — unlike the registry, where get<> demands the exact
+    // input kind.
     static_cast<atp::io::output_base&>(out).connect(ins.at("q"), atp::io::replay);
     out(1);
     EXPECT_EQ(q.pop(), 1);
@@ -636,7 +664,7 @@ TEST(Output, TypeErasedConnectAcceptsAnyInput) {
 TEST(Output, TypedConnectAcceptsAnyInput) {
     atp::io::output<std::string> out{"out_str"};
     atp::io::input<std::any> any_in{"any_in"};
-    out.connect(any_in);  // типизированная перегрузка, без type-erased пути
+    out.connect(any_in);  // the typed overload, not the type-erased path
     out(std::string("hello"));
     EXPECT_EQ(std::any_cast<std::string>(any_in.get()), "hello");
 }
@@ -663,15 +691,15 @@ TEST(Output, QueuedAnyInputAccumulatesFromTypedOutput) {
 TEST(Output, AnyOutputToAnyInputNoDoubleBoxing) {
     atp::io::output<std::any> out{"out_any"};
     atp::io::input<std::any> in{"in_any"};
-    out.connect(in);  // при T == std::any работает обычная типизированная пара
+    out.connect(in);  // for T == std::any the ordinary typed pair applies
     out(std::any(42));
     EXPECT_EQ(in.get().type(), typeid(int));
     EXPECT_EQ(std::any_cast<int>(in.get()), 42);
 }
 
 TEST(Output, AnyOutputTypedConnectHasNoAmbiguity) {
-    // При T == std::any any-перегрузка исключена requires-клаузой —
-    // вызов с replay разрешается в обычную connect(input<T>&, replay_t)
+    // For T == std::any the any-overload is excluded by the requires clause, so a call with replay
+    // resolves to the ordinary connect(input<T>&, replay_t).
     atp::io::output<std::any> out{"out_any"};
     atp::io::input<std::any> in{"in_any"};
     out.connect(in, atp::io::replay);
@@ -687,7 +715,7 @@ TEST(Output, IncompatibleInputStillRejected) {
 }
 
 TEST(Output, DuplicateAnyConnectThrowsAcrossPaths) {
-    // Дубликат ловится по адресу входа независимо от пути подключения
+    // A duplicate is caught by the input's address, whichever connect path was used.
     atp::io::output<int> out{"out_int"};
     atp::io::input<std::any> any_in{"any_in"};
     out.connect(any_in);
@@ -702,7 +730,7 @@ TEST(Output, DisconnectAnyInputStopsDelivery) {
     out(1);
     EXPECT_TRUE(out.disconnect(any_in));
     out(2);
-    EXPECT_EQ(std::any_cast<int>(any_in.get()), 1);  // после разрыва доставки нет
+    EXPECT_EQ(std::any_cast<int>(any_in.get()), 1);  // no delivery after the disconnect
     EXPECT_EQ(out.connections(), 0u);
 }
 
@@ -741,7 +769,7 @@ TEST(OutputsRegistry, TypedFieldAccess) {
     test_outputs outs;
     outs.out1(42);
     EXPECT_EQ(outs.out1.get(), 42);
-    EXPECT_EQ(outs.get<atp::io::output<int>>("out1").get(), 42);  // то же поле, не копия
+    EXPECT_EQ(outs.get<atp::io::output<int>>("out1").get(), 42);  // the same field, not a copy
 }
 
 TEST(OutputsRegistry, AtByNameReturnsMetadata) {
@@ -797,7 +825,7 @@ TEST(OutputsRegistry, DynamicOutputCanBeRemoved) {
 }
 
 TEST(IoBase, ThreadSafeReflectsConstructionTag) {
-    atp::io::input<int> guarded("guarded");  // safe — умолчание
+    atp::io::input<int> guarded("guarded");  // safe is the default
     atp::io::input<int> bare("bare", atp::io::unsafe);
     atp::io::output<int> guarded_out("out");
     EXPECT_TRUE(guarded.thread_safe());
@@ -809,7 +837,7 @@ TEST(IoRegistry, AliasSharesForeignPort) {
     atp::io::input<int> real{"real"};
     atp::io::inputs regs;
     regs.alias("mirror", real);
-    EXPECT_EQ(regs.find("mirror"), &real);  // тот же объект, не копия
+    EXPECT_EQ(regs.find("mirror"), &real);  // the same object, not a copy
     real(7);
     EXPECT_EQ(regs.get<atp::io::input<int>>("mirror").get(), 7);
 }
@@ -829,7 +857,7 @@ TEST(IoRegistry, OwnedSkipsAliases) {
     auto owned = regs.owned();
     ASSERT_EQ(owned.size(), 1u);
     EXPECT_EQ(owned.front(), &own);
-    EXPECT_EQ(regs.list().size(), 2u);  // list видит оба вида записей
+    EXPECT_EQ(regs.list().size(), 2u);  // list sees both kinds of entries
 }
 
 TEST(IoRegistry, DestructionLeavesAliasedPortAlive) {
@@ -837,7 +865,7 @@ TEST(IoRegistry, DestructionLeavesAliasedPortAlive) {
     {
         atp::io::inputs regs;
         regs.alias("mirror", foreign);
-    }  // реестр умер — алиас не владел
+    }  // the registry died; the alias never owned anything
     foreign(5);
     EXPECT_EQ(foreign.get(), 5);
 }

@@ -5,12 +5,9 @@
 
 namespace atp {
 
-// Контекст, который платформа передаёт модулю в initialize/start/stop:
-// агрегат ссылок на службы платформы. Новые службы добавляются полями —
-// сигнатуры жизненного цикла при этом не меняются (но раскладка контекста
-// видна плагинам, поэтому добавление поля — рост plugin_abi).
-// Полный include справочника, а не forward-declaration: контекст без
-// полного типа своей единственной службы бесполезен.
+/// Context the platform hands to a module in initialize: an aggregate of references to platform
+/// services. New services are added as fields, leaving the lifecycle signatures alone — but the
+/// context layout is visible to plugins, so adding a field bumps plugin_abi.
 struct module_context {
     service_directory& services;
 };

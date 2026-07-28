@@ -7,18 +7,17 @@
 #include <gtest/gtest.h>
 
 #include <atp/module.hpp>
-#include <atp/module_config.hpp>
 #include <atp/module_factory.hpp>
 #include <atp/module_registry.hpp>
 
 namespace {
 
-class plain_module : public atp::module<atp::io::inputs, atp::io::outputs> {};
+class plain_module : public atp::module<> {};
 
-class versioned_module : public atp::module<atp::io::inputs, atp::io::outputs, "", atp::version{2, 1}> {};
+class versioned_module : public atp::module<atp::io::ports<>, "", atp::version{2, 1}> {};
 
-// Модуль мимо шаблона module<> — без константы module_version:
-// фабрика должна отвечать default_version (симметрия с module_base).
+// A module written outside the module<> template, without a module_version constant: the factory
+// has to answer default_version, mirroring module_base.
 class bare_module : public atp::module_base {
    public:
     void initialize(atp::module_context&) override {}
@@ -40,14 +39,21 @@ class bare_module : public atp::module_base {
     const atp::io::outputs& outputs() const override {
         return outputs_;
     }
+    atp::io::properties& properties() override {
+        return properties_;
+    }
+    const atp::io::properties& properties() const override {
+        return properties_;
+    }
 
    private:
     atp::io::inputs inputs_;
     atp::io::outputs outputs_;
+    atp::io::properties properties_;
 };
 
-// Модуль с конфигом в конструкторе — для тестов связывания аргументов фабрикой.
-class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> {
+// A module configured through its constructor, for the argument binding tests.
+class configured_module : public atp::module<> {
    public:
     explicit configured_module(int value) : value_(value) {}
 
@@ -58,37 +64,6 @@ class configured_module : public atp::module<atp::io::inputs, atp::io::outputs> 
    private:
     int value_;
 };
-
-// Модуль с параметрами: конструктор берёт module_config первым аргументом.
-class params_module : public atp::module<atp::io::inputs, atp::io::outputs, "configured"> {
-   public:
-    explicit params_module(atp::module_config config) : config_(std::move(config)) {}
-    [[nodiscard]] const std::string& raw() const {
-        return config_.raw;
-    }
-
-   private:
-    atp::module_config config_;
-};
-
-// Параметры + связанные при регистрации аргументы фабрики.
-class params_with_args_module : public atp::module<atp::io::inputs, atp::io::outputs, "configured_args"> {
-   public:
-    params_with_args_module(atp::module_config config, int bound) : config_(std::move(config)), bound_(bound) {}
-    [[nodiscard]] const std::string& raw() const {
-        return config_.raw;
-    }
-    [[nodiscard]] int bound() const {
-        return bound_;
-    }
-
-   private:
-    atp::module_config config_;
-    int bound_;
-};
-
-// Пустой модуль с именем — для реестрового теста отказа от параметров.
-class named_plain_module : public atp::module<atp::io::inputs, atp::io::outputs, "plain"> {};
 
 }  // namespace
 
@@ -112,7 +87,7 @@ TEST(ModuleFactory, CreateReturnsWorkingModule) {
     atp::module_ptr module = factory.create();
     ASSERT_NE(module, nullptr);
     EXPECT_EQ(module->get_version(), atp::version(2, 1));
-    // каждый вызов create — новый экземпляр
+    // every create call yields a fresh instance
     EXPECT_NE(factory.create(), module);
 }
 
@@ -127,7 +102,7 @@ TEST(ModuleFactory, CreateReturnsModulePtrWithEmptyPin) {
     atp::module_factory<bare_module> factory{"bare"};
     atp::module_ptr module = factory.create();
     ASSERT_NE(module, nullptr);
-    EXPECT_EQ(module.get_deleter().pin, nullptr);  // монолит: пин пуст
+    EXPECT_EQ(module.get_deleter().pin, nullptr);  // monolithic: the pin is empty
 }
 
 TEST(ModuleFactory, CreateBindsConstructorArgs) {
@@ -136,31 +111,14 @@ TEST(ModuleFactory, CreateBindsConstructorArgs) {
     atp::module_ptr second = factory.create();
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
-    EXPECT_NE(first, second);  // независимые экземпляры от одного конфига
+    EXPECT_NE(first, second);  // independent instances from one configuration
     EXPECT_EQ(dynamic_cast<configured_module&>(*first).value(), 42);
     EXPECT_EQ(dynamic_cast<configured_module&>(*second).value(), 42);
 }
 
-TEST(ModuleFactory, PassesConfigStringToModule) {
-    atp::module_factory<params_module> factory("configured");
-    atp::module_ptr m = factory.create(R"({"rate": 10})");
-    EXPECT_EQ(static_cast<params_module&>(*m).raw(), R"({"rate": 10})");
-}
-
-TEST(ModuleFactory, ConfigComesFirstBoundArgsAfter) {
-    atp::module_factory<params_with_args_module, int> factory("configured_args", 42);
-    atp::module_ptr m = factory.create("cfg");
-    EXPECT_EQ(static_cast<params_with_args_module&>(*m).raw(), "cfg");
-    EXPECT_EQ(static_cast<params_with_args_module&>(*m).bound(), 42);
-}
-
-TEST(ModuleFactory, ParameterlessModuleRejectsNonEmptyConfig) {
-    atp::module_registry registry;
-    registry.add<params_module>();
-    registry.add<named_plain_module>();
-
-    EXPECT_EQ(static_cast<params_module&>(*registry.create("configured", R"("x")")).raw(), R"("x")");
-    EXPECT_NO_THROW((void)registry.create("plain"));  // пустой конфиг — норма
-    EXPECT_NO_THROW((void)registry.create("plain", ""));
-    EXPECT_THROW((void)registry.create("plain", "{}"), std::runtime_error);  // параметры некому принять
+// Per-instance parameters moved to properties, but binding constructor arguments at registration
+// time stayed: every factory has its own set, shared by all of its instances.
+TEST(ModuleFactory, BoundArgsReachEveryInstance) {
+    atp::module_factory<configured_module, int> factory("configured", 42);
+    EXPECT_EQ(dynamic_cast<configured_module&>(*factory.create()).value(), 42);
 }

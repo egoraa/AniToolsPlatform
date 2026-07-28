@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_validator.hpp>
+#include <atp/runtime/config_validator.hpp>
 #include <atp/studio/document.hpp>
 
 namespace {
@@ -14,8 +14,7 @@ namespace {
 class DocumentFiles : public ::testing::Test {
    protected:
     void SetUp() override {
-        dir_ = std::filesystem::path(::testing::TempDir()) /
-               ::testing::UnitTest::GetInstance()->current_test_info()->name();
+        dir_ = std::filesystem::temp_directory_path() / ::testing::UnitTest::GetInstance()->current_test_info()->name();
         std::filesystem::create_directories(dir_);
     }
 
@@ -29,12 +28,12 @@ class DocumentFiles : public ::testing::Test {
 };
 
 constexpr const char* sample_config = R"({
-    "version": "1.0",
+    "version": "2.0",
     "pipeline": {
-        "children": [
-            {"group": "left", "children": [{"module": "src"}],
+        "modules": [
+            {"group": "left", "modules": [{"module": "src"}],
              "expose": {"outputs": {"out": "src.value"}}},
-            {"group": "right", "children": [{"module": "sink"}],
+            {"group": "right", "modules": [{"module": "sink"}],
              "expose": {"inputs": {"in": "sink.value"}}}
         ],
         "connections": [{"from": "left.out", "to": "right.in"}]
@@ -45,8 +44,8 @@ constexpr const char* sample_config = R"({
 
 TEST_F(DocumentFiles, CreateStartsEmptyWithCurrentSchema) {
     const atp::studio::document doc = atp::studio::document::create();
-    EXPECT_EQ(doc.config().schema, atp::app::config_schema_version);
-    EXPECT_TRUE(doc.config().pipeline.children.empty());
+    EXPECT_EQ(doc.config().schema, atp::runtime::config_schema_version);
+    EXPECT_TRUE(doc.config().pipeline.modules.empty());
     EXPECT_FALSE(doc.had_includes());
 }
 
@@ -54,33 +53,33 @@ TEST_F(DocumentFiles, OpenReadsModelAndGroupAtNavigates) {
     const auto file = write("doc.json", sample_config);
     const atp::studio::document doc = atp::studio::document::open(file);
 
-    ASSERT_NE(doc.group_at(""), nullptr);  // корень
+    ASSERT_NE(doc.group_at(""), nullptr);  // the root
     ASSERT_NE(doc.group_at("left"), nullptr);
     EXPECT_EQ(doc.group_at("left")->name, "left");
-    EXPECT_EQ(doc.group_at("left.src"), nullptr);  // модуль — не группа
+    EXPECT_EQ(doc.group_at("left.src"), nullptr);  // a module is not a group
     EXPECT_EQ(doc.group_at("ghost"), nullptr);
     EXPECT_FALSE(doc.had_includes());
 }
 
 TEST_F(DocumentFiles, OpenRejectsInvalidConfigWithAggregatedErrors) {
-    const auto file = write("bad.json", R"({"version": "1.0", "pipeline": {"typo": 1}})");
+    const auto file = write("bad.json", R"({"version": "2.0", "pipeline": {"typo": 1}})");
     try {
         (void)atp::studio::document::open(file);
         FAIL() << "expected config_error";
-    } catch (const atp::app::config_error& e) {
-        EXPECT_NE(std::string(e.what()).find("typo"), std::string::npos);  // текст валидатора дошёл
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("typo"), std::string::npos);  // the validator's text came through
     }
 }
 
 TEST_F(DocumentFiles, OpenFlagsIncludes) {
-    write("part.json", R"({"group": "g", "children": []})");
+    write("part.json", R"({"group": "g", "modules": []})");
     const auto file = write("doc.json", R"({
-        "version": "1.0",
-        "pipeline": {"children": [{"$include": "part.json"}]}
+        "version": "2.0",
+        "pipeline": {"modules": [{"$include": "part.json"}]}
     })");
     const atp::studio::document doc = atp::studio::document::open(file);
-    EXPECT_TRUE(doc.had_includes());        // сохранение расплющит — предупредить
-    ASSERT_NE(doc.group_at("g"), nullptr);  // документ открыт развёрнутым
+    EXPECT_TRUE(doc.had_includes());        // saving would flatten it, so warn
+    ASSERT_NE(doc.group_at("g"), nullptr);  // the document opened expanded
 }
 
 TEST_F(DocumentFiles, SaveWritesValidConfigAndLayoutSidecar) {
@@ -94,7 +93,7 @@ TEST_F(DocumentFiles, SaveWritesValidConfigAndLayoutSidecar) {
 
     std::ifstream in(saved);
     const nlohmann::json written = nlohmann::json::parse(in);
-    EXPECT_TRUE(atp::app::validate(written).empty());  // файл пригоден для atp_app
+    EXPECT_TRUE(atp::runtime::validate(written).empty());  // the file is usable by atp_app
 
     const atp::studio::document reopened = atp::studio::document::open(saved);
     ASSERT_TRUE(reopened.position("left.src").has_value());
@@ -105,27 +104,27 @@ TEST_F(DocumentFiles, SaveWritesValidConfigAndLayoutSidecar) {
 TEST(DocumentEdit, BuildsPipelineThroughOperations) {
     atp::studio::document doc = atp::studio::document::create();
     doc.add_group("", "left");
-    doc.add_module("left", "counter", "ticks", atp::version{1, 0}, R"({"rate":10})");
+    doc.add_module("left", "counter", "ticks", atp::version{1, 0});
     doc.set_expose_output("left", "out", "ticks.count");
     doc.add_group("", "right");
-    doc.add_module("right", "printer");  // имя по умолчанию — имя фабрики
+    doc.add_module("right", "printer");  // the default name is the factory name
     doc.set_expose_input("right", "in", "printer.value");
     doc.connect("", "left.out", "right.in", true);
     doc.add_thread("main_loop", atp::thread_mode::throttled, std::chrono::milliseconds(5));
     doc.set_assignment("left", "main_loop");
     doc.add_plugin("libdemo.dll");
-    doc.add_plugin("libdemo.dll");  // дедуп: не операция, undo не растёт
+    doc.add_plugin("libdemo.dll");  // a duplicate is not an operation and does not grow undo
 
-    const atp::app::config& cfg = doc.config();
-    ASSERT_EQ(cfg.pipeline.children.size(), 2u);
-    EXPECT_EQ(cfg.pipeline.children[1].group->children[0].module->name, "printer");
+    const atp::runtime::config& cfg = doc.config();
+    ASSERT_EQ(cfg.pipeline.modules.size(), 2u);
+    EXPECT_EQ(cfg.pipeline.modules[1].group->modules[0].module->name, "printer");
     ASSERT_EQ(cfg.pipeline.connections.size(), 1u);
     EXPECT_TRUE(cfg.pipeline.connections[0].replay);
     ASSERT_EQ(cfg.threads.size(), 1u);
     ASSERT_EQ(cfg.assignments.size(), 1u);
     ASSERT_EQ(cfg.plugins.size(), 1u);
-    // построенное операциями проходит полный validate — инварианты те же
-    EXPECT_TRUE(atp::app::validate(atp::app::encode(cfg)).empty());
+    // what the operations built passes the full validate — the invariants are the same
+    EXPECT_TRUE(atp::runtime::validate(atp::runtime::encode(cfg)).empty());
 }
 
 TEST(DocumentEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
@@ -133,21 +132,19 @@ TEST(DocumentEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
     doc.add_group("", "g");
     doc.add_module("g", "counter");
 
-    EXPECT_THROW(doc.add_module("g", "counter"), atp::app::config_error);      // дубликат имени
-    EXPECT_THROW(doc.add_module("ghost", "counter"), atp::app::config_error);  // нет группы
-    EXPECT_THROW(doc.add_group("g", "bad.name"), atp::app::config_error);      // точка в имени
-    EXPECT_THROW(doc.connect("g", "no_dot", "counter.in"), atp::app::config_error);
-    EXPECT_THROW(doc.connect("g", "ghost.out", "counter.in"), atp::app::config_error);  // нет ребёнка
-    EXPECT_THROW(doc.set_params("g", "ghost", "{}"), atp::app::config_error);
-    EXPECT_THROW(doc.set_params("g", "counter", "{broken"), atp::app::config_error);         // не-JSON
-    EXPECT_THROW(doc.add_thread("t", atp::thread_mode::throttled), atp::app::config_error);  // период
-    EXPECT_THROW(doc.set_assignment("g", "nowhere"), atp::app::config_error);                // нет потока
+    EXPECT_THROW(doc.add_module("g", "counter"), atp::runtime::config_error);      // duplicate name
+    EXPECT_THROW(doc.add_module("ghost", "counter"), atp::runtime::config_error);  // no such group
+    EXPECT_THROW(doc.add_group("g", "bad.name"), atp::runtime::config_error);      // a dot in the name
+    EXPECT_THROW(doc.connect("g", "no_dot", "counter.in"), atp::runtime::config_error);
+    EXPECT_THROW(doc.connect("g", "ghost.out", "counter.in"), atp::runtime::config_error);       // no such child
+    EXPECT_THROW(doc.add_thread("t", atp::thread_mode::throttled), atp::runtime::config_error);  // no period
+    EXPECT_THROW(doc.set_assignment("g", "nowhere"), atp::runtime::config_error);                // no such thread
 
-    // после отказов откатываются ровно две успешные операции — и всё
+    // after the refusals exactly the two successful operations roll back, and nothing else
     EXPECT_TRUE(doc.undo());
     EXPECT_TRUE(doc.undo());
     EXPECT_FALSE(doc.can_undo());
-    EXPECT_TRUE(doc.config().pipeline.children.empty());
+    EXPECT_TRUE(doc.config().pipeline.modules.empty());
 }
 
 TEST(DocumentEdit, RemoveChildCleansReferences) {
@@ -162,12 +159,12 @@ TEST(DocumentEdit, RemoveChildCleansReferences) {
     doc.set_position("g.a", {1.0f, 2.0f});
 
     doc.remove_child("g", "a");
-    EXPECT_TRUE(doc.group_at("g")->connections.empty());     // связь с "a." умерла
-    EXPECT_TRUE(doc.group_at("g")->expose_outputs.empty());  // и экспорт
+    EXPECT_TRUE(doc.group_at("g")->connections.empty());     // the "a." connection is gone
+    EXPECT_TRUE(doc.group_at("g")->expose_outputs.empty());  // and so is the export
     EXPECT_EQ(doc.position("g.a"), std::nullopt);
 
-    doc.remove_child("", "g");                      // подгруппа целиком
-    EXPECT_TRUE(doc.config().assignments.empty());  // раскладка не осиротела
+    doc.remove_child("", "g");                      // the whole subgroup
+    EXPECT_TRUE(doc.config().assignments.empty());  // the layout was not orphaned
 }
 
 TEST(DocumentEdit, RenameChildRewritesReferences) {
@@ -187,7 +184,7 @@ TEST(DocumentEdit, RenameChildRewritesReferences) {
 
     doc.add_thread("t", atp::thread_mode::on_demand);
     doc.set_assignment("g", "t");
-    doc.rename_child("", "g", "stage");  // и путь в раскладке
+    doc.rename_child("", "g", "stage");  // the layout path follows too
     EXPECT_EQ(doc.config().assignments[0].first, "stage");
 }
 
@@ -196,13 +193,82 @@ TEST(DocumentEdit, UndoRedoWalkHistory) {
     EXPECT_FALSE(doc.can_undo());
     doc.add_group("", "g");
     doc.add_module("g", "m");
-    EXPECT_TRUE(doc.undo());  // откатили модуль
-    EXPECT_TRUE(doc.group_at("g")->children.empty());
-    EXPECT_TRUE(doc.redo());  // вернули
-    EXPECT_EQ(doc.group_at("g")->children.size(), 1u);
+    EXPECT_TRUE(doc.undo());  // the module was rolled back
+    EXPECT_TRUE(doc.group_at("g")->modules.empty());
+    EXPECT_TRUE(doc.redo());  // and brought back
+    EXPECT_EQ(doc.group_at("g")->modules.size(), 1u);
     EXPECT_TRUE(doc.undo());
-    doc.add_module("g", "other");  // новая ветка истории
-    EXPECT_FALSE(doc.can_redo());  // redo сброшен
+    doc.add_module("g", "other");  // a new branch of the history
+    EXPECT_FALSE(doc.can_redo());  // redo was cleared
+}
+
+TEST(DocumentEdit, SetPropertyAddsAndReplaces) {
+    auto doc = atp::studio::document::create();
+    doc.add_module("", "counter");
+    doc.set_property("", "counter", "limit", 5);
+    ASSERT_EQ(doc.config().pipeline.modules[0].module->properties.size(), 1u);
+    EXPECT_EQ(doc.config().pipeline.modules[0].module->properties[0].second, nlohmann::json(5));
+    doc.set_property("", "counter", "limit", 7);  // replaced, not duplicated
+    ASSERT_EQ(doc.config().pipeline.modules[0].module->properties.size(), 1u);
+    EXPECT_EQ(doc.config().pipeline.modules[0].module->properties[0].second, nlohmann::json(7));
+    EXPECT_TRUE(doc.can_undo());
+}
+
+TEST(DocumentEdit, SetPropertyRejectsNonScalarAndGhostModule) {
+    auto doc = atp::studio::document::create();
+    doc.add_module("", "counter");
+    EXPECT_THROW(doc.set_property("", "counter", "limit", nlohmann::json::object()), atp::runtime::config_error);
+    EXPECT_THROW(doc.set_property("", "ghost", "limit", 5), atp::runtime::config_error);
+}
+
+TEST(DocumentEdit, ClearPropertyRemovesPair) {
+    auto doc = atp::studio::document::create();
+    doc.add_module("", "counter");
+    doc.set_property("", "counter", "limit", 5);
+    doc.clear_property("", "counter", "limit");
+    EXPECT_TRUE(doc.config().pipeline.modules[0].module->properties.empty());
+    doc.clear_property("", "counter", "ghost");  // a missing entry is a no-op, not an error
+}
+
+// Changing the pacing of a thread must not cost it its assignments: that is why set_thread exists
+// instead of a remove/add pair, which would silently drop them.
+TEST(DocumentEdit, SetThreadKeepsAssignments) {
+    auto doc = atp::studio::document::create();
+    doc.add_thread("worker", atp::thread_mode::on_demand);
+    doc.add_group("", "inner");
+    doc.set_assignment("inner", "worker");
+
+    doc.set_thread("worker", atp::thread_mode::throttled, std::chrono::milliseconds{250});
+
+    ASSERT_EQ(doc.config().threads.size(), 1u);
+    EXPECT_EQ(doc.config().threads[0].mode, atp::thread_mode::throttled);
+    EXPECT_EQ(doc.config().threads[0].period, std::chrono::milliseconds{250});
+    ASSERT_EQ(doc.config().assignments.size(), 1u);
+    EXPECT_EQ(doc.config().assignments[0].second, "worker");
+}
+
+TEST(DocumentEdit, SetThreadRejectsContradictoryPeriod) {
+    auto doc = atp::studio::document::create();
+    doc.add_thread("worker", atp::thread_mode::throttled, std::chrono::milliseconds{100});
+
+    EXPECT_THROW(doc.set_thread("worker", atp::thread_mode::throttled, std::chrono::milliseconds{0}),
+                 atp::runtime::config_error);
+    EXPECT_THROW(doc.set_thread("worker", atp::thread_mode::on_demand, std::chrono::milliseconds{5}),
+                 atp::runtime::config_error);
+    EXPECT_THROW(doc.set_thread("missing", atp::thread_mode::on_demand), atp::runtime::config_error);
+    // A rejected change leaves the thread as it was.
+    EXPECT_EQ(doc.config().threads[0].period, std::chrono::milliseconds{100});
+}
+
+TEST(DocumentEdit, SetThreadIsUndoable) {
+    auto doc = atp::studio::document::create();
+    doc.add_thread("worker", atp::thread_mode::on_demand);
+
+    doc.set_thread("worker", atp::thread_mode::spinning);
+    EXPECT_EQ(doc.config().threads[0].mode, atp::thread_mode::spinning);
+
+    EXPECT_TRUE(doc.undo());
+    EXPECT_EQ(doc.config().threads[0].mode, atp::thread_mode::on_demand);
 }
 
 }  // namespace

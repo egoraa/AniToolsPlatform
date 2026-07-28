@@ -1,1 +1,5 @@
 * text eol=lf
+
+# The generated icon is binary: the blanket rule above would rewrite the line endings inside it and
+# corrupt the file.
+*.ico binary

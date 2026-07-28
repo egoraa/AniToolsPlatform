@@ -16,25 +16,27 @@
 
 namespace atp::io::detail {
 
-// Общая механика реестров входов и выходов; владеет элементами.
-// Наследник объявляет элементы ссылками:
-//     input<int>& number = make<input<int>>("number");
-// Некопируем: ссылки наследника привязаны к конкретным объектам в реестре.
-// НЕ потокобезопасен — make/remove/get относятся к фазе настройки.
-// kind — слово для сообщений об ошибках («input»/«output»); ожидается
-// строковый литерал, поэтому хранится как string_view без владения.
+/// Shared machinery of the input, output and property registries; owns its entries.
+///
+/// An heir declares entries as reference members: `input<int>& number = make<input<int>>("number")`.
+/// Non-copyable, since those references are bound to concrete objects inside the registry, and not
+/// thread-safe — make/remove/get belong to the setup phase.
+/// @tparam TBase type-erased base of the entries stored here
 template <std::derived_from<io_base> TBase>
 class io_registry {
    public:
     io_registry(const io_registry&) = delete;
     io_registry& operator=(const io_registry&) = delete;
 
-    template <std::derived_from<TBase> TItem>
-    TItem& make(std::string name, safety s = safe) {
-        auto item = std::make_unique<TItem>(name, s);
+    /// Creates and stores an entry. The argument tail is forwarded to the entry's constructor as
+    /// is: an input gets (name, safety), a property (name, default, tags).
+    /// @throws std::runtime_error if the name is already taken
+    template <std::derived_from<TBase> TItem, typename... TArgs>
+    TItem& make(std::string name, TArgs&&... args) {
+        auto item = std::make_unique<TItem>(name, std::forward<TArgs>(args)...);
         TItem& ref = *item;
-        // try_emplace без аргументов: при дубликате ничего не конструируется
-        // и item остаётся владельцем для текста ошибки.
+        // try_emplace without arguments: on a duplicate nothing is constructed and item still owns
+        // the entry, so its name is available for the error message.
         auto [it, inserted] = registry_.try_emplace(std::move(name));
         if (!inserted) {
             throw std::runtime_error("duplicate " + std::string(kind_) + " name '" + ref.name() + "'");
@@ -43,9 +45,10 @@ class io_registry {
         return ref;
     }
 
-    // Невладеющая запись: публикация чужого порта под именем этого реестра.
-    // Время жизни — контракт вызывающего: алиас живёт не дольше порта
-    // (в группе-композите гарантируется структурно — она владеет детьми).
+    /// Publishes someone else's port under a name of this registry, without taking ownership.
+    /// Lifetime is the caller's contract: the alias must not outlive the port (in a composite
+    /// group this holds structurally — it owns its children).
+    /// @throws std::runtime_error if the name is already taken
     template <std::derived_from<TBase> TItem>
     TItem& alias(std::string name, TItem& port) {
         auto [it, inserted] = registry_.try_emplace(std::move(name));
@@ -56,22 +59,21 @@ class io_registry {
         return port;
     }
 
-    // Точное совпадение динамического типа, а не dynamic_cast: queued_input<T>
-    // наследует input<T>, поэтому апкаст к базе прошёл бы и вернул вырожденный
-    // view. typeid(base) сравнивает именно конкретный вид элемента.
+    /// Looks an entry up by name, requiring an exact dynamic type match.
+    /// @throws std::runtime_error if there is no such entry or its kind differs
     template <std::derived_from<TBase> TItem>
     [[nodiscard]] TItem& get(const std::string& name) {
         TBase& base = at(name);
+        // Exact typeid rather than dynamic_cast: queued_input<T> derives from input<T>, so an
+        // upcast would succeed and hand out a degenerate view.
         if (typeid(base) != typeid(TItem)) {
             throw std::runtime_error(std::string(kind_) + " '" + name + "' has a different type");
         }
         return static_cast<TItem&>(base);
     }
 
-    // Type-erased доступ по имени — пара в духе std::map: at() бросает,
-    // find() возвращает nullptr. const-метод отдаёт неконстантную ссылку:
-    // запись хранит указатель, константность реестра не распространяется
-    // на порты.
+    /// Type-erased lookup by name.
+    /// @throws std::runtime_error if there is no such entry
     [[nodiscard]] TBase& at(const std::string& name) const {
         TBase* item = find(name);
         if (!item) {
@@ -80,16 +82,21 @@ class io_registry {
         return *item;
     }
 
+    /// Type-erased lookup by name; nullptr if there is no such entry. Const, yet hands out a
+    /// mutable reference: entries are held by pointer, so the registry's constness does not extend
+    /// to the ports.
     [[nodiscard]] TBase* find(const std::string& name) const {
         auto it = registry_.find(name);
         return it == registry_.end() ? nullptr : it->second.port;
     }
 
+    /// Drops the entry with this name.
+    /// @return false if there was no such entry
     bool remove(const std::string& name) {
         return registry_.erase(name) > 0;
     }
 
-    // Перечисление элементов — для будущей машинерии соединений.
+    /// Every entry, owned and aliased alike.
     [[nodiscard]] std::vector<const TBase*> list() const {
         std::vector<const TBase*> result;
         result.reserve(registry_.size());
@@ -99,8 +106,8 @@ class io_registry {
         return result;
     }
 
-    // Только владеемые порты — материал карты «порт → поток» у раннера:
-    // реестры групп содержат одни алиасы и выпадают из карты сами.
+    /// Owned entries only — the material for the runner's port-to-thread map, from which group
+    /// registries drop out on their own, holding nothing but aliases.
     [[nodiscard]] std::vector<TBase*> owned() const {
         std::vector<TBase*> result;
         for (const auto& [name, e] : registry_) {
@@ -112,13 +119,21 @@ class io_registry {
     }
 
    protected:
+    /// @param kind word for error messages ("input"/"output"); a string literal is expected, so it
+    ///        is stored as a non-owning view
     explicit io_registry(std::string_view kind) : kind_(kind) {}
-    ~io_registry() = default;  // защищённый: разрушение только через наследника
+
+    // Moving is allowed (the declared deleted copy constructor would otherwise suppress the
+    // implicit move): the map moves while the ports stay on the heap, so the heir's references and
+    // the established connections stay valid. Needed by the ports node and module(TPorts), where
+    // the node is wired up first and then moved inside. There is no move assignment — the heirs'
+    // reference members forbid it.
+    io_registry(io_registry&&) = default;
+    ~io_registry() = default;  // protected: destruction only through an heir
 
    private:
-    // Запись различает владение: у владеемой owned держит объект, у алиаса
-    // owned пуст — реестр публикует чужой порт (группа-композит показывает
-    // порты детей). port валиден всегда.
+    // An owned entry holds the object; for an alias `owned` is empty and the registry merely
+    // publishes someone else's port. `port` is valid either way.
     struct entry {
         std::unique_ptr<TBase> owned;
         TBase* port = nullptr;

@@ -13,18 +13,20 @@ namespace {
 struct source_outputs : atp::io::outputs {
     atp::io::output<int>& number = make<atp::io::output<int>>("number");
 };
+using source_ports = atp::io::ports<atp::io::inputs, source_outputs>;
 
 struct sink_inputs : atp::io::inputs {
-    atp::io::input<int>& number = make<atp::io::input<int>>("number");  // safe: границу потоков выбирает раскладка
+    atp::io::input<int>& number = make<atp::io::input<int>>("number");  // safe: the layout picks the thread boundary
     atp::io::queued_input<int>& history = make<atp::io::queued_input<int>>("history");
 };
+using sink_ports = atp::io::ports<sink_inputs>;
 
-// Источник: несколько значений и тишина — демо конечное.
-class source_module : public atp::module<atp::io::inputs, source_outputs, "source"> {
+// Source: a few values and then silence — the demo is finite.
+class source_module : public atp::module<source_ports, "source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         if (next_ > 3) {
-            return atp::work_status::idle;  // всё отправлено — потоку можно спать
+            return atp::work_status::idle;  // everything sent — the thread may sleep
         }
         outputs().number(next_++);
         return atp::work_status::busy;
@@ -34,7 +36,7 @@ class source_module : public atp::module<atp::io::inputs, source_outputs, "sourc
     int next_ = 1;
 };
 
-class sink_module : public atp::module<sink_inputs, atp::io::outputs, "sink"> {
+class sink_module : public atp::module<sink_ports, "sink"> {
    public:
     std::latch* done = nullptr;
 
@@ -60,7 +62,7 @@ int main() {
     atp::pipeline pipe;
     std::latch done(1);
 
-    // Вложенная группа с собственными портами: снаружи видны только алиасы.
+    // A nested group with ports of its own: only the aliases are visible from outside.
     atp::group& producers = pipe.root().add_group("producers");
     producers.make<source_module>();
     producers.expose_output("numbers", "source.number");
@@ -74,7 +76,7 @@ int main() {
     pipe.root().connect("producers.numbers", "consumers.numbers");
     pipe.root().connect("producers.numbers", "consumers.log");
 
-    // Раскладка развёртывания: именованные потоки с режимами.
+    // Deployment layout: named threads with modes.
     atp::pipeline_runner runner;
     runner.add_thread("producing");  // on_demand
     runner.add_thread("consuming", {atp::thread_mode::throttled, std::chrono::milliseconds(5)});

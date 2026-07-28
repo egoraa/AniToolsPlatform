@@ -1,0 +1,4 @@
+// The icon the executable itself wears: Explorer, the taskbar and any shortcut a user pins read it
+// out of the binary, not from anything Qt sets at runtime. Windows shows the first icon resource in
+// name order, and IDI_ICON1 is the name Qt's own documentation uses for it.
+IDI_ICON1 ICON "atp.ico"

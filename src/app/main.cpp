@@ -4,36 +4,63 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_loader.hpp>
-#include <atp/app/config_model.hpp>
-#include <atp/app/config_validator.hpp>
-#include <atp/app/pipeline_builder.hpp>
+#include <atp/runtime/config_loader.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/pipeline_builder.hpp>
+#include <atp/runtime/property_override.hpp>
 
 namespace {
 
-// Плоский флаг — единственное, что разрешено сигнальному обработчику.
+// A flat flag is the only thing a signal handler may touch.
 volatile std::sig_atomic_t g_stop = 0;
 
 void handle_signal(int) {
     g_stop = 1;
 }
 
+constexpr const char* usage = "usage: atp_app <config.json> [-p path.prop=value]...\n";
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: atp_app <config.json>\n";
+    // Argument parsing happens before the main try, so bad user input exits with code 2 like an
+    // invalid config, rather than 1, which means a pipeline failure.
+    std::filesystem::path config_path;
+    std::vector<atp::runtime::property_override> overrides;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            const std::string_view arg = argv[i];
+            if (arg == "-p") {
+                if (i + 1 == argc) {
+                    std::cerr << usage;
+                    return 2;
+                }
+                overrides.push_back(atp::runtime::parse_property_override(argv[++i]));
+            } else if (config_path.empty()) {
+                config_path = argv[i];
+            } else {
+                std::cerr << usage;
+                return 2;
+            }
+        }
+    } catch (const atp::runtime::config_error& e) {
+        std::cerr << "atp_app: " << e.what() << '\n';
+        return 2;
+    }
+    if (config_path.empty()) {
+        std::cerr << usage;
         return 2;
     }
     try {
-        const std::filesystem::path config_path = argv[1];
-        const nlohmann::json doc = atp::app::load_config(config_path);
-        const std::vector<std::string> errors = atp::app::validate(doc);
+        const nlohmann::json doc = atp::runtime::load_config(config_path);
+        const std::vector<std::string> errors = atp::runtime::validate(doc);
         if (!errors.empty()) {
             std::cerr << "invalid config '" << config_path.string() << "':\n";
             for (const std::string& e : errors) {
@@ -41,18 +68,30 @@ int main(int argc, char** argv) {
             }
             return 2;
         }
-        const atp::app::config cfg = atp::app::decode(doc);
+        const atp::runtime::config cfg = atp::runtime::decode(doc);
 
-        atp::app::application app;
-        atp::app::build(app, cfg, std::filesystem::weakly_canonical(config_path).parent_path());
+        atp::runtime::application app;
+        atp::runtime::build(app, cfg, std::filesystem::weakly_canonical(config_path).parent_path());
+
+        // Overrides are applied on top of the config before start: initialize runs inside
+        // runner.start, so a module already sees the values there. A failure is bad input rather
+        // than a crash, hence code 2 again.
+        try {
+            for (const atp::runtime::property_override& o : overrides) {
+                atp::runtime::apply_property_override(app.pipe.root(), o);
+            }
+        } catch (const atp::runtime::config_error& e) {
+            std::cerr << "atp_app: " << e.what() << '\n';
+            return 2;
+        }
 
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);
         app.runner.start(app.pipe);
         std::cout << "pipeline is running; press Ctrl+C to stop\n";
-        // Опрос вместо runner.wait(): wait блокируется до аварии, а нужен
-        // ещё и выход по Ctrl+C. Управление раннером — только этот поток
-        // (owner-thread-only контракт), опрос error() безопасен.
+        // Polling instead of runner.wait(): wait blocks until a failure, while Ctrl+C has to get us
+        // out too. The runner is driven by this thread alone (the owner-thread-only contract), so
+        // polling error() is safe.
         while (g_stop == 0 && app.runner.error() == nullptr) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }

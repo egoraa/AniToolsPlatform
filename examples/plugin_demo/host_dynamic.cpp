@@ -3,8 +3,7 @@
 
 #include <atp/module_loader.hpp>
 
-// Хост с плагином: модуль приезжает из динамической библиотеки, путь к ней
-// подставляет CMake (ATP_DEMO_PLUGIN).
+// Host with a plugin: the module arrives from a shared library whose path CMake substitutes.
 int main() {
     atp::module_registry registry;
     atp::module_loader plugin{ATP_DEMO_PLUGIN, registry};
@@ -22,7 +21,7 @@ int main() {
     counter->start();
     counter->iterate(std::stop_token{});
     counter->stop();
-    counter.reset();  // модуль умирает до загрузчика — контракт времени жизни
+    counter.reset();  // the module dies before the loader — the lifetime contract
     std::cout << "counter iterated once\n";
     return 0;
 }

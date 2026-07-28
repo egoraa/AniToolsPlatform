@@ -9,53 +9,50 @@
 
 namespace atp::io {
 
-// Приёмник уведомления «входу что-то доставили». Вешается исполнителем на
-// вход (set_notifier), чтобы будить спящий поток-потребитель, не нарушая
-// pull-only чтения: это не колбэк с данными, а голый сигнал. notify()
-// зовётся на потоке пишущего после приёма — обязан быть быстрым, не бросать
-// и не исполнять пользовательский код.
+/// Sink of the bare "something was delivered" signal, attached to an input by the executor to wake
+/// a sleeping consumer thread without breaking pull-only reading: it carries no value.
 class notifier_base {
    public:
+    /// Called on the writer's thread right after delivery. Must be fast, must not throw and must
+    /// not run user code.
     virtual void notify() noexcept = 0;
 
    protected:
-    ~notifier_base() = default;  // владение всегда снаружи — у исполнителя
+    ~notifier_base() = default;  // ownership always stays with the executor
 };
 
-// Type-erased база входа: именно её указатели хранит реестр inputs, её же
-// принимает output_base::connect и хранит output<T> в списке рассылки.
-// Определяет протокол доставки: вход сам отвечает, значения каких типов он
-// принимает (accepts) и как принять type-erased значение (deliver) —
-// выходу не нужны касты иерархии.
+/// Type-erased base of an input: what the inputs registry stores, what output_base::connect takes
+/// and what output<T> keeps in its subscriber list.
+///
+/// Defines the delivery protocol: the input itself answers which value types it accepts and how a
+/// type-erased value is stored, so the output needs no hierarchy casts.
 class input_base : public io_base {
    public:
     using io_base::io_base;
 
-    // Метаданные производимого типа со стороны выхода: тег + упаковщик в
-    // std::any. box нужен только универсальным входам (input<std::any>);
-    // типизированный вход кастует значение напрямую.
+    /// Metadata of the produced type, supplied by the output: the type tag plus a boxing function.
+    /// `box` is only used by universal inputs (input<std::any>); a typed input casts directly.
     struct erased_type {
         std::type_index type;
         std::any (*box)(const void*);
     };
 
-    // Одна инстанция метаданных на тип в пределах модуля (статик в
-    // inline-функции). В каждой DLL — своя копия: сравнивать адреса
-    // erased_type нельзя, использовать только содержимое.
+    /// Per-type metadata instance. Every DLL holds its own copy, so erased_type addresses must
+    /// never be compared — use the contents only.
     template <typename T>
     [[nodiscard]] static const erased_type& erased_of() {
         static const erased_type meta{typeid(T), [](const void* p) { return std::any(*static_cast<const T*>(p)); }};
         return meta;
     }
 
-    // Согласен ли вход принимать значения типа produced. Зовётся один раз
-    // при подключении, не на каждую доставку.
+    /// Whether the input accepts values of type @p produced. Called once, at connect time, not per
+    /// delivery.
     [[nodiscard]] virtual bool accepts(std::type_index produced) const = 0;
 
-    // Доставка значения: value указывает на объект типа meta.type.
-    // Корректность пары (value, meta) — протокольная гарантия выхода,
-    // подкреплённая проверкой accepts при подключении. NVI: приём — у
-    // наследника (do_deliver), уведомление — здесь, одно на любую доставку.
+    /// Delivers a value and fires the notifier.
+    /// @param value points at an object of type `meta.type`
+    /// @param meta metadata of the produced type; the pairing with @p value is guaranteed by the
+    ///        output and backed by the accepts() check performed at connect time
     void deliver(const void* value, const erased_type& meta) {
         do_deliver(value, meta);
         if (notifier_ != nullptr) {
@@ -63,13 +60,14 @@ class input_base : public io_base {
         }
     }
 
-    // Установка/снятие — фаза настройки исполнителя: строго до запуска
-    // потоков и после их join; конкурентно с доставкой — гонка. Прямая
-    // запись в вход (operator()) уведомителя не трогает: сигнал — про
-    // доставку от выходов.
+    /// Installs or clears the delivery notifier. Setup phase only: strictly before the threads
+    /// start and after they join — concurrent use with delivery is a race. Writing into the input
+    /// directly does not fire it; the signal is about delivery from outputs.
     void set_notifier(notifier_base* notifier) noexcept {
         notifier_ = notifier;
     }
+
+    /// Currently installed notifier, or nullptr.
     [[nodiscard]] notifier_base* notifier() const noexcept {
         return notifier_;
     }

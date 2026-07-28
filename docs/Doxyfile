@@ -1,0 +1,40 @@
+# Doxygen configuration for the AniToolsPlatform API reference.
+# Run from the project root: doxygen docs/Doxyfile
+# Only non-default options are listed; everything else keeps the doxygen defaults.
+
+PROJECT_NAME           = AniToolsPlatform
+PROJECT_BRIEF          = "Header-only C++23 platform for modular pipelines"
+OUTPUT_DIRECTORY       = build/doxygen
+
+# The module author's SDK plus the host runtime and studio core. Sources are included so the
+# comments in the .cpp files of the Qt layer are parsed as well; namespaces.dox documents the
+# namespaces themselves, without which doxygen would drop everything declared directly in them.
+INPUT                  = include src docs/namespaces.dox
+FILE_PATTERNS          = *.hpp *.cpp *.dox
+RECURSIVE              = YES
+
+# Only entities with a documentation block reach the reference: internals stay out instead of
+# padding the output with empty pages.
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = YES
+HIDE_UNDOC_MEMBERS     = YES
+HIDE_UNDOC_CLASSES     = YES
+
+# The convention is a brief first sentence in a /// block, no explicit \brief.
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+
+# Diagnostics that matter for the comments themselves: a mistyped @param name or a broken reference
+# is a real error. Undocumented internals are expected and stay silent.
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+
+# The export macro would otherwise hide the C symbols of the plugin contract.
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+PREDEFINED             = ATP_PLUGIN_EXPORT=
+
+GENERATE_LATEX         = NO
+SORT_MEMBER_DOCS       = NO

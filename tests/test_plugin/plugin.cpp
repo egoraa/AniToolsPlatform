@@ -1,11 +1,11 @@
 #include <atp/module.hpp>
 #include <atp/plugin.hpp>
 
-// Тестовый плагин для module_loader: корректный контракт, собственное имя
-// модуля из NTTP плюс алиас того же типа, версия модуля 2.0.
+// Test plugin for module_loader: a correct contract, the module's own name from the NTTP plus an
+// alias of the same type, module version 2.0.
 namespace {
 
-class plugin_module : public atp::module<atp::io::inputs, atp::io::outputs, "plugin_module", atp::ver<"2.0">> {};
+class plugin_module : public atp::module<atp::io::ports<>, "plugin_module", atp::ver<"2.0">> {};
 
 }  // namespace
 
@@ -14,6 +14,6 @@ ATP_PLUGIN_EXPORT unsigned atp_abi_version() {
 }
 
 ATP_PLUGIN_EXPORT void atp_register_modules(atp::module_registrar& registrar) {
-    registrar.add<plugin_module>();                // собственное имя "plugin_module"
-    registrar.add<plugin_module>("plugin_alias");  // алиас поверх собственного имени
+    registrar.add<plugin_module>();                // its own name, "plugin_module"
+    registrar.add<plugin_module>("plugin_alias");  // an alias on top of the own name
 }

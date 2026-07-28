@@ -12,71 +12,77 @@
 namespace atp::io {
 class inputs;
 class outputs;
+class properties;
 }  // namespace atp::io
 
 namespace atp {
 
-using work_status = io::work_status;  // сигнатура iterate пишется atp::work_status
+using work_status = io::work_status;  // so that iterate is written as atp::work_status
 
-// Type-erased база модуля — в одном ряду с io_base/input_base/output_base.
+/// Type-erased base of a module, the peer of io_base/input_base/output_base.
 class module_base {
    public:
     virtual ~module_base() = default;
 
-    // Контекст платформы модуль получает один раз — в initialize; кому он
-    // нужен позже, сохраняет ссылку у себя. В initialize модуль публикует
-    // свои интерфейсы (context.services.provide), в start ищет соседей
-    // (at/find по сохранённому контексту) — двухфазность делает порядок
-    // инициализации модулей неважным; в stop симметрично снимает публикации.
-    // stop() обязан быть корректен и после initialize без start: при ошибке
-    // каскада запуска исполнитель откатывается, вызывая stop всем прошедшим
-    // initialize. iterate — горячий путь, службы фазы настройки ему не
-    // передаются.
+    /// Wires the module up. Called once; whoever needs the context later stores the reference. Here
+    /// the module publishes its own interfaces (context.services.provide), and in start() it looks
+    /// peers up — the two phases make module initialisation order irrelevant.
     virtual void initialize(module_context& context) = 0;
+
+    /// Starts the module: peers are looked up here, since by now everyone has published.
     virtual void start() = 0;
+
+    /// One pass of the hot path. Gets no context by design.
+    /// @return busy if the module did or will do work, idle if it has nothing to do — this drives
+    ///         the runner's pacing
     virtual work_status iterate(std::stop_token stop_token) = 0;
+
+    /// Stops the module and removes its publications. Must be correct after initialize() without
+    /// start(): a failed start cascade rolls back by calling stop() on everything already
+    /// initialised.
     virtual void stop() = 0;
 
-    // Версия модуля для рантайм-сравнения через type-erased ссылку.
-    // Наследник, не объявивший версию, отвечает default_version; сама
-    // версия объявляется один раз — NTTP-параметром module (module.hpp),
-    // здесь только точка доступа. Имя get_version, а не STL-шное
-    // version() — имя занято типом atp::version (тот же приём, что
-    // std::vector::get_allocator при занятом allocator).
+    /// Module version through a type-erased reference; an heir that declared none answers
+    /// default_version. The version itself is declared once, as an NTTP of module (module.hpp).
+    /// Named get_version rather than version(), because atp::version is a type — the same trick as
+    /// std::vector::get_allocator.
     [[nodiscard]] virtual version get_version() const noexcept {
         return default_version;
     }
 
-    // Type-erased доступ к io-реестрам: машинерия соединений (group)
-    // работает с модулем через unique_ptr<module_base> и без этих
-    // аксессоров не видела бы портов. module<> реализует их ковариантным
-    // override — авторам модулей ничего делать не нужно.
+    /// Type-erased access to the io registries, without which the connection machinery — working
+    /// through unique_ptr<module_base> — would not see the ports. module<> implements these as
+    /// covariant overrides, so module authors need to do nothing.
     [[nodiscard]] virtual io::inputs& inputs() = 0;
     [[nodiscard]] virtual const io::inputs& inputs() const = 0;
     [[nodiscard]] virtual io::outputs& outputs() = 0;
     [[nodiscard]] virtual const io::outputs& outputs() const = 0;
 
-    // Имя модуля через type-erased ссылку — симметрично get_version.
-    // Модуль, не объявивший имени, — «аноним»: пустой string_view
-    // (аналог default_version у версии). Имя объявляется один раз —
-    // NTTP-параметром module (module.hpp), здесь только точка доступа.
+    /// A module's third registry: the setting values edited on the fly, which the builder, the CLI
+    /// and studio all reach through this type-erased path.
+    [[nodiscard]] virtual io::properties& properties() = 0;
+    [[nodiscard]] virtual const io::properties& properties() const = 0;
+
+    /// Module name through a type-erased reference, symmetrical to get_version. A module that
+    /// declared no name is anonymous and answers an empty view.
     [[nodiscard]] virtual std::string_view get_name() const noexcept {
         return {};
     }
 };
 
-// Делетер модуля с пином: shared_ptr удерживает библиотеку плагина от
-// выгрузки, пока жив модуль, — его vtable и код деструктора лежат в ней.
-// У монолитных модулей пин пуст (обычный delete). Пин — член делетера,
-// а не контрол-блок shared_ptr: владение модулем остаётся уникальным.
+/// Module deleter carrying a pin: the shared_ptr holds the plugin library against unloading while
+/// the module lives, since its vtable and destructor code sit inside it. For monolithic modules the
+/// pin is empty and this is a plain delete. The pin is a member of the deleter rather than a
+/// shared_ptr control block, so ownership of the module stays unique.
 struct module_deleter {
     std::shared_ptr<void> pin{};
 
     void operator()(module_base* m) const noexcept {
-        delete m;  // пин ещё жив (член делетера) — код деструктора доступен
+        delete m;  // the pin is a deleter member, so the destructor code is still mapped
     }
 };
 
+/// Owning pointer to a module.
 using module_ptr = std::unique_ptr<module_base, module_deleter>;
 
 }  // namespace atp

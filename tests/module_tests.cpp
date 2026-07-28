@@ -3,6 +3,7 @@
 #include <string_view>
 #include <typeindex>
 #include <typeinfo>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -10,34 +11,36 @@
 
 namespace {
 
-struct test_inputs : atp::io::inputs {
+struct test_in : atp::io::inputs {
     atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
     atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
 };
+using test_ports = atp::io::ports<test_in>;
 
-class test_module : public atp::module<test_inputs, atp::io::outputs> {
+class test_module : public atp::module<test_ports> {
    public:
+    using module::module;  // the constructor taking a ready node, for the move test
     void initialize(atp::module_context&) override {
         initialized = true;
     }
     bool initialized = false;
 };
 
-class versioned_module : public atp::module<test_inputs, atp::io::outputs, "", atp::version{1, 2, 3}> {};
+class versioned_module : public atp::module<test_ports, "", atp::version{1, 2, 3}> {};
 
-// имя третьим NTTP-параметром; версия не указана — default_version
-class named_module : public atp::module<test_inputs, atp::io::outputs, "named"> {};
+// the name as the second NTTP; no version given, so default_version applies
+class named_module : public atp::module<test_ports, "named"> {};
 
-// имя и версия вместе
-class full_module : public atp::module<test_inputs, atp::io::outputs, "full", atp::version{1, 2, 3}> {};
+// name and version together
+class full_module : public atp::module<test_ports, "full", atp::version{1, 2, 3}> {};
 
 }  // namespace
 
-// Compile-time доступ к версии — прямо из типа модуля.
+// Compile-time access to the version, straight from the module type.
 static_assert(versioned_module::module_version == atp::version{1, 2, 3});
 static_assert(test_module::module_version == atp::default_version);
 
-// Compile-time доступ к имени — прямо из типа модуля.
+// Compile-time access to the name, straight from the module type.
 static_assert(test_module::module_name.empty());
 static_assert(named_module::module_name == "named");
 static_assert(full_module::module_name == "full");
@@ -57,7 +60,7 @@ TEST(Module, InputsReturnsReference) {
     module.inputs().input1(42);
     std::string world = "World";
     module.inputs().input2(world);
-    // записи не пропадают во временной копии — inputs() отдаёт ссылку на член
+    // the entries do not vanish into a temporary copy — inputs() hands out a reference
     EXPECT_EQ(module.inputs().input1.get(), 42);
     EXPECT_EQ(module.inputs().input2.get(), "World");
 }
@@ -76,10 +79,33 @@ TEST(Module, ConstAccess) {
     EXPECT_FALSE(cmodule.inputs().input1.empty());
 }
 
+TEST(Module, PortsAreNodePorts) {
+    // A module's ports are the ports of the node it was given. The addresses compared are those of
+    // the ports rather than the sections: sections are members of the node and move by value,
+    // while the ports live on the heap and a move leaves them alone.
+    test_ports ports;
+    atp::io::input<int>* input1 = &ports.in.input1;
+    atp::io::input<std::string>* input2 = &ports.in.input2;
+    test_module module{std::move(ports)};
+    EXPECT_EQ(&module.inputs().input1, input1);
+    EXPECT_EQ(&module.inputs().input2, input2);
+}
+
+TEST(Module, ConstructedFromPrewiredPorts) {
+    // The node is wired up before the module and taken over by its constructor; the connection
+    // survives the move, the ports being on the heap.
+    atp::io::output<int> feeder{"feeder"};
+    test_ports ports;
+    feeder.connect(ports.in.input1);
+    test_module module{std::move(ports)};
+    feeder(11);
+    EXPECT_EQ(module.inputs().input1.get(), 11);
+}
+
 TEST(Module, DefaultVersionThroughBase) {
     test_module module;
     atp::module_base& base = module;
-    // Модуль, не объявивший версию, отвечает 0.0.1
+    // A module that declared no version answers 0.0.1.
     EXPECT_EQ(base.get_version(), atp::default_version);
     EXPECT_EQ(base.get_version(), atp::version(0, 0, 1));
 }
@@ -88,14 +114,14 @@ TEST(Module, DeclaredVersionThroughBase) {
     versioned_module module;
     atp::module_base& base = module;
     EXPECT_EQ(base.get_version(), atp::version(1, 2, 3));
-    // Сравнение с версией другой длины: 1.2 == 1.2.0 < 1.2.3
+    // Comparison against a version of another length: 1.2 == 1.2.0 < 1.2.3.
     EXPECT_GT(base.get_version(), atp::version(1, 2));
 }
 
 TEST(Module, DefaultNameThroughBaseIsEmpty) {
     test_module module;
     atp::module_base& base = module;
-    // Модуль, не объявивший имени, — «аноним»: пустой string_view
+    // A module that declared no name is anonymous: an empty string_view.
     EXPECT_EQ(base.get_name(), std::string_view{});
 }
 
@@ -106,16 +132,17 @@ TEST(Module, DeclaredNameThroughBase) {
 }
 
 namespace {
-struct erased_probe_inputs : atp::io::inputs {
+struct erased_probe_in : atp::io::inputs {
     atp::io::input<int>& number = make<atp::io::input<int>>("number");
 };
-class erased_probe : public atp::module<erased_probe_inputs, atp::io::outputs> {};
+using erased_probe_ports = atp::io::ports<erased_probe_in>;
+class erased_probe : public atp::module<erased_probe_ports> {};
 }  // namespace
 
 TEST(Module, IoRegistriesReachableThroughBase) {
     erased_probe m;
     atp::module_base& base = m;
-    // Реестры через type-erased базу — те же объекты, что у конкретного типа.
+    // The registries reached through the type-erased base are the same objects.
     EXPECT_EQ(&base.inputs(), static_cast<atp::io::inputs*>(&m.inputs()));
     EXPECT_NE(base.inputs().find("number"), nullptr);
     EXPECT_EQ(base.outputs().list().size(), 0u);
@@ -123,6 +150,37 @@ TEST(Module, IoRegistriesReachableThroughBase) {
 
 TEST(Module, DefaultIterateReportsIdle) {
     erased_probe m;
-    // Умолчание module<>: no-op-итерация и есть простой.
+    // The module<> default: a no-op iteration is exactly what idle means.
     EXPECT_EQ(m.iterate(std::stop_token{}), atp::work_status::idle);
+}
+
+namespace {
+
+struct counter_props : atp::io::properties {
+    atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
+};
+using counter_props_ports = atp::io::ports<atp::io::inputs, atp::io::outputs, counter_props>;
+
+class propertied_module : public atp::module<counter_props_ports, "propertied"> {};
+
+}  // namespace
+
+TEST(Module, PropertiesCovariantAccess) {
+    propertied_module m;
+    EXPECT_EQ(m.properties().step.get(), 1);  // the concrete type sees its own section
+}
+
+TEST(Module, PropertiesReachableThroughBase) {
+    propertied_module m;
+    atp::module_base& base = m;
+    atp::io::property_base* p = base.properties().find("step");
+    ASSERT_NE(p, nullptr);
+    p->from_string("5");
+    EXPECT_EQ(m.properties().step.get(), 5);
+    EXPECT_TRUE(m.properties().step.changed());
+}
+
+TEST(Module, DefaultModuleHasEmptyProperties) {
+    atp::module<> m;
+    EXPECT_TRUE(m.properties().list().empty());
 }

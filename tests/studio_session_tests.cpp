@@ -8,9 +8,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/app/config_model.hpp>
-#include <atp/app/config_validator.hpp>
 #include <atp/module.hpp>
+#include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_validator.hpp>
 #include <atp/studio/module_manager.hpp>
 #include <atp/studio/session.hpp>
 #include <atp/studio/value_format.hpp>
@@ -32,8 +32,10 @@ struct feed_outputs : atp::io::outputs {
 struct drain_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
+using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
+using drain_ports = atp::io::ports<drain_inputs>;
 
-class studio_source : public atp::module<atp::io::inputs, feed_outputs, "studio_source"> {
+class studio_source : public atp::module<feed_ports, "studio_source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         if (sent_) {
@@ -48,28 +50,40 @@ class studio_source : public atp::module<atp::io::inputs, feed_outputs, "studio_
     bool sent_ = false;
 };
 
-class studio_sink : public atp::module<drain_inputs, atp::io::outputs, "studio_sink"> {
+class studio_sink : public atp::module<drain_ports, "studio_sink"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         return inputs().value.try_pop() ? atp::work_status::busy : atp::work_status::idle;
     }
 };
 
-atp::app::config session_config() {
+// A module carrying a property: on-the-fly edits are checked against the live tree.
+struct target_props : atp::io::properties {
+    atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
+};
+class target_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
+
+atp::runtime::config make_config(const char* text) {
+    const nlohmann::json doc = nlohmann::json::parse(text);
+    EXPECT_TRUE(atp::runtime::validate(doc).empty());
+    return atp::runtime::decode(doc);
+}
+
+atp::runtime::config session_config() {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "1.0",
+        "version": "2.0",
         "pipeline": {
-            "children": [
-                {"group": "left", "children": [{"module": "studio_source", "name": "src"}],
+            "modules": [
+                {"group": "left", "modules": [{"module": "studio_source", "name": "src"}],
                  "expose": {"outputs": {"out": "src.value"}}},
-                {"group": "right", "children": [{"module": "studio_sink", "name": "sink"}],
+                {"group": "right", "modules": [{"module": "studio_sink", "name": "sink"}],
                  "expose": {"inputs": {"in": "sink.value"}}}
             ],
             "connections": [{"from": "left.out", "to": "right.in"}]
         }
     })");
-    EXPECT_TRUE(atp::app::validate(doc).empty());
-    return atp::app::decode(doc);
+    EXPECT_TRUE(atp::runtime::validate(doc).empty());
+    return atp::runtime::decode(doc);
 }
 
 TEST(StudioSession, RunsConfigSamplesConnectionsAndRestarts) {
@@ -81,16 +95,16 @@ TEST(StudioSession, RunsConfigSamplesConnectionsAndRestarts) {
     EXPECT_FALSE(s.running());
     EXPECT_TRUE(s.stats().empty());
 
-    const atp::app::config cfg = session_config();
+    const atp::runtime::config cfg = session_config();
     s.start(cfg);
     EXPECT_TRUE(s.running());
 
-    // ждём прохождения значения по единственной связи корня (таймаут щедрый)
+    // wait for a value to travel along the root's only connection; the timeout is generous
     std::optional<std::string> seen;
     for (int i = 0; i < 500 && !seen; ++i) {
         for (const auto& sample : s.sample_connections()) {
             if (sample.writes > 0 && sample.value) {
-                EXPECT_EQ(sample.group_path, "");  // соединение объявлено в корне
+                EXPECT_EQ(sample.group_path, "");  // the connection is declared in the root
                 EXPECT_EQ(sample.index, 0u);
                 seen = atp::studio::format_value(*sample.value);
             }
@@ -102,7 +116,7 @@ TEST(StudioSession, RunsConfigSamplesConnectionsAndRestarts) {
 
     s.stop();
     EXPECT_FALSE(s.running());
-    s.start(cfg);  // повторный запуск — свежий пайплайн
+    s.start(cfg);  // a second run gets a fresh pipeline
     s.stop();
 }
 
@@ -110,15 +124,29 @@ TEST(StudioSession, BuildFailureLeavesSessionClean) {
     atp::studio::module_manager manager;
     atp::studio::session s(manager.registry());
 
-    const atp::app::config cfg = session_config();  // модули не зарегистрированы
-    EXPECT_THROW(s.start(cfg), atp::app::config_error);
+    const atp::runtime::config cfg = session_config();  // the modules are not registered
+    EXPECT_THROW(s.start(cfg), atp::runtime::config_error);
     EXPECT_FALSE(s.running());
     EXPECT_TRUE(s.sample_connections().empty());
 
     manager.registry().add<studio_source>();
     manager.registry().add<studio_sink>();
-    s.start(cfg);  // сессия пригодна после отказа
+    s.start(cfg);  // the session is usable after a failure
     s.stop();
+}
+
+TEST(StudioSession, SetPropertyReachesLiveModule) {
+    atp::module_registry registry;
+    registry.add<target_module>();
+    atp::studio::session s(registry);
+    EXPECT_THROW(s.set_property({"target", "limit", "5"}), std::logic_error);  // nothing is running
+    s.start(make_config(R"({"version": "2.0", "pipeline": {"modules": [{"module": "target"}]}})"));
+    s.set_property({"target", "limit", "42"});
+    auto* m = s.live_root()->find_module("target");
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->properties().at("limit").to_string(), "42");
+    s.stop();
+    EXPECT_EQ(s.live_root(), nullptr) << "there is no live tree after stop";
 }
 
 }  // namespace

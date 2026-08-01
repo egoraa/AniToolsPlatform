@@ -14,9 +14,9 @@ namespace atp::runtime {
 /// An edit of one property addressed by its path in the group tree; the sources are the -p flag of
 /// atp_app ("group.module.prop=value") and studio's on-the-fly edits.
 struct property_override {
-    std::string module_path;  // module path in the group tree, segments separated by '.'
-    std::string name;         // property name
-    std::string value;        // string value, parsed by the property itself
+    std::string module_path;
+    std::string name;
+    std::string value;
 };
 
 /// Parses "path.prop=value": splitting on the FIRST '=' (a value may contain one) and then, to the
@@ -84,4 +84,4 @@ inline void apply_property_override(group& root, const property_override& o) {
 
 }  // namespace atp::runtime
 
-#endif  // ATP_RUNTIME_PROPERTY_OVERRIDE_HPP
+#endif

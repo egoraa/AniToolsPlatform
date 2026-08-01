@@ -14,4 +14,4 @@ struct module_context {
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_MODULE_CONTEXT_HPP
+#endif

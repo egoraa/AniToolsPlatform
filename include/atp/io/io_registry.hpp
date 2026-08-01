@@ -13,6 +13,7 @@
 
 #include <atp/io/io_base.hpp>
 #include <atp/io/threading.hpp>
+#include <atp/type_compare.hpp>
 
 namespace atp::io::detail {
 
@@ -35,8 +36,6 @@ class io_registry {
     TItem& make(std::string name, TArgs&&... args) {
         auto item = std::make_unique<TItem>(name, std::forward<TArgs>(args)...);
         TItem& ref = *item;
-        // try_emplace without arguments: on a duplicate nothing is constructed and item still owns
-        // the entry, so its name is available for the error message.
         auto [it, inserted] = registry_.try_emplace(std::move(name));
         if (!inserted) {
             throw std::runtime_error("duplicate " + std::string(kind_) + " name '" + ref.name() + "'");
@@ -64,9 +63,7 @@ class io_registry {
     template <std::derived_from<TBase> TItem>
     [[nodiscard]] TItem& get(const std::string& name) {
         TBase& base = at(name);
-        // Exact typeid rather than dynamic_cast: queued_input<T> derives from input<T>, so an
-        // upcast would succeed and hand out a degenerate view.
-        if (typeid(base) != typeid(TItem)) {
+        if (!same_type(typeid(base), typeid(TItem))) {
             throw std::runtime_error(std::string(kind_) + " '" + name + "' has a different type");
         }
         return static_cast<TItem&>(base);
@@ -123,17 +120,10 @@ class io_registry {
     ///        is stored as a non-owning view
     explicit io_registry(std::string_view kind) : kind_(kind) {}
 
-    // Moving is allowed (the declared deleted copy constructor would otherwise suppress the
-    // implicit move): the map moves while the ports stay on the heap, so the heir's references and
-    // the established connections stay valid. Needed by the ports node and module(TPorts), where
-    // the node is wired up first and then moved inside. There is no move assignment — the heirs'
-    // reference members forbid it.
     io_registry(io_registry&&) = default;
-    ~io_registry() = default;  // protected: destruction only through an heir
+    ~io_registry() = default;
 
    private:
-    // An owned entry holds the object; for an alias `owned` is empty and the registry merely
-    // publishes someone else's port. `port` is valid either way.
     struct entry {
         std::unique_ptr<TBase> owned;
         TBase* port = nullptr;
@@ -145,4 +135,4 @@ class io_registry {
 
 }  // namespace atp::io::detail
 
-#endif  // ANITOOLSPLATFORM_IO_IO_REGISTRY_HPP
+#endif

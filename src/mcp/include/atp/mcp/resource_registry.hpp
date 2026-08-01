@@ -55,4 +55,4 @@ class resource_registry {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_RESOURCE_REGISTRY_HPP
+#endif

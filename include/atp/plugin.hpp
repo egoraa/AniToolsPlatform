@@ -41,4 +41,4 @@ inline constexpr const char* register_modules_symbol = "atp_register_modules";
 #define ATP_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
 #endif
 
-#endif  // ANITOOLSPLATFORM_PLUGIN_HPP
+#endif

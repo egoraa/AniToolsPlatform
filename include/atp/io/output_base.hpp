@@ -57,10 +57,9 @@ class output_base : public io_base {
     [[nodiscard]] virtual std::uint64_t write_count() const = 0;
 
    private:
-    // Single connection point: the heir checks compatibility and adds the input to its list.
     virtual void do_connect(input_base& in, bool deliver_cached) = 0;
 };
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_OUTPUT_BASE_HPP
+#endif

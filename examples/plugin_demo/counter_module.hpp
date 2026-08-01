@@ -29,8 +29,6 @@ using counter_ports = atp::io::ports<atp::io::inputs, counter_outputs, counter_p
 /// Counts upwards from start_at, emitting one value per pass.
 class counter_module : public atp::module<counter_ports, "counter", atp::ver<"1.0">> {
    public:
-    // The start of the sequence is fixed at start time: editing start_at on the fly must not pull
-    // an already running count backwards.
     void start() override {
         next_ = properties().start_at.get();
     }
@@ -38,10 +36,8 @@ class counter_module : public atp::module<counter_ports, "counter", atp::ver<"1.
     atp::work_status iterate(std::stop_token) override {
         outputs().count(next_);
         outputs().label("tick " + std::to_string(next_));
-        // The step is read every pass, so an on-the-fly edit (studio, -p) changes the sequence
-        // immediately — which is exactly what the pull model allows.
         next_ += properties().step.get();
-        return atp::work_status::busy;  // the counter does work on every call
+        return atp::work_status::busy;
     }
 
    private:
@@ -50,4 +46,4 @@ class counter_module : public atp::module<counter_ports, "counter", atp::ver<"1.
 
 }  // namespace demo
 
-#endif  // ATP_EXAMPLES_PLUGIN_DEMO_COUNTER_MODULE_HPP
+#endif

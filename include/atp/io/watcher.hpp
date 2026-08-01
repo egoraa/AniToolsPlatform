@@ -57,8 +57,6 @@ class watcher {
     }
 
    private:
-    // Rules are polymorphic, so future kinds (predicates, a whole-queue batch handler) are new
-    // watch overloads rather than a redesign.
     struct rule_base {
         virtual ~rule_base() = default;
         virtual work_status poll() = 0;
@@ -117,4 +115,4 @@ class watcher {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_WATCHER_HPP
+#endif

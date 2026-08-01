@@ -32,12 +32,12 @@ class server {
     /// @param message a decoded JSON-RPC message
     /// @return the response, or nullopt for a notification, which must not be answered
     [[nodiscard]] std::optional<nlohmann::json> handle(const nlohmann::json& message) {
-        nlohmann::json id;  // kept outside the try, so a failure after parsing still echoes the id
+        nlohmann::json id;
         try {
             const rpc_request request = parse_request(message);
             id = request.id;
             if (request.notification()) {
-                return std::nullopt;  // initialized, cancelled, progress — nothing to answer
+                return std::nullopt;
             }
             return make_result(id, dispatch(request));
         } catch (const rpc_error& e) {
@@ -73,7 +73,6 @@ class server {
     [[nodiscard]] static nlohmann::json initialize() {
         return nlohmann::json{
             {"protocolVersion", protocol_version},
-            // Neither list changes at runtime, so listChanged is left out rather than declared false.
             {"capabilities", {{"tools", nlohmann::json::object()}, {"resources", nlohmann::json::object()}}},
             {"serverInfo", {{"name", server_name}, {"version", server_version}}}};
     }
@@ -85,7 +84,6 @@ class server {
         const auto name = params.at("name").get<std::string>();
         const tool* t = tools_->find(name);
         if (t == nullptr) {
-            // An unknown tool is a malformed request, not a failed call — hence a protocol error.
             throw rpc_error(rpc_invalid_params, "unknown tool '" + name + "'");
         }
         const nlohmann::json arguments =
@@ -98,8 +96,6 @@ class server {
             }
             return result;
         } catch (const std::exception& e) {
-            // Everything the studio throws lands here. Its messages are written for a human and are
-            // exactly what lets the model correct itself, so they are passed through verbatim.
             return nlohmann::json{{"content", text_content(e.what())}, {"isError", true}};
         }
     }
@@ -127,4 +123,4 @@ class server {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_SERVER_HPP
+#endif

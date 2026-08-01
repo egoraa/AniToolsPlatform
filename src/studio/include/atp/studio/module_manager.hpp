@@ -8,6 +8,11 @@
 #include <utility>
 #include <vector>
 
+#include <atp/io/input_base.hpp>
+#include <atp/io/inputs.hpp>
+#include <atp/io/output_base.hpp>
+#include <atp/io/outputs.hpp>
+#include <atp/io/properties.hpp>
 #include <atp/io/property_base.hpp>
 #include <atp/module_loader.hpp>
 #include <atp/module_registry.hpp>
@@ -25,9 +30,9 @@ struct port_info {
 /// probe module it was taken from.
 struct property_info {
     std::string name;
-    io::property_kind kind;            // hint for the inspector widget
-    std::string default_value;         // default in string form, for the comparison made on save
-    std::vector<std::string> options;  // non-empty for enumerations: the drop-down items
+    io::property_kind kind;
+    std::string default_value;
+    std::vector<std::string> options;
     bool persistent = true;
 };
 
@@ -38,7 +43,7 @@ struct module_info {
     std::vector<port_info> inputs;
     std::vector<port_info> outputs;
     std::vector<property_info> properties;
-    bool broken = false;  // the probe instance could not be created
+    bool broken = false;
     std::string error;
 };
 
@@ -46,7 +51,7 @@ struct module_info {
 struct plugin_info {
     std::filesystem::path path;
     bool loaded = false;
-    std::string error;  // reason for the refusal, meant for the user rather than a log
+    std::string error;
     std::vector<module_info> modules;
 };
 
@@ -67,7 +72,7 @@ class module_manager {
         }
     }
 
-    /// Removes a search directory. The DLLs already loaded from it stay: an open document may
+    /// Removes a search directory. The DLLs already loaded from it stay: an open project may
     /// reference their modules, and unloading from under it is worse than a stale entry.
     /// @return false if the directory was not in the list
     bool remove_search_dir(const std::filesystem::path& dir) {
@@ -110,7 +115,7 @@ class module_manager {
             info.loaded = true;
             loaders_.push_back(std::move(loader));
         } catch (const std::exception& e) {
-            info.error = e.what();  // the loader has already rolled the partial registration back
+            info.error = e.what();
         }
         if (existing != nullptr) {
             *existing = std::move(info);
@@ -150,11 +155,7 @@ class module_manager {
 
    private:
     [[nodiscard]] static bool is_plugin_file(const std::filesystem::path& p) {
-#if defined(_WIN32)
-        return p.extension() == ".dll";
-#else
-        return p.extension() == ".so";
-#endif
+        return p.extension() == plugin_extension;
     }
 
     [[nodiscard]] plugin_info* find_info(const std::filesystem::path& canonical) {
@@ -166,8 +167,6 @@ class module_manager {
         return nullptr;
     }
 
-    // Member order is destruction order reversed: the loaders withdraw their factories from the
-    // registry, so the registry has to outlive them.
     module_registry registry_;
     std::vector<module_loader> loaders_;
     std::vector<plugin_info> plugins_;
@@ -176,4 +175,4 @@ class module_manager {
 
 }  // namespace atp::studio
 
-#endif  // ATP_STUDIO_MODULE_MANAGER_HPP
+#endif

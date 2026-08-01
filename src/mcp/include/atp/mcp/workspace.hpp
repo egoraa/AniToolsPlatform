@@ -8,14 +8,14 @@
 #include <vector>
 
 #include <atp/runtime/config_model.hpp>
-#include <atp/studio/document.hpp>
 #include <atp/studio/module_manager.hpp>
+#include <atp/studio/project.hpp>
 #include <atp/studio/session.hpp>
 
 namespace atp::mcp {
 
 /// Everything one server process edits and runs: the same three objects the GUI owns, plus the path
-/// policy. There is exactly one of each — the agent works on one document at a time, the way a
+/// policy. There is exactly one of each — the agent works on one project at a time, the way a
 /// studio window does.
 class workspace {
    public:
@@ -35,9 +35,6 @@ class workspace {
             plugin_dirs_.push_back(canonical);
             modules_.add_search_dir(std::move(canonical));
         }
-        // The catalog is filled here rather than on the first request: an agent's opening move is to
-        // list the modules, and an empty answer is indistinguishable from a host that has none.
-        // A failing plugin is recorded in its plugin_info, so this cannot throw a startup away.
         modules_.rescan();
     }
 
@@ -46,12 +43,12 @@ class workspace {
         return modules_;
     }
 
-    /// The edited document.
-    [[nodiscard]] studio::document& doc() {
-        return document_;
+    /// The edited project.
+    [[nodiscard]] studio::project& project() {
+        return project_;
     }
 
-    /// The execution of that document.
+    /// The execution of that project.
     [[nodiscard]] studio::session& run_session() {
         return session_;
     }
@@ -61,16 +58,16 @@ class workspace {
         return root_;
     }
 
-    /// Where the document was last opened from or saved to; nullopt for a document that has never
+    /// Where the project was last opened from or saved to; nullopt for a project that has never
     /// touched the disk.
-    [[nodiscard]] const std::optional<std::filesystem::path>& document_path() const {
-        return document_path_;
+    [[nodiscard]] const std::optional<std::filesystem::path>& project_path() const {
+        return project_path_;
     }
 
     /// Directory the config's relative paths — plugins above all — are resolved against. Falls back
-    /// to the root while the document has no file of its own.
-    [[nodiscard]] std::filesystem::path document_dir() const {
-        return document_path_ ? document_path_->parent_path() : root_;
+    /// to the root while the project has no file of its own.
+    [[nodiscard]] std::filesystem::path project_dir() const {
+        return project_path_ ? project_path_->parent_path() : root_;
     }
 
     /// Turns a client-supplied path into an absolute one inside the root.
@@ -104,24 +101,24 @@ class workspace {
         throw runtime::config_error("plugin '" + path + "' is outside the workspace root and every --plugin-dir");
     }
 
-    /// Throws the document away and starts an empty one.
+    /// Throws the project away and starts an empty one.
     void reset_document() {
-        document_ = studio::document::create();
-        document_path_.reset();
+        project_ = studio::project::create();
+        project_path_.reset();
     }
 
     /// Opens a config together with its layout sidecar.
     /// @throws runtime::config_error on a read or validation failure
     void open_document(const std::filesystem::path& file) {
-        document_ = studio::document::open(file);
-        document_path_ = file;
+        project_ = studio::project::open(file);
+        project_path_ = file;
     }
 
     /// Writes the config and its layout sidecar.
     /// @throws runtime::config_error if the config cannot be written
     void save_document(const std::filesystem::path& file) {
-        document_.save(file);
-        document_path_ = file;
+        project_.save(file);
+        project_path_ = file;
     }
 
    private:
@@ -141,16 +138,14 @@ class workspace {
         return !relative.empty() && *relative.begin() != "..";
     }
 
-    // Declaration order is destruction order reversed: the session holds a reference to the
-    // registry, so the manager has to outlive it.
     std::filesystem::path root_;
     std::vector<std::filesystem::path> plugin_dirs_;
     studio::module_manager modules_;
-    studio::document document_ = studio::document::create();
+    studio::project project_ = studio::project::create();
     studio::session session_{modules_.registry()};
-    std::optional<std::filesystem::path> document_path_;
+    std::optional<std::filesystem::path> project_path_;
 };
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_WORKSPACE_HPP
+#endif

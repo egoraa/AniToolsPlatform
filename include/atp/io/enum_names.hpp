@@ -36,9 +36,6 @@ concept named_enum = std::is_enum_v<E> && requires { enum_names<E>::entries; };
 
 namespace detail {
 
-// The names go into a separate array, since options() hands out a span while entries holds pairs.
-// The variable template has its own instance in every DLL — as erased_of<T>() does — so only
-// string_view contents are ever compared, never addresses.
 template <named_enum E>
 inline constexpr auto enum_option_names = [] {
     constexpr std::size_t count = std::tuple_size_v<std::remove_cvref_t<decltype(enum_names<E>::entries)>>;
@@ -66,7 +63,7 @@ struct property_codec<E> {
                 return std::string(e.name);
             }
         }
-        return {};  // unreachable: property<E> lets no value outside the table in
+        return {};
     }
 
     static std::optional<E> from_string(std::string_view text) {
@@ -89,4 +86,4 @@ struct property_codec<E> {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_ENUM_NAMES_HPP
+#endif

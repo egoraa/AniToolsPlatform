@@ -10,6 +10,8 @@
 #include <typeinfo>
 #include <unordered_map>
 
+#include <atp/type_compare.hpp>
+
 namespace atp {
 
 /// Non-owning directory of services: which provider (by name) offers which interfaces. A module
@@ -48,8 +50,6 @@ class service_directory {
         if (name.empty()) {
             throw std::invalid_argument("empty service provider name");
         }
-        // An empty inner map for a fresh name cannot linger: try_emplace right below always
-        // inserts the first entry.
         auto& services = entries_[name];
         auto [it, inserted] = services.try_emplace(std::type_index(typeid(TService)), std::addressof(service));
         if (!inserted) {
@@ -109,11 +109,9 @@ class service_directory {
     }
 
    private:
-    // Provider name → its interfaces. Invariant: the inner map is never empty — removing the last
-    // interface erases the whole name entry, so find(name) never turns up a hollow one.
-    std::unordered_map<std::string, std::map<std::type_index, void*>> entries_;
+    std::unordered_map<std::string, std::map<std::type_index, void*, type_name_less>> entries_;
 };
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_SERVICE_DIRECTORY_HPP
+#endif

@@ -28,7 +28,6 @@ template <std::derived_from<inputs> TIn = inputs,
           std::derived_from<outputs> TOut = outputs,
           std::derived_from<properties> TProps = properties>
 struct ports {
-    // Section types feed the covariant inputs()/outputs()/properties() of module<>.
     using in_type = TIn;
     using out_type = TOut;
     using props_type = TProps;
@@ -46,4 +45,4 @@ concept ports_node = std::derived_from<T, ports<typename T::in_type, typename T:
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_PORTS_HPP
+#endif

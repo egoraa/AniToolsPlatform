@@ -91,4 +91,4 @@ class queued_input : public input<T> {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_QUEUED_INPUT_HPP
+#endif

@@ -44,8 +44,6 @@ class module_registry {
     template <std::derived_from<module_base> M>
         requires std::constructible_from<M> && has_module_name<M>
     module_factory_base& add() {
-        // Explicit <M>: without it the unqualified add(std::string) would resolve to the
-        // add(unique_ptr) overload and fail to compile.
         return add<M>(std::string{M::module_name});
     }
 
@@ -70,9 +68,6 @@ class module_registry {
             throw std::invalid_argument("null module factory");
         }
         module_factory_base& ref = *factory;
-        // An empty inner map for a fresh name cannot linger: try_emplace right below always
-        // inserts the first version. On a duplicate try_emplace moves nothing, so factory keeps
-        // ownership and ref stays valid for the error message.
         auto& versions = registry_[std::string(ref.name())];
         auto [it, inserted] = versions.try_emplace(ref.get_version(), std::move(factory));
         if (!inserted) {
@@ -125,7 +120,7 @@ class module_registry {
         if (it == registry_.end()) {
             return nullptr;
         }
-        return it->second.rbegin()->second.get();  // the "inner map is never empty" invariant
+        return it->second.rbegin()->second.get();
     }
 
     /// Factory of an exact version; nullptr if the name or the version is unknown.
@@ -188,18 +183,11 @@ class module_registry {
     }
 
    private:
-    // Name → versions ascending (version::operator<=>). Invariant: the inner map is never empty —
-    // removing the last version erases the whole name entry, so find(name) never turns up a hollow
-    // one.
     std::unordered_map<std::string, std::map<version, std::unique_ptr<module_factory_base>>> registry_;
 };
 
 namespace detail {
 
-// Wrapper around a plugin factory: create() re-seats the module onto a deleter pinning the
-// library, so the module holds it against unloading. Member order matters — pin_ is declared before
-// inner_, so the inner factory (whose vtable lives in the plugin) is destroyed before the pin is
-// released.
 class pinned_factory final : public module_factory_base {
    public:
     pinned_factory(std::unique_ptr<module_factory_base> inner, std::shared_ptr<void> pin)
@@ -262,7 +250,6 @@ class module_registrar {
         if (pin_) {
             factory = std::make_unique<detail::pinned_factory>(std::move(factory), pin_);
         }
-        // The pair is recorded only after a successful registration.
         module_factory_base& ref = registry_->add(std::move(factory));
         registered_.emplace_back(std::string(ref.name()), ref.get_version());
         return ref;
@@ -281,4 +268,4 @@ class module_registrar {
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_MODULE_REGISTRY_HPP
+#endif

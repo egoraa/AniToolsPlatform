@@ -22,7 +22,7 @@ namespace atp::mcp {
 /// @param ws workspace they read; it must outlive the registry
 inline void register_resources(resource_registry& resources, workspace& ws) {
     resources.add({"atp://document", "Current pipeline config", "application/json",
-                   [&ws] { return runtime::encode(ws.doc().config()).dump(2); }});
+                   [&ws] { return runtime::encode(ws.project().config()).dump(2); }});
 
     resources.add({"atp://modules", "Catalog of registered modules", "application/json", [&ws] {
                        nlohmann::json modules = nlohmann::json::array();
@@ -36,8 +36,6 @@ inline void register_resources(resource_registry& resources, workspace& ws) {
                        const std::filesystem::path file = ws.root() / "docs" / "architecture.md";
                        std::ifstream in(file);
                        if (!in) {
-                           // A missing digest is not a failure: the workspace root simply is not the
-                           // repository root.
                            return std::string("docs/architecture.md is not available in this workspace");
                        }
                        std::stringstream body;
@@ -48,4 +46,4 @@ inline void register_resources(resource_registry& resources, workspace& ws) {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_RESOURCES_HPP
+#endif

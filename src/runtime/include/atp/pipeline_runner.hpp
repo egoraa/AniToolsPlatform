@@ -32,7 +32,7 @@ enum class thread_mode { on_demand, throttled, spinning };
 /// Configuration of a runner thread.
 struct thread_options {
     thread_mode mode = thread_mode::on_demand;
-    std::chrono::milliseconds period{};  // throttled only: target iteration period
+    std::chrono::milliseconds period{};
 };
 
 /// Pipeline executor: named threads plus the lifecycle driven through the composite root. Owns the
@@ -106,7 +106,7 @@ class pipeline_runner {
             throw std::logic_error("pipeline is already running");
         }
         if (threads_config_.empty()) {
-            threads_config_.push_back({"main", {}});  // no configuration = a single-threaded pipeline
+            threads_config_.push_back({"main", {}});
         }
         {
             std::lock_guard lock(error_mutex_);
@@ -114,16 +114,12 @@ class pipeline_runner {
         }
         pipeline_ = &p;
         try {
-            // Snapshot of the tree and the pure configuration checks come before the cascades.
             groups_.clear();
             collect_groups(p.root(), nullptr);
             build_thread_map();
             map_ports();
             validate_connections();
             apply_detach();
-            // A failing initialize rolls itself back (the groups' local fail-fast); a failing start
-            // needs an external stop, which is exactly the "initialised but not started" case the
-            // module_base contract covers.
             p.root().initialize(p.context());
             try {
                 p.root().start();
@@ -134,13 +130,8 @@ class pipeline_runner {
                 }
                 throw;
             }
-            // Notifiers go on a pipeline that is ready to run: the replay of the assembly phase
-            // never saw them, and the first pass of every thread happens right after launch
-            // anyway.
             install_notifiers();
         } catch (...) {
-            // One rollback for every failure: a dangling pipeline_ and half-filled maps must not
-            // survive a failed start — the invariant is "not running means clean state".
             uninstall_notifiers();
             undo_detach();
             reset_state();
@@ -169,8 +160,6 @@ class pipeline_runner {
         if (running_) {
             std::stop_token token = stop_source_.get_token();
             {
-                // The predicate is "an error OR a stop was requested" from the start, so a future
-                // module-initiated stop only has to add request_stop+notify under the same lock.
                 std::unique_lock lock(error_mutex_);
                 error_cv_.wait(lock, [&] { return error_ != nullptr || token.stop_requested(); });
             }
@@ -227,9 +216,6 @@ class pipeline_runner {
         return std::nullopt;
     }
 
-    // Snapshot of the group tree taken for the duration of start(): DFS pre-order, root first
-    // (parent == nullptr). The only place a subgroup is recognised (dynamic_cast); every start
-    // phase is then a flat loop over the snapshot.
     struct group_node {
         group* parent;
         group* node;
@@ -248,7 +234,6 @@ class pipeline_runner {
         thread_of_.clear();
         std::size_t matched = 0;
         for (const group_node& n : groups_) {
-            // Pre-order means the parent is already in the map, so inheriting its thread is trivial.
             std::size_t index = n.parent != nullptr ? thread_of_.at(n.parent) : 0;
             auto it = assigned_.find(n.node);
             if (it != assigned_.end()) {
@@ -257,16 +242,11 @@ class pipeline_runner {
             }
             thread_of_[n.node] = index;
         }
-        // Every assignment has to be found in the tree: a foreign group silently ignored would be
-        // a configuration error nobody notices.
         if (matched != assigned_.size()) {
             throw std::invalid_argument("assigned group is not part of the pipeline");
         }
     }
 
-    // Port-to-thread map: every module's owned ports get the thread of the group running them. A
-    // child subgroup needs no separate branch — group registries hold nothing but aliases, so
-    // their owned() is empty.
     void map_ports() {
         port_thread_.clear();
         for (const group_node& n : groups_) {
@@ -282,8 +262,6 @@ class pipeline_runner {
         }
     }
 
-    // The criterion is the thread boundary, not the group one: neighbours sharing a thread need no
-    // safe input.
     void validate_connections() const {
         for (const group_node& n : groups_) {
             for (const group::connection& c : n.node->connections()) {
@@ -298,8 +276,6 @@ class pipeline_runner {
         }
     }
 
-    // Assigned subgroups run on threads of their own, so they are excluded from their parents'
-    // iterate for the duration of the run.
     void apply_detach() {
         for (const group_node& n : groups_) {
             if (n.parent != nullptr && assigned_.contains(n.node)) {
@@ -316,9 +292,6 @@ class pipeline_runner {
         detached_.clear();
     }
 
-    // A thread's signal: the thread sleeps on this cv in run_loop, and notify() comes from delivery
-    // into its inputs. `signaled` is guarded by the mutex, which rules out a wakeup lost in the gap
-    // between a pass and falling asleep.
     struct thread_signal final : io::notifier_base {
         std::mutex mutex;
         std::condition_variable_any cv;
@@ -333,10 +306,6 @@ class pipeline_runner {
         }
     };
 
-    // Waking up makes sense only for an on_demand thread and only on delivery from another thread:
-    // its own thread is not asleep while delivering, a throttled one keeps its pace and a spinning
-    // one never sleeps. Installing the same signal twice (an input with several cross-thread
-    // sources) is harmless.
     void install_notifiers() {
         signals_.clear();
         signals_.reserve(threads_config_.size());
@@ -366,21 +335,18 @@ class pipeline_runner {
         signals_.clear();
     }
 
-    // Pass counters of a thread; held by unique_ptr so the loops get stable addresses.
     struct pass_counters {
         std::atomic<std::uint64_t> passes{0};
         std::atomic<std::uint64_t> busy{0};
     };
 
     void launch_threads() {
-        stop_source_ = {};  // a fresh source: the runner may already have gone through a cycle
+        stop_source_ = {};
         counters_.clear();
         for (std::size_t i = 0; i < threads_config_.size(); ++i) {
             counters_.push_back(std::make_unique<pass_counters>());
         }
         std::vector<std::vector<group*>> per_thread(threads_config_.size());
-        // Units of execution: the root (defaulting to the first declared thread) plus the
-        // explicitly assigned groups, in the snapshot's DFS order.
         for (const group_node& n : groups_) {
             if (n.parent == nullptr || assigned_.contains(n.node)) {
                 per_thread[thread_of_.at(n.node)].push_back(n.node);
@@ -388,7 +354,7 @@ class pipeline_runner {
         }
         for (std::size_t i = 0; i < threads_config_.size(); ++i) {
             if (per_thread[i].empty()) {
-                continue;  // an empty thread has nothing to do — do not create it
+                continue;
             }
             const thread_config& config = threads_config_[i];
             threads_.emplace_back([this, config, signal = signals_[i].get(), counter = counters_[i].get(),
@@ -414,9 +380,7 @@ class pipeline_runner {
                   thread_signal& signal,
                   pass_counters& counter) {
         std::stop_token token = stop_source_.get_token();
-        // Sleeping is interrupted both by the stop token (request_stop wakes instantly) and by a
-        // delivery notification (see thread_signal).
-        std::chrono::milliseconds delay{};  // on_demand: 0 means "not sleeping yet, just yielding"
+        std::chrono::milliseconds delay{};
         try {
             while (!token.stop_requested()) {
                 const work_status pass = iterate_units(units, token);
@@ -429,8 +393,6 @@ class pipeline_runner {
                         std::this_thread::yield();
                         break;
                     case thread_mode::throttled: {
-                        // Sliding: missed ticks are not caught up, keeping the pace even. Delivery
-                        // does not wake a throttled thread — no notifiers are installed on it.
                         const auto next = std::chrono::steady_clock::now() + options.period;
                         std::unique_lock lock(signal.mutex);
                         signal.cv.wait_until(lock, token, next, [] { return false; });
@@ -451,7 +413,7 @@ class pipeline_runner {
                             const bool woken = signal.cv.wait_for(lock, token, delay, [&] { return signal.signaled; });
                             signal.signaled = false;
                             if (woken) {
-                                delay = {};  // data arrived — take the next pass on the hot path
+                                delay = {};
                                 break;
                             }
                         }
@@ -464,9 +426,6 @@ class pipeline_runner {
         }
     }
 
-    // The first error wins, and the stop covers the whole pipeline. request_stop happens under the
-    // lock because it is part of the wait() predicate — changing the condition outside the mutex
-    // would lose a wakeup.
     void capture_error(std::exception_ptr e) {
         {
             std::lock_guard lock(error_mutex_);
@@ -485,8 +444,6 @@ class pipeline_runner {
         }
     }
 
-    // Shared tail of stop()/wait(): join the threads, run the stop cascade through the root and
-    // reset the working state.
     void shutdown() {
         for (std::jthread& t : threads_) {
             if (t.joinable()) {
@@ -494,13 +451,11 @@ class pipeline_runner {
             }
         }
         threads_.clear();
-        // The threads are joined and no deliveries remain, so writing outputs from stop() is fine —
-        // there is nobody left to wake.
         uninstall_notifiers();
         try {
             pipeline_->root().stop();
         } catch (...) {
-            store_error(std::current_exception());  // stop() never throws — see error()
+            store_error(std::current_exception());
         }
         undo_detach();
         reset_state();
@@ -519,20 +474,20 @@ class pipeline_runner {
     std::unordered_map<const group*, std::size_t> thread_of_;
     std::vector<group_node> groups_;
     std::unordered_map<const io::io_base*, std::size_t> port_thread_;
-    std::vector<std::pair<group*, group*>> detached_;  // (parent, subgroup) — material for the undo
+    std::vector<std::pair<group*, group*>> detached_;
     std::vector<std::jthread> threads_;
-    std::vector<std::unique_ptr<thread_signal>> signals_;   // by thread index; addresses stay stable
-    std::vector<io::input_base*> notified_inputs_;          // to be cleared on shutdown
-    std::vector<std::unique_ptr<pass_counters>> counters_;  // by thread index; live until the next start()
+    std::vector<std::unique_ptr<thread_signal>> signals_;
+    std::vector<io::input_base*> notified_inputs_;
+    std::vector<std::unique_ptr<pass_counters>> counters_;
     std::stop_source stop_source_;
     pipeline* pipeline_ = nullptr;
     bool running_ = false;
 
     mutable std::mutex error_mutex_;
-    std::condition_variable error_cv_;  // wakes wait(); the predicate changes under error_mutex_
-    std::exception_ptr error_;          // first execution error; kept until the next start()
+    std::condition_variable error_cv_;
+    std::exception_ptr error_;
 };
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_PIPELINE_RUNNER_HPP
+#endif

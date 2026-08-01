@@ -39,4 +39,4 @@ class module_factory_base {
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_MODULE_FACTORY_BASE_HPP
+#endif

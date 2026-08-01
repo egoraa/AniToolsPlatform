@@ -10,8 +10,9 @@
 #include <typeindex>
 #include <vector>
 
-#include <atp/studio/document.hpp>
 #include <atp/studio/module_manager.hpp>
+#include <atp/studio/project.hpp>
+#include <atp/type_compare.hpp>
 #include <atp/version.hpp>
 
 namespace atp::studio {
@@ -61,25 +62,32 @@ using describe_fn = std::function<const module_info*(const std::string&, const s
     return std::nullopt;
 }
 
+/// Whether the type is the universal one: an io::input<std::any> takes a value of any type. Decided
+/// through same_type rather than ==, because the tag routinely comes from a plugin, where the
+/// erased_of<T> statics live per-DLL.
+[[nodiscard]] inline bool is_universal(std::type_index type) {
+    return same_type(type, typeid(std::any));
+}
+
 /// Compatibility rule, the same one the runtime applies in io::input::accepts: an exact type match
 /// or the universal input<std::any>. The reverse — output<std::any> into a typed input — is
 /// deliberately unsupported.
 [[nodiscard]] inline bool types_compatible(std::type_index produced, std::type_index accepted) {
-    return accepted == produced || accepted == std::type_index(typeid(std::any));
+    return same_type(accepted, produced) || is_universal(accepted);
 }
 
-/// Connects two ports, checking their types before writing into the document. When the type is
+/// Connects two ports, checking their types before writing into the project. When the type is
 /// unknown on either side (the plugin is not loaded) the check is skipped: forbidding a connection
 /// out of ignorance is worse than letting the runtime refuse it at startup.
 /// @throws runtime::config_error if the group is missing, the types are incompatible, or
-///         document::connect rejects the connection
-inline void connect_ports(document& doc,
+///         project::connect rejects the connection
+inline void connect_ports(project& proj,
                           const std::string& group_path,
                           const std::string& from,
                           const std::string& to,
                           const describe_fn& describe,
                           bool replay = false) {
-    const runtime::group_node* g = doc.group_at(group_path);
+    const runtime::group_node* g = proj.group_at(group_path);
     if (g == nullptr) {
         throw runtime::config_error("no group '" + group_path + "'");
     }
@@ -89,7 +97,7 @@ inline void connect_ports(document& doc,
         throw runtime::config_error("incompatible types: output '" + from + "' is " + produced->name() + ", input '" +
                                     to + "' accepts " + accepted->name());
     }
-    doc.connect(group_path, from, to, replay);
+    proj.connect(group_path, from, to, replay);
 }
 
 /// Ports of the group's modules that can be exported in the given direction, as "child.port"
@@ -128,16 +136,15 @@ inline void connect_ports(document& doc,
 /// exported in this direction is not duplicated.
 /// @return the name the port is visible under from outside
 /// @throws runtime::config_error if the group is missing or the path is malformed
-[[nodiscard]] inline std::string expose_port(document& doc,
+[[nodiscard]] inline std::string expose_port(project& proj,
                                              const std::string& group_path,
                                              const std::string& port_path,
                                              bool is_output) {
-    const runtime::group_node* g = doc.group_at(group_path);
+    const runtime::group_node* g = proj.group_at(group_path);
     if (g == nullptr) {
         throw runtime::config_error("no group '" + group_path + "'");
     }
     const auto& map = is_output ? g->expose_outputs : g->expose_inputs;
-    // Already exported in this direction — hand out the existing alias.
     for (const auto& [alias, path] : map) {
         if (path == port_path) {
             return alias;
@@ -148,19 +155,18 @@ inline void connect_ports(document& doc,
         throw runtime::config_error("expected '<child>.<port>', got '" + port_path + "'");
     }
     const std::string base = port_path.substr(dot + 1);
-    // base, base_2, base_3, … — the first free one in this direction.
     std::string alias = base;
     for (std::size_t n = 2; std::ranges::any_of(map, [&](const auto& e) { return e.first == alias; }); ++n) {
         alias = base + "_" + std::to_string(n);
     }
     if (is_output) {
-        doc.set_expose_output(group_path, alias, port_path);
+        proj.set_expose_output(group_path, alias, port_path);
     } else {
-        doc.set_expose_input(group_path, alias, port_path);
+        proj.set_expose_input(group_path, alias, port_path);
     }
     return alias;
 }
 
 }  // namespace atp::studio
 
-#endif  // ATP_STUDIO_PORT_TYPES_HPP
+#endif

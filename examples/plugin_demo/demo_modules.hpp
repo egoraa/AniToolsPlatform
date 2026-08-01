@@ -22,7 +22,6 @@ namespace demo {
 /// Registers the demo modules; called by main in the monolithic build and by atp_register_modules
 /// in the plugin one.
 inline void register_demo_modules(atp::module_registrar& registrar) {
-    // The name comes from the module itself, so the registration point does not repeat the string.
     registrar.add<counter_module>();
     registrar.add<scaler_module>();
     registrar.add<printer_module>();
@@ -30,4 +29,4 @@ inline void register_demo_modules(atp::module_registrar& registrar) {
 
 }  // namespace demo
 
-#endif  // ATP_EXAMPLES_PLUGIN_DEMO_DEMO_MODULES_HPP
+#endif

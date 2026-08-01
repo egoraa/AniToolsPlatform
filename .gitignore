@@ -3,7 +3,9 @@ build/
 .idea/
 .superpowers/
 external/
-.claude/
+.claude/*
+!.claude/CLAUDE.md
+CLAUDE.local.md
 .mcp.json
 *.layout.json
 aqtinstall.log

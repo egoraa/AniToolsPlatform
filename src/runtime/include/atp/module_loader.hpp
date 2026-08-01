@@ -25,30 +25,30 @@
 
 namespace atp {
 
+/// Platform extension of a plugin file. A config may write a plugin path without one, so this is
+/// what module_loader appends and what a plugin directory is scanned for.
+inline constexpr const char* plugin_extension =
+#if defined(_WIN32)
+    ".dll";
+#elif defined(__APPLE__)
+    ".dylib";
+#else
+    ".so";
+#endif
+
 namespace detail {
 
-// A path without an extension is the cross-platform way to write a config, so the platform
-// extension is appended here, in the single place libraries are opened. Explicitly rather than
-// through the LoadLibrary quirk, which appends ".dll" itself but trips over a dot in a directory
-// name, while dlopen appends nothing at all.
 [[nodiscard]] inline std::filesystem::path with_plugin_extension(std::filesystem::path path) {
     if (!path.has_extension()) {
-#if defined(_WIN32)
-        path += ".dll";
-#else
-        path += ".so";
-#endif
+        path += plugin_extension;
     }
     return path;
 }
 
-// Platform wrappers over dlopen/LoadLibrary. The handle is a void* and the branching lives here
-// alone; the system error text goes into the exception.
 #if defined(_WIN32)
 inline void* open_library(const std::filesystem::path& path) {
     void* handle = ::LoadLibraryW(path.c_str());
     if (!handle) {
-        // On Windows system_category translates GetLastError codes.
         throw std::runtime_error("cannot load plugin '" + path.string() +
                                  "': " + std::system_category().message(static_cast<int>(::GetLastError())));
     }
@@ -81,9 +81,6 @@ inline void close_library(void* handle) noexcept {
 }
 #endif
 
-// RAII library handle living inside a shared_ptr whose copies (the "pins") are held by the loader,
-// the factory wrappers and the deleters of the created modules. The physical unload happens when
-// the last pin dies.
 class plugin_library {
    public:
     explicit plugin_library(const std::filesystem::path& path) : handle_(open_library(path)) {}
@@ -129,13 +126,6 @@ class module_loader {
             register_modules(registrar);
             modules_ = registrar.registered();
         } catch (const std::exception& e) {
-            // The exception may have been born in plugin code (the registrar inlines are
-            // instantiated inside the DLL), so it can be neither rethrown nor destroyed after the
-            // library is unloaded. The text is copied into a host exception while the DLL is still
-            // alive; the plugin exception dies on leaving the catch, and only then does unwinding
-            // the constructor (the library_ member) unload the library. The partial registration is
-            // withdrawn by our own (name, version) pairs alone, leaving other versions of the same
-            // names untouched.
             for (const auto& [name, ver] : registrar.registered()) {
                 registry.remove(name, ver);
             }
@@ -196,14 +186,10 @@ class module_loader {
         if (!library_) {
             return;
         }
-        // The factories go first, while their vtables still live in the loaded library; they are
-        // withdrawn one (name, version) at a time.
         for (const auto& [name, ver] : modules_) {
             registry_->remove(name, ver);
         }
         modules_.clear();
-        // Release our own pin: the physical unload happens once the last module of this library
-        // dies — or right now, if there are none.
         library_.reset();
     }
 
@@ -215,4 +201,4 @@ class module_loader {
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_MODULE_LOADER_HPP
+#endif

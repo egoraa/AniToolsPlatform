@@ -12,6 +12,7 @@
 
 #include <atp/io/input_base.hpp>
 #include <atp/io/threading.hpp>
+#include <atp/type_compare.hpp>
 
 namespace atp::io {
 
@@ -34,7 +35,6 @@ class input : public input_base {
     template <typename U>
         requires std::constructible_from<T, U>
     void operator()(U&& value) {
-        // Construct T outside the lock: the critical section covers store() only.
         T incoming(std::forward<U>(value));
         auto guard = lock();
         store(std::move(incoming));
@@ -77,7 +77,7 @@ class input : public input_base {
         if constexpr (std::same_as<T, std::any>) {
             return true;
         } else {
-            return produced == type();
+            return same_type(produced, type());
         }
     }
 
@@ -89,17 +89,15 @@ class input : public input_base {
     }
 
    private:
-    // Both delivery branches are resolved at compile time, so no full specialisation for
-    // std::any is needed; queued_input inherits the protocol as is.
     void do_deliver(const void* value, const erased_type& meta) override {
         if constexpr (std::same_as<T, std::any>) {
             if (meta.type == typeid(std::any)) {
-                (*this)(*static_cast<const std::any*>(value));  // any→any — no double boxing
+                (*this)(*static_cast<const std::any*>(value));
             } else {
                 (*this)(meta.box(value));
             }
         } else {
-            (*this)(*static_cast<const T*>(value));  // meta.type == typeid(T) — output's guarantee
+            (*this)(*static_cast<const T*>(value));
         }
     }
 
@@ -108,4 +106,4 @@ class input : public input_base {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_INPUT_HPP
+#endif

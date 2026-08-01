@@ -25,8 +25,6 @@ struct property_codec;
 
 namespace detail {
 
-// from_chars/to_chars: locale-independent and allocation-free. A partial parse ("12x") is
-// rejected — the string has to be a number in full.
 template <typename T>
 std::optional<T> parse_number(std::string_view text) {
     T value{};
@@ -40,7 +38,7 @@ std::optional<T> parse_number(std::string_view text) {
 
 template <typename T>
 std::string print_number(T value) {
-    char buffer[64];  // roomy enough for any arithmetic type, so ec cannot report an overflow
+    char buffer[64];
     const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
     return std::string(buffer, result.ptr);
 }
@@ -112,4 +110,4 @@ concept property_value = requires(const T& value, std::string_view text) {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_PROPERTY_CODEC_HPP
+#endif

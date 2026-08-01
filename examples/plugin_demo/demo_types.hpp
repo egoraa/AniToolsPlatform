@@ -31,4 +31,4 @@ inline std::string to_string(const sample& value) {
 
 }  // namespace demo
 
-#endif  // ATP_EXAMPLES_PLUGIN_DEMO_DEMO_TYPES_HPP
+#endif

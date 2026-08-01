@@ -56,8 +56,8 @@ inline void register_settings_tools(tool_registry& tools, workspace& ws) {
                               {"value", "string", "Scalar value: number, string or boolean"}}),
                [&ws](const nlohmann::json& args) {
                    const std::string property = arg_string(args, "property");
-                   ws.doc().set_property(arg_string(args, "group_path"), arg_string(args, "name"), property,
-                                         arg_scalar(args, "value"));
+                   ws.project().set_property(arg_string(args, "group_path"), arg_string(args, "name"), property,
+                                             arg_scalar(args, "value"));
                    return nlohmann::json{{"set", property}};
                }});
 
@@ -66,8 +66,8 @@ inline void register_settings_tools(tool_registry& tools, workspace& ws) {
                               {"name", "string", "Module name within that group"},
                               {"property", "string", "Property name"}}),
                [&ws](const nlohmann::json& args) {
-                   ws.doc().clear_property(arg_string(args, "group_path"), arg_string(args, "name"),
-                                           arg_string(args, "property"));
+                   ws.project().clear_property(arg_string(args, "group_path"), arg_string(args, "name"),
+                                               arg_string(args, "property"));
                    return nlohmann::json{{"cleared", true}};
                }});
 
@@ -79,13 +79,13 @@ inline void register_settings_tools(tool_registry& tools, workspace& ws) {
                        std::chrono::milliseconds(args.contains("period_ms") && !args.at("period_ms").is_null()
                                                      ? static_cast<long long>(arg_index(args, "period_ms"))
                                                      : 0LL);
-                   ws.doc().add_thread(name, mode, period);
+                   ws.project().add_thread(name, mode, period);
                    return nlohmann::json{{"added", name}};
                }});
 
     tools.add({"remove_thread", "Removes a thread along with every assignment pointing at it.",
                object_schema({{"name", "string", "Thread name"}}), [&ws](const nlohmann::json& args) {
-                   ws.doc().remove_thread(arg_string(args, "name"));
+                   ws.project().remove_thread(arg_string(args, "name"));
                    return nlohmann::json{{"removed", true}};
                }});
 
@@ -93,13 +93,13 @@ inline void register_settings_tools(tool_registry& tools, workspace& ws) {
                object_schema({{"group_path", "string", "Group to assign; the root cannot be assigned by path"},
                               {"thread", "string", "Thread name declared with add_thread"}}),
                [&ws](const nlohmann::json& args) {
-                   ws.doc().set_assignment(arg_string(args, "group_path"), arg_string(args, "thread"));
+                   ws.project().set_assignment(arg_string(args, "group_path"), arg_string(args, "thread"));
                    return nlohmann::json{{"assigned", true}};
                }});
 
     tools.add({"clear_assignment", "Drops a group's thread assignment, letting it run inline in its ancestor again.",
                object_schema({{"group_path", "string", "Group to unassign"}}), [&ws](const nlohmann::json& args) {
-                   ws.doc().clear_assignment(arg_string(args, "group_path"));
+                   ws.project().clear_assignment(arg_string(args, "group_path"));
                    return nlohmann::json{{"cleared", true}};
                }});
 
@@ -107,22 +107,19 @@ inline void register_settings_tools(tool_registry& tools, workspace& ws) {
                object_schema({{"path", "string", "Plugin path, relative to the config's directory"}}),
                [&ws](const nlohmann::json& args) {
                    const std::string path = arg_string(args, "path");
-                   // Validated against the plugin policy now, but stored verbatim: the config's own
-                   // paths are relative to the config's directory, and rewriting them would break
-                   // the file for atp_app.
-                   (void)ws.resolve_plugin((ws.document_dir() / path).string());
-                   ws.doc().add_plugin(path);
+                   (void)ws.resolve_plugin((ws.project_dir() / path).string());
+                   ws.project().add_plugin(path);
                    return nlohmann::json{{"added", path}};
                }});
 
     tools.add({"remove_config_plugin", "Removes a plugin path from the config's plugin list.",
                object_schema({{"path", "string", "Plugin path as it appears in the config"}}),
                [&ws](const nlohmann::json& args) {
-                   ws.doc().remove_plugin(arg_string(args, "path"));
+                   ws.project().remove_plugin(arg_string(args, "path"));
                    return nlohmann::json{{"removed", true}};
                }});
 }
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_SETTINGS_TOOLS_HPP
+#endif

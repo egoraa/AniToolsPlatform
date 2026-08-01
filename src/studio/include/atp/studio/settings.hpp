@@ -5,19 +5,62 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
 namespace atp::studio {
 
+/// Colour scheme studio asks Qt for. `system` follows the desktop, and is what a fresh profile gets:
+/// an application that ignores the desktop's own choice is the one that looks out of place.
+enum class app_theme { system, light, dark };
+
+/// The word an app_theme is written as in the settings file. A word rather than a number, because the
+/// file is meant to be readable and editable by hand.
+/// @param theme the scheme
+/// @return its token
+[[nodiscard]] inline std::string_view theme_name(app_theme theme) {
+    switch (theme) {
+        case app_theme::light:
+            return "light";
+        case app_theme::dark:
+            return "dark";
+        case app_theme::system:
+            break;
+    }
+    return "system";
+}
+
+/// The reverse. A word this build does not know yields nothing rather than a guess — what to do with
+/// such a profile is the caller's decision, not this function's.
+/// @param name token from the settings file
+/// @return the scheme, or nullopt if the token is not one of them
+[[nodiscard]] inline std::optional<app_theme> theme_from_name(std::string_view name) {
+    if (name == "system") {
+        return app_theme::system;
+    }
+    if (name == "light") {
+        return app_theme::light;
+    }
+    if (name == "dark") {
+        return app_theme::dark;
+    }
+    return std::nullopt;
+}
+
 /// User settings of studio, as opposed to a pipeline config: they live in the user profile and
-/// never touch documents.
+/// never touch projects.
 struct studio_settings {
-    std::vector<std::string> search_dirs;      // module search directories
-    std::vector<std::string> recent_projects;  // MRU list of projects, freshest first
+    std::vector<std::string> search_dirs;
+    std::vector<std::string> recent_projects;
+    app_theme theme = app_theme::system;
+    std::string style;
+    std::string window_geometry;
+    std::string window_state;
 };
 
 /// How many projects the MRU list keeps.
@@ -71,6 +114,20 @@ inline void note_recent(studio_settings& s, const std::filesystem::path& file) {
                 s.recent_projects.push_back(d.get<std::string>());
             }
         }
+        if (const auto theme = doc.find("theme"); theme != doc.end() && theme->is_string()) {
+            if (const std::optional<app_theme> parsed = theme_from_name(theme->get<std::string>())) {
+                s.theme = *parsed;
+            }
+        }
+        if (const auto it = doc.find("style"); it != doc.end() && it->is_string()) {
+            s.style = it->get<std::string>();
+        }
+        if (const auto it = doc.find("window_geometry"); it != doc.end() && it->is_string()) {
+            s.window_geometry = it->get<std::string>();
+        }
+        if (const auto it = doc.find("window_state"); it != doc.end() && it->is_string()) {
+            s.window_state = it->get<std::string>();
+        }
     } catch (const nlohmann::json::parse_error&) {  // NOLINT(bugprone-empty-catch)
     }
     return s;
@@ -83,6 +140,10 @@ inline void save_settings(const studio_settings& s, const std::filesystem::path&
     nlohmann::json doc;
     doc["search_dirs"] = s.search_dirs;
     doc["recent_projects"] = s.recent_projects;
+    doc["theme"] = std::string(theme_name(s.theme));
+    doc["style"] = s.style;
+    doc["window_geometry"] = s.window_geometry;
+    doc["window_state"] = s.window_state;
     std::ofstream out(file);
     if (!out) {
         throw std::runtime_error("cannot write settings '" + file.string() + "'");
@@ -92,4 +153,4 @@ inline void save_settings(const studio_settings& s, const std::filesystem::path&
 
 }  // namespace atp::studio
 
-#endif  // ATP_STUDIO_SETTINGS_HPP
+#endif

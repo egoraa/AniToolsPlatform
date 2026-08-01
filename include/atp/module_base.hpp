@@ -17,7 +17,7 @@ class properties;
 
 namespace atp {
 
-using work_status = io::work_status;  // so that iterate is written as atp::work_status
+using work_status = io::work_status;
 
 /// Type-erased base of a module, the peer of io_base/input_base/output_base.
 class module_base {
@@ -78,7 +78,7 @@ struct module_deleter {
     std::shared_ptr<void> pin{};
 
     void operator()(module_base* m) const noexcept {
-        delete m;  // the pin is a deleter member, so the destructor code is still mapped
+        delete m;
     }
 };
 
@@ -87,4 +87,4 @@ using module_ptr = std::unique_ptr<module_base, module_deleter>;
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_MODULE_BASE_HPP
+#endif

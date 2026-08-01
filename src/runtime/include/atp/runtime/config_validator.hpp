@@ -17,8 +17,6 @@ namespace atp::runtime {
 
 namespace detail {
 
-// Error accumulator: the rules append to it and carry on, so the user gets every problem of the
-// config in one run instead of one per attempt.
 class validator {
    public:
     std::vector<std::string> errors;
@@ -27,8 +25,6 @@ class validator {
         errors.push_back(path + ": " + message);
     }
 
-    // An unknown key is almost always a typo, and staying silent would cost the user a setting that
-    // quietly went missing.
     void check_keys(const nlohmann::json& node, const std::string& path, std::initializer_list<const char*> allowed) {
         const std::unordered_set<std::string> allowed_set(allowed.begin(), allowed.end());
         for (const auto& [key, value] : node.items()) {
@@ -38,8 +34,6 @@ class validator {
         }
     }
 
-    // A name (of a child, a thread, an alias): a non-empty string without a dot, the dot being
-    // reserved as the path separator.
     bool check_name(const nlohmann::json& node, const std::string& path) {
         if (!node.is_string() || node.get<std::string>().empty() ||
             node.get<std::string>().find('.') != std::string::npos) {
@@ -49,7 +43,6 @@ class validator {
         return true;
     }
 
-    // A "child.port" path: exactly one dot with both halves non-empty (mirrors group::split_path).
     void check_port_path(const nlohmann::json& node, const std::string& path) {
         if (!node.is_string()) {
             error(path, "must be a string '<child>.<port>'");
@@ -77,8 +70,6 @@ class validator {
             error("version", "invalid format '" + doc.at("version").get<std::string>() + "'");
             return;
         }
-        // The major means compatibility, the minor means "no newer than us": unknown fields of a
-        // future minor must not be ignored silently.
         if (v->parts[0] != config_schema_version.parts[0] || v->parts[1] > config_schema_version.parts[1]) {
             error("version", "config schema " + v->to_string() + " is not supported (application supports " +
                                  config_schema_version.to_string() + ")");
@@ -181,14 +172,12 @@ class validator {
                     error(path + ".version", "invalid version");
                 }
             }
-            // Properties form a "name → scalar" object: the value type is checked here, while
-            // whether the module has such a property is the builder's job — it has the registry.
             if (node.contains("properties")) {
                 const std::string ppath = path + ".properties";
                 if (!node.at("properties").is_object()) {
                     error(ppath, "must be an object of name -> scalar");
                 } else {
-                    const nlohmann::json props = node.at("properties");  // items() holds a reference
+                    const nlohmann::json props = node.at("properties");
                     for (const auto& [pname, pvalue] : props.items()) {
                         if (!pvalue.is_number() && !pvalue.is_string() && !pvalue.is_boolean()) {
                             error(ppath + "." + pname, "must be a scalar (number, string or boolean)");
@@ -208,8 +197,6 @@ class validator {
         }
     }
 
-    // An assign path is checked against the tree itself: the segments descend through the subgroup
-    // names of the expanded document.
     bool group_path_exists(const nlohmann::json& pipeline, const std::string& path) const {
         const nlohmann::json* current = &pipeline;
         std::size_t begin = 0;
@@ -271,7 +258,7 @@ class validator {
 
     if (!doc.contains("pipeline") || !doc.at("pipeline").is_object()) {
         v.error("pipeline", "required object is missing");
-        return v.errors;  // without the tree the remaining checks are meaningless
+        return v.errors;
     }
     v.check_keys(doc.at("pipeline"), "pipeline", {"modules", "expose", "connections"});
     v.check_group_body(doc.at("pipeline"), "pipeline");
@@ -303,8 +290,6 @@ class validator {
                 }
                 const bool has_period = t.contains("period_ms");
                 if (mode == "throttled") {
-                    // The same contracts as pipeline_runner::add_thread, but reported with a config
-                    // path instead of an exception halfway through.
                     if (!has_period || !t.at("period_ms").is_number_integer() || t.at("period_ms").get<int>() <= 0) {
                         v.error(tpath, "throttled thread requires a positive integer 'period_ms'");
                     }
@@ -337,4 +322,4 @@ class validator {
 
 }  // namespace atp::runtime
 
-#endif  // ATP_RUNTIME_CONFIG_VALIDATOR_HPP
+#endif

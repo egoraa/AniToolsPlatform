@@ -13,8 +13,8 @@ namespace atp::mcp {
 /// server, unlike the client-supplied paths the workspace confines.
 struct options {
     std::filesystem::path root = std::filesystem::current_path();
-    std::vector<std::filesystem::path> plugin_dirs;  // --plugin-dir: loadable, but not scanned
-    std::vector<std::filesystem::path> scan_dirs;    // --scan-dir: scanned at startup
+    std::vector<std::filesystem::path> plugin_dirs;
+    std::vector<std::filesystem::path> scan_dirs;
 };
 
 /// One line describing the accepted command line.
@@ -44,4 +44,4 @@ inline constexpr std::string_view usage =
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_OPTIONS_HPP
+#endif

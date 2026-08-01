@@ -1,7 +1,3 @@
-# Test plugins for module_loader. Hidden visibility by default leaves only the contract symbols
-# exposed (on MSVC the preset is a no-op, since exports are explicit there anyway).
-# PREFIX ""/OUTPUT_NAME keep the file name toolchain-independent, so configs and tests reference one
-# name under MinGW, MSVC and Linux alike.
 add_library(test_plugin SHARED plugin.cpp)
 target_link_libraries(test_plugin PRIVATE atp_platform)
 set_target_properties(test_plugin PROPERTIES
@@ -9,6 +5,14 @@ set_target_properties(test_plugin PROPERTIES
         VISIBILITY_INLINES_HIDDEN ON
         PREFIX ""
         OUTPUT_NAME "test_plugin")
+
+add_library(test_plugin_ports SHARED plugin_ports.cpp)
+target_link_libraries(test_plugin_ports PRIVATE atp_platform)
+set_target_properties(test_plugin_ports PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        PREFIX ""
+        OUTPUT_NAME "test_plugin_ports")
 
 add_library(test_plugin_bad_abi SHARED plugin_bad_abi.cpp)
 target_link_libraries(test_plugin_bad_abi PRIVATE atp_platform)

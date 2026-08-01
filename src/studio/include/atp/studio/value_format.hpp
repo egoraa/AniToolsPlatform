@@ -26,7 +26,7 @@ namespace atp::studio {
         return std::to_string(*v);
     }
     if (const float* v = std::any_cast<float>(&value)) {
-        std::ostringstream out;  // ostringstream avoids the trailing zeros of to_string
+        std::ostringstream out;
         out << *v;
         return out.str();
     }
@@ -46,4 +46,4 @@ namespace atp::studio {
 
 }  // namespace atp::studio
 
-#endif  // ATP_STUDIO_VALUE_FORMAT_HPP
+#endif

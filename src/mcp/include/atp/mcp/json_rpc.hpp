@@ -38,8 +38,8 @@ class rpc_error : public std::runtime_error {
 /// A parsed JSON-RPC 2.0 request.
 struct rpc_request {
     std::string method;
-    nlohmann::json params = nlohmann::json::object();  // an absent params becomes an empty object
-    nlohmann::json id;                                 // null for a notification
+    nlohmann::json params = nlohmann::json::object();
+    nlohmann::json id;
 
     /// Whether the message is a notification, which must not be answered.
     [[nodiscard]] bool notification() const {
@@ -93,4 +93,4 @@ struct rpc_request {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_JSON_RPC_HPP
+#endif

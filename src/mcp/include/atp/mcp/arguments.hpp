@@ -12,10 +12,6 @@
 
 namespace atp::mcp {
 
-// Reading an argument is validation of the model's input, which the specification classes as a tool
-// execution error rather than a protocol one. Throwing runtime::config_error puts these failures on
-// exactly the same path as the studio's own, so the model gets a readable message either way.
-
 /// Required string argument.
 /// @throws runtime::config_error if it is absent or not a string
 [[nodiscard]] inline std::string arg_string(const nlohmann::json& args, const char* name) {
@@ -77,7 +73,7 @@ namespace atp::mcp {
 /// One field of a tool's argument schema.
 struct schema_field {
     const char* name;
-    const char* type;  // a JSON Schema type: "string", "number", "integer", "boolean"
+    const char* type;
     const char* description;
     bool required = true;
 };
@@ -107,4 +103,4 @@ struct schema_field {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_ARGUMENTS_HPP
+#endif

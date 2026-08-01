@@ -1,0 +1,88 @@
+# Headless CI for the platform: configure, build every target and run the full ctest suite on each
+# supported toolchain. The GUI (atp_studio) is skipped everywhere — no Qt on the runners, so CMake
+# reports "Qt6 not found" and moves on.
+name: CMake on multiple platforms
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations.
+      fail-fast: false
+
+      # One entry per configuration, all of it in `include:` and none of it in base keys: an
+      # `include` record that matches no base combination adds a job of its own, whereas a base key
+      # shared by every record (say `build_type: [Release]`) would collapse them into one.
+      matrix:
+        include:
+          - label: ubuntu / gcc
+            os: ubuntu-latest
+            generator_args: -G "Unix Makefiles"
+            compiler_args: -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          - label: ubuntu / clang
+            os: ubuntu-latest
+            generator_args: -G "Unix Makefiles"
+            compiler_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          # Windows names no generator on purpose. CMake's default on Windows is the newest installed
+          # Visual Studio, which is what we want: it finds the MSVC toolchain itself without vcvars,
+          # picks the compilers on its own (hence no compiler_args) and, being multi-config, makes
+          # --config Release on the build and test steps meaningful. Naming a version instead ties the
+          # workflow to the runner image — "Visual Studio 17 2022" broke the moment windows-latest
+          # moved to the windows-2025-vs2026 image, which ships no VS 2022 at all.
+          - label: windows / msvc
+            os: windows-latest
+            generator_args: ""
+            compiler_args: ""
+          - label: macos / appleclang
+            os: macos-latest
+            generator_args: -G "Unix Makefiles"
+            compiler_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        # 4.1 is the floor (cmake_minimum_required), not a ceiling: pinning 4.1.x would also pin the
+        # set of Visual Studio versions CMake can detect, which is what the Windows job depends on.
+        cmake-version: '4.x'
+
+    - name: Set reusable strings
+      # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+    - name: Configure CMake
+      shell: bash
+      # CMAKE_BUILD_TYPE is passed everywhere: single-config generators take it, the VS generator
+      # ignores it in favour of --config below.
+      run: |
+        cmake -B "${{ steps.strings.outputs.build-output-dir }}" -S "${{ github.workspace }}" \
+          ${{ matrix.generator_args }} \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          ${{ matrix.compiler_args }}
+
+    - name: Build
+      # Build your program with the given configuration. Note that --config is needed because the Windows generator is a multi-config generator (Visual Studio generator).
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ env.BUILD_TYPE }}
+
+    - name: Test
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      # Execute tests defined by the CMake configuration. Note that --build-config is needed because the Windows generator is a multi-config generator (Visual Studio generator).
+      # --output-on-failure: a test failing on a machine nobody can log into must print why.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      run: ctest --build-config ${{ env.BUILD_TYPE }} --output-on-failure

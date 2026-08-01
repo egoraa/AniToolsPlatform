@@ -13,7 +13,7 @@ namespace io {}
 /// Loading a pipeline from a config: the schema, the validator, the typed model and the builder.
 namespace runtime {}
 
-/// The studio core, independent of any GUI toolkit: the editable document, the module manager and
+/// The studio core, independent of any GUI toolkit: the editable project, the module manager and
 /// the run session.
 namespace studio {
 

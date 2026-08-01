@@ -22,4 +22,4 @@ class inputs : public detail::io_registry<input_base> {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_INPUTS_HPP
+#endif

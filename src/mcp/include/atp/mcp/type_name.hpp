@@ -15,4 +15,4 @@ namespace atp::mcp {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_TYPE_NAME_HPP
+#endif

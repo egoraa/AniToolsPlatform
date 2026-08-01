@@ -76,8 +76,13 @@
 ## Тесты
 
 - googletest; файлы тестов — `snake_case` с суффиксом `_tests.cpp`
-  (`module_registry_tests.cpp`), новые файлы добавляются в
-  `tests/CMakeLists.txt`.
+  (`module_registry_tests.cpp`). Файл лежит в каталоге покрываемой
+  подсистемы (`tests/platform/`, `tests/runtime/`, `tests/mcp/`,
+  `tests/studio/`, `tests/ui/`) и приставку подсистемы в имени не
+  повторяет: `runtime/config_loader_tests.cpp`. Источники глобятся —
+  новый файл `tests/CMakeLists.txt` не трогает.
+- Общие для сьютов помощники — в `tests/support/`, подключаются от корня
+  `tests/`: `#include "support/pipeline_test_support.hpp"`.
 - Один сьют на класс/аспект; имя теста — утверждение о поведении
   (`RemoveLastVersionErasesName`).
 - Ожидаемые исключения — `EXPECT_THROW`; проверка текста ошибки — через

@@ -36,9 +36,6 @@ struct application {
 
 namespace detail {
 
-// JSON scalar → the string property_base::from_string expects: a string as is (dump would add
-// quotes), a bool spelled out (the codec's own form) and a number through dump (canonical text).
-// The symmetry of the reverse path is studio's business, via the property kind.
 inline std::string scalar_to_string(const nlohmann::json& value) {
     if (value.is_string()) {
         return value.get<std::string>();
@@ -49,10 +46,6 @@ inline std::string scalar_to_string(const nlohmann::json& value) {
     return value.dump();
 }
 
-// Config values are applied before g.add and initialize, so a module already sees its settings in
-// initialize. An unknown name and an unparsable value are both config errors; the module context is
-// added by the caller. The property's invalid_argument is translated into config_error as is — its
-// text already names the property and, for an enum, lists the allowed names.
 inline void apply_properties(module_base& m, const module_node& node) {
     for (const auto& [name, value] : node.properties) {
         io::property_base* prop = m.properties().find(name);
@@ -67,8 +60,6 @@ inline void apply_properties(module_base& m, const module_node& node) {
     }
 }
 
-// Platform errors are wrapped in config context, so the user sees which node was being built and
-// not just "no module named X".
 inline void build_group(group& g, const group_node& node, module_registry& registry) {
     for (const child_node& c : node.modules) {
         if (c.module) {
@@ -86,8 +77,6 @@ inline void build_group(group& g, const group_node& node, module_registry& regis
             build_group(g.add_group(c.group->name), *c.group, registry);
         }
     }
-    // Exports come after the modules and connections after the exports: connection paths may
-    // reference subgroup aliases, which are ready by then.
     for (const auto& [alias, path] : node.expose_inputs) {
         try {
             g.expose_input(alias, path);
@@ -167,4 +156,4 @@ inline void build(application& app, const config& cfg, const std::filesystem::pa
 
 }  // namespace atp::runtime
 
-#endif  // ATP_RUNTIME_PIPELINE_BUILDER_HPP
+#endif

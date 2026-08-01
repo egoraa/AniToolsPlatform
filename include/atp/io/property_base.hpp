@@ -105,10 +105,10 @@ class property_base : public io_base {
 
    private:
     property_kind kind_;
-    std::vector<std::string> options_;  // empty for unconstrained properties — no allocation
+    std::vector<std::string> options_;
     bool persistent_;
 };
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_PROPERTY_BASE_HPP
+#endif

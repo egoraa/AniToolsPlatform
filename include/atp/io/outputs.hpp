@@ -21,4 +21,4 @@ class outputs : public detail::io_registry<output_base> {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_OUTPUTS_HPP
+#endif

@@ -36,8 +36,6 @@ namespace detail {
         const module_factory_base* f =
             ver ? ws.modules().registry().find(factory, *ver) : ws.modules().registry().find(factory);
         if (f == nullptr) {
-            // The plugin is not loaded; port_types skips the type check rather than refusing, which
-            // is the same call the GUI makes.
             return nullptr;
         }
         return &cache->emplace(key, studio::module_manager::describe(*f)).first->second;
@@ -49,7 +47,7 @@ namespace detail {
 [[nodiscard]] inline std::optional<version> arg_version(const nlohmann::json& args) {
     const std::string text = arg_string_or(args, "version", "");
     if (text.empty()) {
-        return std::nullopt;  // absent means the latest registered version
+        return std::nullopt;
     }
     const std::optional<version> parsed = try_parse_version(text);
     if (!parsed) {
@@ -75,7 +73,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                [&ws](const nlohmann::json& args) {
                    const std::filesystem::path file = ws.resolve(arg_string(args, "path"));
                    ws.open_document(file);
-                   return nlohmann::json{{"opened", file.string()}, {"had_includes", ws.doc().had_includes()}};
+                   return nlohmann::json{{"opened", file.string()}, {"had_includes", ws.project().had_includes()}};
                }});
 
     tools.add({"save_document", "Writes the config and, next to it, the *.layout.json sidecar holding node positions.",
@@ -85,8 +83,6 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                    ws.save_document(file);
                    std::filesystem::path layout = file;
                    layout.replace_extension(".layout.json");
-                   // Reported explicitly: a second file appearing on disk should not look like a
-                   // side effect to the caller.
                    return nlohmann::json{{"config", file.string()}, {"layout", layout.string()}};
                }});
 
@@ -94,7 +90,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                "Returns the whole config as JSON. Cheaper for you to read once than to reassemble "
                "the state from individual queries.",
                no_arguments_schema(), [&ws](const nlohmann::json&) {
-                   return nlohmann::json{{"document", runtime::encode(ws.doc().config())}};
+                   return nlohmann::json{{"document", runtime::encode(ws.project().config())}};
                }});
 
     tools.add({"add_module", "Adds a module to a group.",
@@ -105,7 +101,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                [&ws](const nlohmann::json& args) {
                    const std::string factory = arg_string(args, "factory");
                    const std::string name = arg_string_or(args, "name", "");
-                   ws.doc().add_module(arg_string(args, "group_path"), factory, name, detail::arg_version(args));
+                   ws.project().add_module(arg_string(args, "group_path"), factory, name, detail::arg_version(args));
                    return nlohmann::json{{"added", name.empty() ? factory : name}};
                }});
 
@@ -114,7 +110,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                    {{"group_path", "string", "Parent group; \"\" is the root"}, {"name", "string", "Subgroup name"}}),
                [&ws](const nlohmann::json& args) {
                    const std::string name = arg_string(args, "name");
-                   ws.doc().add_group(arg_string(args, "group_path"), name);
+                   ws.project().add_group(arg_string(args, "group_path"), name);
                    return nlohmann::json{{"added", name}};
                }});
 
@@ -124,7 +120,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                object_schema({{"group_path", "string", "Group holding the child; \"\" is the root"},
                               {"name", "string", "Child name"}}),
                [&ws](const nlohmann::json& args) {
-                   ws.doc().remove_child(arg_string(args, "group_path"), arg_string(args, "name"));
+                   ws.project().remove_child(arg_string(args, "group_path"), arg_string(args, "name"));
                    return nlohmann::json{{"removed", true}};
                }});
 
@@ -133,9 +129,25 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                               {"old_name", "string", "Current name"},
                               {"new_name", "string", "New name"}}),
                [&ws](const nlohmann::json& args) {
-                   ws.doc().rename_child(arg_string(args, "group_path"), arg_string(args, "old_name"),
-                                         arg_string(args, "new_name"));
+                   ws.project().rename_child(arg_string(args, "group_path"), arg_string(args, "old_name"),
+                                             arg_string(args, "new_name"));
                    return nlohmann::json{{"renamed", true}};
+               }});
+
+    tools.add({"move_child",
+               "Moves a module or subgroup into another group. Connections and exported ports of "
+               "the source group that referenced it are dropped; thread assignments and canvas "
+               "positions of the moved subtree follow it. The name gets a numeric suffix if it is "
+               "taken in the target group.",
+               object_schema({{"from_group", "string", "Group currently holding the child; \"\" is the root"},
+                              {"name", "string", "Child name"},
+                              {"to_group", "string", "Group to move it into; \"\" is the root"}}),
+               [&ws](const nlohmann::json& args) {
+                   const studio::move_result result = ws.project().move_child(
+                       arg_string(args, "from_group"), arg_string(args, "name"), arg_string(args, "to_group"));
+                   return nlohmann::json{{"moved", result.new_name},
+                                         {"dropped_connections", result.dropped_connections},
+                                         {"dropped_exposes", result.dropped_exposes}};
                }});
 
     tools.add({"connect",
@@ -146,7 +158,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                               {"to", "string", "Destination port, as 'child.port'"},
                               {"replay", "boolean", "Replay the cached value to the new subscriber", false}}),
                [&ws](const nlohmann::json& args) {
-                   studio::connect_ports(ws.doc(), arg_string(args, "group_path"), arg_string(args, "from"),
+                   studio::connect_ports(ws.project(), arg_string(args, "group_path"), arg_string(args, "from"),
                                          arg_string(args, "to"), detail::make_describe(ws),
                                          arg_bool_or(args, "replay", false));
                    return nlohmann::json{{"connected", true}};
@@ -156,7 +168,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                object_schema({{"group_path", "string", "Group holding the connection; \"\" is the root"},
                               {"index", "integer", "Index in the group's connection list"}}),
                [&ws](const nlohmann::json& args) {
-                   ws.doc().disconnect(arg_string(args, "group_path"), arg_index(args, "index"));
+                   ws.project().disconnect(arg_string(args, "group_path"), arg_index(args, "index"));
                    return nlohmann::json{{"disconnected", true}};
                }});
 
@@ -168,50 +180,80 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                               {"output", "boolean", "True for an output port, false for an input"}}),
                [&ws](const nlohmann::json& args) {
                    const std::string alias =
-                       studio::expose_port(ws.doc(), arg_string(args, "group_path"), arg_string(args, "port_path"),
+                       studio::expose_port(ws.project(), arg_string(args, "group_path"), arg_string(args, "port_path"),
                                            arg_bool_or(args, "output", true));
                    return nlohmann::json{{"alias", alias}};
                }});
 
     tools.add(
-        {"remove_expose_input", "Removes an exported input alias from a group.",
+        {"remove_expose_input",
+         "Removes an exported input alias from a group, and with it every re-export and connection "
+         "above that named it. Use rename_expose_input to change an alias without losing them.",
          object_schema({{"group_path", "string", "Group holding the alias"}, {"alias", "string", "Alias to remove"}}),
          [&ws](const nlohmann::json& args) {
-             ws.doc().remove_expose_input(arg_string(args, "group_path"), arg_string(args, "alias"));
+             ws.project().remove_expose_input(arg_string(args, "group_path"), arg_string(args, "alias"));
              return nlohmann::json{{"removed", true}};
          }});
 
     tools.add(
-        {"remove_expose_output", "Removes an exported output alias from a group.",
+        {"remove_expose_output",
+         "Removes an exported output alias from a group, and with it every re-export and connection "
+         "above that named it. Use rename_expose_output to change an alias without losing them.",
          object_schema({{"group_path", "string", "Group holding the alias"}, {"alias", "string", "Alias to remove"}}),
          [&ws](const nlohmann::json& args) {
-             ws.doc().remove_expose_output(arg_string(args, "group_path"), arg_string(args, "alias"));
+             ws.project().remove_expose_output(arg_string(args, "group_path"), arg_string(args, "alias"));
              return nlohmann::json{{"removed", true}};
          }});
+
+    tools.add({"rename_expose_input",
+               "Renames an exported input alias, pointing the parent's reference at the new name. "
+               "Unlike a remove-then-expose pair this keeps the re-export above and the connections "
+               "naming it.",
+               object_schema({{"group_path", "string", "Group holding the alias"},
+                              {"alias", "string", "Current alias"},
+                              {"new_alias", "string", "New alias"}}),
+               [&ws](const nlohmann::json& args) {
+                   ws.project().rename_expose_input(arg_string(args, "group_path"), arg_string(args, "alias"),
+                                                    arg_string(args, "new_alias"));
+                   return nlohmann::json{{"renamed", true}};
+               }});
+
+    tools.add({"rename_expose_output",
+               "Renames an exported output alias, pointing the parent's reference at the new name. "
+               "Unlike a remove-then-expose pair this keeps the re-export above and the connections "
+               "naming it.",
+               object_schema({{"group_path", "string", "Group holding the alias"},
+                              {"alias", "string", "Current alias"},
+                              {"new_alias", "string", "New alias"}}),
+               [&ws](const nlohmann::json& args) {
+                   ws.project().rename_expose_output(arg_string(args, "group_path"), arg_string(args, "alias"),
+                                                     arg_string(args, "new_alias"));
+                   return nlohmann::json{{"renamed", true}};
+               }});
 
     tools.add({"auto_layout", "Recomputes canvas positions for one level of a group.",
                object_schema({{"group_path", "string", "Group to lay out; \"\" is the root"}}),
                [&ws](const nlohmann::json& args) {
                    const std::string group_path = arg_string(args, "group_path");
-                   const runtime::group_node* g = ws.doc().group_at(group_path);
+                   const runtime::group_node* g = ws.project().group_at(group_path);
                    if (g == nullptr) {
                        throw runtime::config_error("no group at path '" + group_path + "'");
                    }
                    std::size_t placed = 0;
                    for (const auto& [child, position] : studio::auto_layout(*g)) {
-                       ws.doc().set_position(studio::detail::full_path(group_path, child), position);
+                       ws.project().set_position(studio::node_ref{group_path, child}.full(), position);
                        ++placed;
                    }
                    return nlohmann::json{{"placed", placed}};
                }});
 
     tools.add({"undo", "Reverts the last editing operation.", no_arguments_schema(),
-               [&ws](const nlohmann::json&) { return nlohmann::json{{"undone", ws.doc().undo()}}; }});
+               [&ws](const nlohmann::json&) { return nlohmann::json{{"undone", ws.project().undo()}}; }});
 
     tools.add({"redo", "Reapplies the last undone operation.", no_arguments_schema(),
-               [&ws](const nlohmann::json&) { return nlohmann::json{{"redone", ws.doc().redo()}}; }});
+               [&ws](const nlohmann::json&) { return nlohmann::json{{"redone", ws.project().redo()}}; }});
 }
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_DOCUMENT_TOOLS_HPP
+#endif

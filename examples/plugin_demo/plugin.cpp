@@ -2,7 +2,6 @@
 
 #include "demo_modules.hpp"
 
-// Plugin: the same register_demo_modules wrapped into the boundary contract.
 ATP_PLUGIN_EXPORT unsigned atp_abi_version() {
     return atp::plugin_abi;
 }

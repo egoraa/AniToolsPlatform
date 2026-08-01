@@ -19,4 +19,4 @@ class properties : public detail::io_registry<property_base> {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_PROPERTIES_HPP
+#endif

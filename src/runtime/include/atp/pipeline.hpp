@@ -35,8 +35,6 @@ class pipeline {
     }
 
    private:
-    // Member order is destruction order reversed: the group (with its connections and modules) dies
-    // before the services the modules may still reference in stop().
     service_directory services_;
     module_context context_{services_};
     group root_{"root"};
@@ -44,4 +42,4 @@ class pipeline {
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_PIPELINE_HPP
+#endif

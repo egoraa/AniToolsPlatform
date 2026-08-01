@@ -43,12 +43,10 @@ inline void register_execution_tools(tool_registry& tools, workspace& ws) {
                "Builds the pipeline from the current document and starts it. Returns immediately: "
                "poll get_status and read_connections to see what the pipeline is actually doing.",
                no_arguments_schema(), [&ws](const nlohmann::json&) {
-                   // Config plugins are relative to the config's directory, exactly as atp_app
-                   // resolves them, and go through the same policy as an explicit load_plugin.
-                   for (const std::string& plugin : ws.doc().config().plugins) {
-                       ws.modules().load_plugin(ws.resolve_plugin((ws.document_dir() / plugin).string()));
+                   for (const std::string& plugin : ws.project().config().plugins) {
+                       ws.modules().load_plugin(ws.resolve_plugin((ws.project_dir() / plugin).string()));
                    }
-                   ws.run_session().start(ws.doc().config());
+                   ws.run_session().start(ws.project().config());
                    return nlohmann::json{{"running", ws.run_session().running()}};
                }});
 
@@ -93,8 +91,6 @@ inline void register_execution_tools(tool_registry& tools, workspace& ws) {
                [&ws](const nlohmann::json& args) {
                    const std::string path = arg_string(args, "path");
                    const nlohmann::json value = arg_scalar(args, "value");
-                   // parse_property_override splits on the FIRST '=', and a dotted path holds none,
-                   // so a value containing '=' survives the round trip.
                    const std::string text = value.is_string() ? value.get<std::string>() : value.dump();
                    ws.run_session().set_property(runtime::parse_property_override(path + "=" + text));
                    return nlohmann::json{{"set", path}};
@@ -109,11 +105,11 @@ inline void register_execution_tools(tool_registry& tools, workspace& ws) {
                    if (root == nullptr) {
                        throw runtime::config_error("nothing is running, so there are no live values to pull");
                    }
-                   studio::sync_persistent_properties(ws.doc(), ws.doc().config(), *root);
+                   studio::sync_persistent_properties(ws.project(), ws.project().config(), *root);
                    return nlohmann::json{{"synced", true}};
                }});
 }
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_EXECUTION_TOOLS_HPP
+#endif

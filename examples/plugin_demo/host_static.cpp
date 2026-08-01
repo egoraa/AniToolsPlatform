@@ -3,7 +3,6 @@
 
 #include "demo_modules.hpp"
 
-// Monolith: the module is linked into the executable and main calls the registration itself.
 int main() {
     atp::module_registry registry;
     atp::module_registrar registrar{registry};

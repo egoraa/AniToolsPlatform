@@ -18,7 +18,6 @@
 
 namespace {
 
-// A flat flag is the only thing a signal handler may touch.
 volatile std::sig_atomic_t g_stop = 0;
 
 void handle_signal(int) {
@@ -30,8 +29,6 @@ constexpr const char* usage = "usage: atp_app <config.json> [-p path.prop=value]
 }  // namespace
 
 int main(int argc, char** argv) {
-    // Argument parsing happens before the main try, so bad user input exits with code 2 like an
-    // invalid config, rather than 1, which means a pipeline failure.
     std::filesystem::path config_path;
     std::vector<atp::runtime::property_override> overrides;
     try {
@@ -73,9 +70,6 @@ int main(int argc, char** argv) {
         atp::runtime::application app;
         atp::runtime::build(app, cfg, std::filesystem::weakly_canonical(config_path).parent_path());
 
-        // Overrides are applied on top of the config before start: initialize runs inside
-        // runner.start, so a module already sees the values there. A failure is bad input rather
-        // than a crash, hence code 2 again.
         try {
             for (const atp::runtime::property_override& o : overrides) {
                 atp::runtime::apply_property_override(app.pipe.root(), o);
@@ -89,9 +83,6 @@ int main(int argc, char** argv) {
         std::signal(SIGTERM, handle_signal);
         app.runner.start(app.pipe);
         std::cout << "pipeline is running; press Ctrl+C to stop\n";
-        // Polling instead of runner.wait(): wait blocks until a failure, while Ctrl+C has to get us
-        // out too. The runner is driven by this thread alone (the owner-thread-only contract), so
-        // polling error() is safe.
         while (g_stop == 0 && app.runner.error() == nullptr) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }

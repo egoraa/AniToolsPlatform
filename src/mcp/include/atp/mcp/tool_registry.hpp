@@ -14,7 +14,7 @@ namespace atp::mcp {
 struct tool {
     std::string name;
     std::string description;
-    nlohmann::json input_schema;  // JSON Schema of the arguments object
+    nlohmann::json input_schema;
 
     /// Performs the call.
     /// @param arguments the "arguments" object of tools/call, never null
@@ -57,4 +57,4 @@ class tool_registry {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_TOOL_REGISTRY_HPP
+#endif

@@ -21,7 +21,7 @@
 
 namespace atp::studio {
 
-/// Execution of a document: every run gets a fresh pipeline and runner, while the module registry
+/// Execution of a project: every run gets a fresh pipeline and runner, while the module registry
 /// lives at session level and survives the runs. The session is owned by the GUI thread, which is
 /// therefore the runner's owner too — the owner-thread-only contract holds by construction.
 class session {
@@ -41,7 +41,7 @@ class session {
         auto runner = std::make_unique<pipeline_runner>();
         runtime::build_pipeline(*pipe, *runner, cfg, *registry_);
         runner->start(*pipe);
-        pipe_ = std::move(pipe);  // published only after a successful start
+        pipe_ = std::move(pipe);
         runner_ = std::move(runner);
     }
 
@@ -58,7 +58,7 @@ class session {
     }
 
     /// Edits a property of a live module — studio's on-the-fly channel. It does not touch the
-    /// document: persistent edits are mirrored into it by the inspector itself.
+    /// project: persistent edits are mirrored into it by the inspector itself.
     /// @throws std::logic_error if nothing is running; runtime::config_error if the path does not
     ///         resolve or the value is rejected
     void set_property(const runtime::property_override& o) {
@@ -86,7 +86,7 @@ class session {
         return runner_ ? runner_->stats() : std::vector<pipeline_runner::thread_stats>{};
     }
 
-    /// Monitoring sample of one connection. The (group path, index) pair matches the document's,
+    /// Monitoring sample of one connection. The (group path, index) pair matches the project's,
     /// since build_group preserves declaration order.
     struct connection_sample {
         std::string group_path;
@@ -125,4 +125,4 @@ class session {
 
 }  // namespace atp::studio
 
-#endif  // ATP_STUDIO_SESSION_HPP
+#endif

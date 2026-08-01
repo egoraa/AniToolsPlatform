@@ -11,8 +11,8 @@ namespace atp::studio {
 
 /// Thread a group path ends up running on, plus how that was decided.
 struct resolved_thread {
-    std::string name;        // never empty: the implicit "main" when nothing is declared
-    bool inherited = false;  // true unless an assignment sits exactly on the requested path
+    std::string name;
+    bool inherited = false;
 };
 
 /// Resolves the thread of a group path the way pipeline_runner does: an assignment on the path
@@ -28,8 +28,6 @@ struct resolved_thread {
             return {thread, false};
         }
     }
-    // Ancestors from the nearest one up: cut the path back at every separator. The root has no
-    // assignment of its own, so the loop stops before the empty path.
     std::string ancestor = group_path;
     while (true) {
         const std::size_t dot = ancestor.rfind('.');
@@ -62,4 +60,4 @@ struct resolved_thread {
 
 }  // namespace atp::studio
 
-#endif  // ATP_STUDIO_THREAD_RESOLVE_HPP
+#endif

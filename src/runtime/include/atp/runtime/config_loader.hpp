@@ -17,7 +17,6 @@ namespace atp::runtime {
 
 namespace detail {
 
-// Nesting ceiling guarding against pathological cases; sensible configs stay far below it.
 inline constexpr std::size_t max_include_depth = 16;
 
 inline nlohmann::json read_json(const std::filesystem::path& path) {
@@ -28,7 +27,6 @@ inline nlohmann::json read_json(const std::filesystem::path& path) {
     try {
         return nlohmann::json::parse(file);
     } catch (const nlohmann::json::parse_error& e) {
-        // e.what() carries the error position; the path is ours to add.
         throw config_error("cannot parse '" + path.string() + "': " + e.what());
     }
 }
@@ -37,7 +35,6 @@ inline void expand_includes(nlohmann::json& node,
                             const std::filesystem::path& dir,
                             std::vector<std::filesystem::path>& stack);
 
-// The path stack serves both as the cycle detector and as the chain text for diagnostics.
 inline nlohmann::json load_fragment(const std::filesystem::path& path, std::vector<std::filesystem::path>& stack) {
     const std::filesystem::path canonical = std::filesystem::weakly_canonical(path);
     if (std::ranges::find(stack, canonical) != stack.end()) {
@@ -63,8 +60,6 @@ inline void expand_includes(nlohmann::json& node,
                             std::vector<std::filesystem::path>& stack) {
     if (node.is_object()) {
         if (node.contains("$include")) {
-            // An include node is replaced whole, so sibling keys would go missing silently —
-            // hence they are forbidden.
             if (node.size() != 1) {
                 throw config_error("$include must be the only key of its object");
             }
@@ -72,7 +67,6 @@ inline void expand_includes(nlohmann::json& node,
                 throw config_error("$include path must be a string");
             }
             nlohmann::json fragment = load_fragment(dir / node.at("$include").get<std::string>(), stack);
-            // The schema version is declared once, by the root document.
             if (fragment.is_object() && fragment.contains("version")) {
                 throw config_error("'version' is allowed only in the root config, found in included '" +
                                    node.at("$include").get<std::string>() + "'");
@@ -106,4 +100,4 @@ inline void expand_includes(nlohmann::json& node,
 
 }  // namespace atp::runtime
 
-#endif  // ATP_RUNTIME_CONFIG_LOADER_HPP
+#endif

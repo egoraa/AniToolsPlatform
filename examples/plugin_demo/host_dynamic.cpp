@@ -3,7 +3,6 @@
 
 #include <atp/module_loader.hpp>
 
-// Host with a plugin: the module arrives from a shared library whose path CMake substitutes.
 int main() {
     atp::module_registry registry;
     atp::module_loader plugin{ATP_DEMO_PLUGIN, registry};
@@ -21,7 +20,7 @@ int main() {
     counter->start();
     counter->iterate(std::stop_token{});
     counter->stop();
-    counter.reset();  // the module dies before the loader — the lifetime contract
+    counter.reset();
     std::cout << "counter iterated once\n";
     return 0;
 }

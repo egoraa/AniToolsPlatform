@@ -58,9 +58,9 @@ class module_factory final : public module_factory_base {
 
    private:
     std::string name_;
-    std::tuple<TArgs...> args_;  // factory configuration; create copies it into the instance
+    std::tuple<TArgs...> args_;
 };
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_MODULE_FACTORY_HPP
+#endif

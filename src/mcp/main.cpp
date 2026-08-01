@@ -56,8 +56,6 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // Argument parsing happens before anything else, so bad invocation exits with 2 rather than
-    // leaving a half-built server talking on stdout.
     std::optional<atp::mcp::options> args = atp::mcp::parse_options(argc, argv);
     if (!args) {
         std::cerr << atp::mcp::usage;
@@ -76,8 +74,6 @@ int main(int argc, char** argv) {
         atp::mcp::register_resources(resources, ws);
         atp::mcp::server server(tools, resources);
 
-        // The protocol stream carries one JSON object per line, no embedded newlines. Diagnostics —
-        // ours and the modules' alike — go to stderr; see claim_protocol_stream above.
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.empty()) {
@@ -96,7 +92,6 @@ int main(int argc, char** argv) {
                 std::fflush(protocol);
             }
         }
-        // A closed stdin is how the client shuts the server down; the session ends with it.
         ws.run_session().stop();
     } catch (const std::exception& e) {
         std::cerr << "atp_mcp: " << e.what() << '\n';

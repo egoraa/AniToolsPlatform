@@ -23,9 +23,6 @@ namespace atp {
 template <io::ports_node TPorts = io::ports<>, detail::fixed_string Name = "", version Version = default_version>
 class module : public module_base {
    public:
-    // Name and version are declared once, as NTTPs, and are available both at compile time and at
-    // runtime — there is nothing to store in the object. The view points into the template
-    // parameter object, which has static storage duration.
     static constexpr std::string_view module_name = Name.view();
     static constexpr version module_version = Version;
 
@@ -45,13 +42,10 @@ class module : public module_base {
     void initialize(module_context&) override {}
     void start() override {}
     work_status iterate(std::stop_token) override {
-        return work_status::idle;  // a no-op iteration is exactly what idle means
+        return work_status::idle;
     }
     void stop() override {}
 
-    // Covariant overrides serve as the author's access point and as the base contract at once: the
-    // concrete module type sees its own sections (inputs().step, outputs().count) while the
-    // machinery going through module_base sees the same registries type-erased.
     [[nodiscard]] TPorts::in_type& inputs() override {
         return io_.in;
     }
@@ -77,4 +71,4 @@ class module : public module_base {
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_MODULE_HPP
+#endif

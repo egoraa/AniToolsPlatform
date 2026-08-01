@@ -49,7 +49,6 @@ inline void register_catalog_tools(tool_registry& tools, workspace& ws) {
                "Read this before adding modules to a document.",
                no_arguments_schema(), [&ws](const nlohmann::json&) {
                    nlohmann::json modules = nlohmann::json::array();
-                   // list() covers monolithic registrations too, which plugins() would miss.
                    for (const module_factory_base* factory : ws.modules().registry().list()) {
                        modules.push_back(to_json(studio::module_manager::describe(*factory)));
                    }
@@ -90,4 +89,4 @@ inline void register_catalog_tools(tool_registry& tools, workspace& ws) {
 
 }  // namespace atp::mcp
 
-#endif  // ATP_MCP_CATALOG_TOOLS_HPP
+#endif

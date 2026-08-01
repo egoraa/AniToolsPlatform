@@ -37,8 +37,6 @@ class output : public output_base {
     template <typename U>
         requires std::constructible_from<T, U>
     void operator()(U&& value) {
-        // Under the lock — only the subscriber snapshot and the cache update; delivery itself
-        // runs unlocked, and each input copies the value inside its own deliver().
         T incoming(std::forward<U>(value));
         std::vector<input_base*> targets;
         {
@@ -121,7 +119,7 @@ class output : public output_base {
 
     [[nodiscard]] std::optional<std::any> peek() const override {
         if (!thread_safe()) {
-            return std::nullopt;  // observability contract — see output_base
+            return std::nullopt;
         }
         auto guard = lock();
         if (!value_) {
@@ -145,8 +143,6 @@ class output : public output_base {
     }
 
    private:
-    // Shared connect path: duplicate check, registration and the replay snapshot under the lock;
-    // the replay delivery itself happens unlocked.
     void attach(input_base& in, bool deliver_cached) {
         std::optional<T> snapshot;
         {
@@ -164,9 +160,6 @@ class output : public output_base {
         }
     }
 
-    // The runtime compatibility check lives on the input's side: unlike the registry, which needs
-    // an exact input kind, an output accepts anything that agreed to take T (heirs of input<T>,
-    // the universal input<std::any>).
     void do_connect(input_base& in, bool deliver_cached) override {
         if (!in.accepts(typeid(T))) {
             throw std::runtime_error("input '" + in.name() + "' is not compatible with output '" + name() + "'");
@@ -181,4 +174,4 @@ class output : public output_base {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_OUTPUT_HPP
+#endif

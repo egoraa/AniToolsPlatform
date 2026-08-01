@@ -20,7 +20,6 @@ struct scaler_inputs : atp::io::inputs {
 };
 struct scaler_outputs : atp::io::outputs {
     atp::io::output<double>& value = make<atp::io::output<double>>("value");
-    // The type is qualified because the member of the same name would shadow it here.
     atp::io::output<demo::sample>& sample = make<atp::io::output<demo::sample>>("sample");
 };
 struct scaler_props : atp::io::properties {
@@ -33,8 +32,6 @@ using scaler_ports = atp::io::ports<scaler_inputs, scaler_outputs, scaler_props>
 class scaler_module : public atp::module<scaler_ports, "scaler", atp::ver<"1.0">> {
    public:
     atp::work_status iterate(std::stop_token) override {
-        // take() rather than get(): a value is processed exactly once, and an empty pass is idle —
-        // the signal the executor backs off on.
         const std::optional<int> count = inputs().count.take();
         if (!count) {
             return atp::work_status::idle;
@@ -51,4 +48,4 @@ class scaler_module : public atp::module<scaler_ports, "scaler", atp::ver<"1.0">
 
 }  // namespace demo
 
-#endif  // ATP_EXAMPLES_PLUGIN_DEMO_SCALER_MODULE_HPP
+#endif

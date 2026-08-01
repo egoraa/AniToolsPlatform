@@ -1,9 +1,5 @@
-# A twin example: the same modules (demo_modules.hpp) are linked into a monolithic host and built
-# as a plugin for the dynamic one.
 add_library(atp_demo_plugin SHARED plugin.cpp)
 target_link_libraries(atp_demo_plugin PRIVATE atp_platform)
-# PREFIX ""/OUTPUT_NAME keep the file name toolchain-independent, so configs reference one name
-# under MinGW, MSVC and Linux alike.
 set_target_properties(atp_demo_plugin PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON

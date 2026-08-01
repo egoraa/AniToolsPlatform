@@ -6,7 +6,7 @@
 #include <unordered_map>
 
 #include <atp/runtime/config_model.hpp>
-#include <atp/studio/document.hpp>
+#include <atp/studio/project.hpp>
 
 namespace atp::studio {
 
@@ -23,8 +23,6 @@ inline constexpr float layout_row_height = 140.0f;
     for (const runtime::child_node& c : g.modules) {
         layer[c.module ? c.module->name : c.group->name] = 0;
     }
-    // The pass count is capped by the size of the graph, so a cycle in the connections cannot spin
-    // the layout forever, and a draft view needs no honest topological sort.
     for (std::size_t pass = 0; pass < g.modules.size(); ++pass) {
         bool changed = false;
         for (const runtime::connection_node& c : g.connections) {
@@ -54,4 +52,4 @@ inline constexpr float layout_row_height = 140.0f;
 
 }  // namespace atp::studio
 
-#endif  // ATP_STUDIO_LAYOUT_HPP
+#endif

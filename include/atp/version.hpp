@@ -62,8 +62,6 @@ inline constexpr version default_version{0, 0, 1};
 
 namespace detail {
 
-// A string literal as an NTTP: a const char* cannot be passed to a template, so a structural type
-// holding a copy of the characters (the terminating zero included) is needed.
 template <std::size_t N>
 struct fixed_string {
     std::array<char, N> chars{};
@@ -77,9 +75,6 @@ struct fixed_string {
     }
 };
 
-// Parses "1.2.3". Any format error throws: parsing also runs at runtime (see try_parse_version),
-// while in constant evaluation (ver<"...">) a throw stays a compile error whose message the
-// compiler quotes.
 constexpr version parse_version(std::string_view text) {
     version result;
     unsigned part = 0;
@@ -135,4 +130,4 @@ inline constexpr version ver = detail::parse_version(Text.view());
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_VERSION_HPP
+#endif

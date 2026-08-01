@@ -18,7 +18,7 @@ class notifier_base {
     virtual void notify() noexcept = 0;
 
    protected:
-    ~notifier_base() = default;  // ownership always stays with the executor
+    ~notifier_base() = default;
 };
 
 /// Type-erased base of an input: what the inputs registry stores, what output_base::connect takes
@@ -80,4 +80,4 @@ class input_base : public io_base {
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_INPUT_BASE_HPP
+#endif

@@ -67,7 +67,7 @@ class group : public module_base {
     template <std::derived_from<module_base> M, typename... TArgs>
         requires std::constructible_from<M, TArgs...>
     M& make(std::string name, TArgs&&... args) {
-        module_ptr module(new M(std::forward<TArgs>(args)...), {});  // monolithic: the pin is empty
+        module_ptr module(new M(std::forward<TArgs>(args)...), {});
         M& ref = static_cast<M&>(*module);
         add(std::move(name), std::move(module));
         return ref;
@@ -166,8 +166,6 @@ class group : public module_base {
         return connections_;
     }
 
-    // The destructor body runs before the member destructors, so both sides of every record are
-    // still alive: "disconnect before destroying an input" holds by construction.
     ~group() override {
         for (const connection& c : connections_) {
             (void)c.out->disconnect(*c.in);
@@ -268,7 +266,6 @@ class group : public module_base {
 
    private:
     [[nodiscard]] const child* find_child(const std::string& name) const {
-        // Linear search: setup phase, and groups hold few children.
         for (const child& c : children_) {
             if (c.name == name) {
                 return &c;
@@ -286,7 +283,6 @@ class group : public module_base {
         }
     }
 
-    // Splits a "<child>.<port>" path within this group's scope.
     [[nodiscard]] std::pair<module_base*, std::string> split_path(const std::string& path) const {
         auto dot = path.find('.');
         if (dot == std::string::npos || dot == 0 || dot + 1 == path.size()) {
@@ -340,4 +336,4 @@ class group : public module_base {
 
 }  // namespace atp
 
-#endif  // ANITOOLSPLATFORM_GROUP_HPP
+#endif

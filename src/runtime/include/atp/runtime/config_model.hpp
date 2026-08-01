@@ -29,11 +29,9 @@ class config_error : public std::runtime_error {
 
 /// A plain module within a group.
 struct module_node {
-    std::string factory;                     // factory name in the registry
-    std::string name;                        // child name in the group (defaults to the factory name)
-    std::optional<version> factory_version;  // absent means the latest registered one
-    // Initial property values: name → JSON scalar. The value is stored as a node rather than a
-    // string, since encode has to keep 5 distinct from "5" on a round trip.
+    std::string factory;
+    std::string name;
+    std::optional<version> factory_version;
     std::vector<std::pair<std::string, nlohmann::json>> properties;
 };
 
@@ -50,7 +48,7 @@ struct child_node {
 
 /// A connection within a group's scope.
 struct connection_node {
-    std::string from;  // "child.port" paths within the group's scope
+    std::string from;
     std::string to;
     bool replay = false;
 };
@@ -59,7 +57,7 @@ struct connection_node {
 struct group_node {
     std::string name;
     std::vector<child_node> modules;
-    std::vector<std::pair<std::string, std::string>> expose_inputs;  // alias → "child.port"
+    std::vector<std::pair<std::string, std::string>> expose_inputs;
     std::vector<std::pair<std::string, std::string>> expose_outputs;
     std::vector<connection_node> connections;
 };
@@ -68,22 +66,19 @@ struct group_node {
 struct thread_node {
     std::string name;
     thread_mode mode = thread_mode::on_demand;
-    std::chrono::milliseconds period{};  // throttled only
+    std::chrono::milliseconds period{};
 };
 
 /// A whole config document in typed form.
 struct config {
-    version schema;                    // the "version" field of the root document
-    std::vector<std::string> plugins;  // paths relative to the config's directory
-    group_node pipeline;               // the root; its name is always "root"
+    version schema;
+    std::vector<std::string> plugins;
+    group_node pipeline;
     std::vector<thread_node> threads;
-    std::vector<std::pair<std::string, std::string>> assignments;  // group path → thread name
+    std::vector<std::pair<std::string, std::string>> assignments;
 };
 
 namespace detail {
-
-// Decoding trusts the shape: it runs after validate, so a mismatch is a program logic error rather
-// than a faulty user config.
 
 inline module_node decode_module(const nlohmann::json& j) {
     module_node m;
@@ -97,8 +92,6 @@ inline module_node decode_module(const nlohmann::json& j) {
         m.factory_version = *v;
     }
     if (j.contains("properties")) {
-        // items() holds a reference to the object, so the result goes into a variable first (see
-        // decode_group).
         const nlohmann::json props = j.at("properties");
         for (const auto& [name, value] : props.items()) {
             m.properties.emplace_back(name, value);
@@ -127,8 +120,6 @@ inline group_node decode_group(std::string name, const nlohmann::json& j) {
     }
     if (j.contains("expose")) {
         const nlohmann::json& expose = j.at("expose");
-        // value() returns json by value while items() holds a reference to it: a temporary in the
-        // range-for header dies before the loop body, and the iteration would read freed memory.
         const nlohmann::json inputs = expose.value("inputs", nlohmann::json::object());
         for (const auto& [alias, path] : inputs.items()) {
             g.expose_inputs.emplace_back(alias, path.get<std::string>());
@@ -144,9 +135,6 @@ inline group_node decode_group(std::string name, const nlohmann::json& j) {
     }
     return g;
 }
-
-// Encoding writes the canonical form: defaults are omitted, so a file saved by studio does not
-// accumulate noise and config diffs stay readable.
 
 inline nlohmann::json encode_group_body(const group_node& g);
 
@@ -242,7 +230,7 @@ inline nlohmann::json encode_group_body(const group_node& g) {
         }
         cfg.threads.push_back(std::move(n));
     }
-    const nlohmann::json assign = doc.value("assign", nlohmann::json::object());  // see the items() note above
+    const nlohmann::json assign = doc.value("assign", nlohmann::json::object());
     for (const auto& [group_path, thread] : assign.items()) {
         cfg.assignments.emplace_back(group_path, thread.get<std::string>());
     }
@@ -293,4 +281,4 @@ inline nlohmann::json encode_group_body(const group_node& g) {
 
 }  // namespace atp::runtime
 
-#endif  // ATP_RUNTIME_CONFIG_MODEL_HPP
+#endif

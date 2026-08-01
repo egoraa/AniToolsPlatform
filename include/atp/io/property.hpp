@@ -20,9 +20,6 @@ namespace atp::io {
 
 namespace detail {
 
-// Type-level value set: options() is declared by the enum codec alone (the name table, see
-// enum_names.hpp), and the requires check spares the scalar codecs any knowledge of it. Including
-// enum_names.hpp here is unnecessary — the specialisation arrives with the module author's TU.
 template <property_value T>
 std::vector<std::string> type_options() {
     if constexpr (requires { property_codec<T>::options(); }) {
@@ -37,9 +34,6 @@ std::vector<std::string> type_options() {
     }
 }
 
-// Instance-level value set: the values are converted to T and printed by the codec, so that the
-// membership check compares canonical strings — "007" is then found among allowed(7, 8), and 7
-// does not drift apart from 7.0.
 template <property_value T, typename TValue>
 std::vector<std::string> render_options(const option_set<TValue>& allowed) {
     std::vector<std::string> result;
@@ -67,10 +61,6 @@ class property : public property_base {
     /// @param s whether this instance serialises access
     /// @throws std::invalid_argument if the default is outside the type-level value set
     explicit property(std::string name, T default_value = T{}, persistence p = atp::io::persistent, safety s = safe)
-        // The base is constructed first, so checked() may already call name() and options(): the
-        // message about a rejected default names both the property and the options. The persistent
-        // tag is qualified deliberately — unqualified lookup in class scope would find the
-        // same-named base method instead.
         : property_base(std::move(name), typeid(T), property_codec<T>::kind, detail::type_options<T>(), p, s)
         , default_(checked(std::move(default_value)))
         , value_(default_) {}
@@ -95,7 +85,7 @@ class property : public property_base {
     template <typename U>
         requires std::constructible_from<T, U>
     void operator()(U&& value) {
-        T incoming = checked(T(std::forward<U>(value)));  // construction and check outside the lock
+        T incoming = checked(T(std::forward<U>(value)));
         auto guard = lock();
         value_ = std::move(incoming);
         changed_ = true;
@@ -137,9 +127,6 @@ class property : public property_base {
     }
 
     void from_string(std::string_view text) override {
-        // Two distinct failures: the string did not parse, or it parsed into a value outside the
-        // set. The membership check is the one a typed write goes through — the constraint cannot
-        // be bypassed via the string path.
         std::optional<T> parsed = property_codec<T>::from_string(text);
         if (!parsed) {
             throw std::invalid_argument("property '" + name() + "': cannot parse '" + std::string(text) + "'" +
@@ -152,13 +139,10 @@ class property : public property_base {
     }
 
     [[nodiscard]] std::string default_string() const override {
-        return property_codec<T>::to_string(default_);  // the default never changes — no lock needed
+        return property_codec<T>::to_string(default_);
     }
 
    private:
-    // The list of options is the only hint telling a config author what to write; it is assembled
-    // here for every consumer at once (config, -p, studio) and stays empty for unconstrained
-    // properties.
     [[nodiscard]] std::string options_hint() const {
         if (options().empty()) {
             return {};
@@ -170,9 +154,6 @@ class property : public property_base {
         return hint + ")";
     }
 
-    // The single membership check, shared by the default, the typed write and from_string.
-    // Comparing canonical strings lets one piece of code serve both an enum name table (a value
-    // outside it prints as an empty string and matches nothing) and a value set of any other type.
     [[nodiscard]] T checked(T value) const {
         if (!options().empty()) {
             const std::string text = property_codec<T>::to_string(value);
@@ -184,11 +165,11 @@ class property : public property_base {
         return value;
     }
 
-    T default_;  // never changes after the constructor
+    T default_;
     T value_;
     bool changed_ = false;
 };
 
 }  // namespace atp::io
 
-#endif  // ANITOOLSPLATFORM_IO_PROPERTY_HPP
+#endif

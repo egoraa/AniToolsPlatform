@@ -28,10 +28,10 @@ concept has_module_version = requires {
 /// create() builds an instance from the same values, so all instances of one factory are identical
 /// and different configurations are separate registrations (aliases). Per-instance settings do not
 /// belong here but in the module's properties, applied to the created object.
-/// @tparam M module type
+/// @tparam TModule module type
 /// @tparam TArgs constructor argument types bound at registration
-template <std::derived_from<module_base> M, typename... TArgs>
-    requires std::constructible_from<M, const TArgs&...>
+template <std::derived_from<module_base> TModule, typename... TArgs>
+    requires std::constructible_from<TModule, const TArgs&...>
 class module_factory final : public module_factory_base {
    public:
     /// @param name name to register the factory under
@@ -42,18 +42,18 @@ class module_factory final : public module_factory_base {
         return name_;
     }
 
-    /// Reported statically from M::module_version, without creating an instance; a module written
+    /// Reported statically from TModule::module_version, without creating an instance; a module written
     /// outside the module<> template and lacking the constant gets default_version.
     [[nodiscard]] version get_version() const noexcept override {
-        if constexpr (has_module_version<M>) {
-            return M::module_version;
+        if constexpr (has_module_version<TModule>) {
+            return TModule::module_version;
         } else {
             return default_version;
         }
     }
 
     [[nodiscard]] module_ptr create() const override {
-        return std::apply([](const TArgs&... args) { return module_ptr(new M(args...), {}); }, args_);
+        return std::apply([](const TArgs&... args) { return module_ptr(new TModule(args...), {}); }, args_);
     }
 
    private:

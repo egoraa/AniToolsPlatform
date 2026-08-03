@@ -6,6 +6,7 @@
 #include <atp/io.hpp>
 #include <atp/module.hpp>
 #include <atp/module_loader.hpp>
+#include <atp/null_host.hpp>
 #include <atp/service_directory.hpp>
 
 #include "test_plugin/boundary_types.hpp"
@@ -93,7 +94,8 @@ TEST(PluginBoundary, FindsAServicePublishedByThePlugin) {
     atp::module_registry registry;
     atp::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
     atp::service_directory services;
-    atp::module_context context{services};
+    atp::null_host host;
+    atp::module_context context{services, host};
     atp::module_ptr echo = registry.create("plugin_echo");
     ASSERT_NE(echo, nullptr);
     echo->initialize(context);

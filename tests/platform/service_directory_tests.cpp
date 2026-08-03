@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <atp/module.hpp>
+#include <atp/null_host.hpp>
 #include <atp/service_directory.hpp>
 
 namespace {
@@ -22,13 +23,13 @@ struct counter {
     ~counter() = default;
 };
 
-struct greeter_impl : greeter {
+struct greeter_impl final : greeter {
     std::string greet() const override {
         return "hello";
     }
 };
 
-struct both_impl : greeter, counter {
+struct both_impl final : greeter, counter {
     std::string greet() const override {
         return "hi";
     }
@@ -167,7 +168,8 @@ TEST(ServiceDirectory, RemoveReturnsFalseWhenMissing) {
 
 TEST(ServiceDirectory, ModulePublishesInInitializeConsumerFindsInStart) {
     atp::service_directory services;
-    atp::module_context context{services};
+    atp::null_host host;
+    atp::module_context context{services, host};
     greeter_module provider;
     consumer_module consumer;
     consumer.initialize(context);

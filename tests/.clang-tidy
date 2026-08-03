@@ -1,0 +1,10 @@
+---
+# googletest's convention wins inside tests/: a fixture class is named after the suite it carries,
+# and docs/code_style.md keeps suite and test names PascalCase for exactly that reason. This is an
+# allowance for one shape of name, not a check switched off — the helper types and the modules a
+# test declares still have to be snake_case, and a name like Some_Thing is still rejected.
+InheritParentConfig: true
+CheckOptions:
+  readability-identifier-naming.ClassIgnoredRegexp: '^[A-Z][A-Za-z0-9]*$'
+  readability-identifier-naming.StructIgnoredRegexp: '^[A-Z][A-Za-z0-9]*$'
+...

@@ -63,9 +63,15 @@ inline void close_library(void* handle) noexcept {
     ::FreeLibrary(static_cast<HMODULE>(handle));
 }
 #else
+/// Opens a plugin library and reports the platform's own error text on failure.
+///
+/// POSIX does not guarantee dlerror() to be thread safe, and that is accepted here rather than
+/// worked around: loading a plugin fills module_registry, which is setup-phase-only and not thread
+/// safe either, so a second thread cannot be in this code to begin with.
 inline void* open_library(const std::filesystem::path& path) {
     void* handle = ::dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
+        // NOLINTNEXTLINE(concurrency-mt-unsafe)
         const char* error = ::dlerror();
         throw std::runtime_error("cannot load plugin '" + path.string() + "': " + (error ? error : "unknown error"));
     }

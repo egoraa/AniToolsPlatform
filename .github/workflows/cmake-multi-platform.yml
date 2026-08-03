@@ -1,6 +1,7 @@
-# Headless CI for the platform: configure, build every target and run the full ctest suite on each
-# supported toolchain. The GUI (atp_studio) is skipped everywhere — no Qt on the runners, so CMake
-# reports "Qt6 not found" and moves on.
+# CI for the platform: configure, build every target and run the full ctest suite on each supported
+# toolchain. Those four jobs are headless — no Qt on the runners, so CMake reports "Qt6 not found" and
+# moves on, which is a configuration worth keeping exercised and the reason the GUI is not simply
+# added to them. The widget tests get a job of their own, `qt ui tests`, which installs Qt.
 name: CMake on multiple platforms
 
 on:
@@ -30,10 +31,15 @@ jobs:
             os: ubuntu-latest
             generator_args: -G "Unix Makefiles"
             compiler_args: -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          # This one entry also carries ATP_BUILD_STUDIO=OFF, so the headless configuration is
+          # actually built somewhere. Leaving every job on the default is how that configuration
+          # silently stopped compiling: the option gated src/studio and src/mcp while atp_tests kept
+          # linking both, and nothing here ever asked for it.
           - label: ubuntu / clang
             os: ubuntu-latest
             generator_args: -G "Unix Makefiles"
             compiler_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+            extra_args: -DATP_BUILD_STUDIO=OFF
           # Windows names no generator on purpose. CMake's default on Windows is the newest installed
           # Visual Studio, which is what we want: it finds the MSVC toolchain itself without vcvars,
           # picks the compilers on its own (hence no compiler_args) and, being multi-config, makes
@@ -70,11 +76,15 @@ jobs:
       shell: bash
       # CMAKE_BUILD_TYPE is passed everywhere: single-config generators take it, the VS generator
       # ignores it in favour of --config below.
+      # ATP_WERROR is on here and nowhere else: a warning must stop a change from landing, but it must
+      # not stop a developer from building — a new compiler version routinely finds new ones.
       run: |
         cmake -B "${{ steps.strings.outputs.build-output-dir }}" -S "${{ github.workspace }}" \
           ${{ matrix.generator_args }} \
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-          ${{ matrix.compiler_args }}
+          -DATP_WERROR=ON \
+          ${{ matrix.compiler_args }} \
+          ${{ matrix.extra_args }}
 
     - name: Build
       # Build your program with the given configuration. Note that --config is needed because the Windows generator is a multi-config generator (Visual Studio generator).
@@ -86,3 +96,297 @@ jobs:
       # --output-on-failure: a test failing on a machine nobody can log into must print why.
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
       run: ctest --build-config ${{ env.BUILD_TYPE }} --output-on-failure
+
+    - name: Install
+      # The SDK package, into a throwaway prefix. Nothing consumes it here — that is #22's job — but
+      # the install rules themselves are platform-sensitive (GNUInstallDirs answers differently per
+      # distribution) and were written on Windows, so every runner running them is worth the two
+      # seconds it costs.
+      run: cmake --install ${{ steps.strings.outputs.build-output-dir }} --config ${{ env.BUILD_TYPE }} --prefix "${{ runner.temp }}/atp-sdk"
+
+  # Sanitizers run on Linux/clang only, and not because of convenience: MSVC implements
+  # AddressSanitizer alone, so ThreadSanitizer — the one that actually checks this platform's
+  # contracts — has nowhere else to run. A Debug build, since a sanitizer report is worth little
+  # without frames.
+  sanitize:
+    name: sanitizer / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # thread first: it is the one with something to say about io_base's deferred lock, the
+          # setup-phase-only notifier and the stop/wait race that pipeline_runner excludes by
+          # contract rather than by synchronisation.
+          - sanitizer: thread
+          - sanitizer: address,undefined
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    - name: Configure CMake
+      # ATP_WERROR stays off here: this job is about runtime findings, and a warning that the four
+      # build jobs already gate on should not be reported twice.
+      run: |
+        cmake -B "${{ github.workspace }}/build" -S "${{ github.workspace }}" \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+          -DATP_SANITIZER=${{ matrix.sanitizer }}
+
+    - name: Build
+      run: cmake --build "${{ github.workspace }}/build"
+
+    - name: Test
+      working-directory: ${{ github.workspace }}/build
+      # The plugin tests dlopen libraries built in this same tree, so they carry the instrumentation
+      # too and the reports stay complete across the boundary.
+      env:
+        TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        ASAN_OPTIONS: halt_on_error=1:detect_leaks=1:detect_stack_use_after_return=1
+        UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      run: ctest --output-on-failure
+
+  # The only job with Qt, and therefore the only one that compiles src/studio/ui and runs the widget
+  # tests. It is deliberately not a fifth entry of the build matrix: those four prove the build still
+  # works with no Qt installed, which is a real configuration (#40) and would be lost by giving every
+  # runner a Qt.
+  #
+  # Linux only. The suite needs the offscreen QPA plugin, which ships with Qt itself here, while on
+  # Windows it has to be deployed next to the executable (cmake/DeployQt.cmake, #41) — one platform is
+  # enough for tests whose findings do not differ per platform.
+  ui:
+    name: qt ui tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    - name: Install the Qt link-time dependencies
+      # Qt6::Gui links libGL and libxkbcommon, and the runner image carries neither. This is needed
+      # even though the tests never open a display: the dependency is on the library, not on the
+      # platform plugin that ends up being loaded.
+      run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        # The version cmake/AutoInstallQt.cmake would fetch, so a developer using that path and this
+        # job build against the same Qt. Widgets and Svg both come from the base package; no modules
+        # have to be named.
+        version: '6.10.3'
+        cache: true
+
+    - name: Configure CMake
+      # ATP_WERROR for the same reason as the build jobs, and this is the first time it covers
+      # src/studio/ui at all: those sources are compiled by no other job, and locally only by MSVC.
+      run: |
+        cmake -B "${{ github.workspace }}/build" -S "${{ github.workspace }}" \
+          -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DATP_WERROR=ON
+
+    - name: Build
+      # This target only. The headless suite is built and run by four jobs already, and building it
+      # again here would double the job for nothing.
+      run: cmake --build "${{ github.workspace }}/build" --target atp_ui_tests
+
+    - name: Test
+      working-directory: ${{ github.workspace }}/build
+      # QT_QPA_PLATFORM is belt and braces: tests/ui/qt_app.hpp already qputenv's it before building
+      # the QApplication, so the suite runs with no display under a plain ctest too. Setting it here
+      # states the requirement where someone reading the job can see it.
+      #
+      # --no-tests=error matters more than it looks: ctest exits 0 on an empty selection, so without it
+      # a mistyped label would turn this job green while running nothing at all.
+      env:
+        QT_QPA_PLATFORM: offscreen
+      run: ctest --label-regex ui --no-tests=error --output-on-failure
+
+  # The only test of the plugin boundary itself. Every other job builds both ends of every connection
+  # from one source tree in one build, which is precisely why #12 (type identity across a plugin
+  # boundary on macOS) could reach master unnoticed. Here the plugin comes out of a separate CMake
+  # project that reaches the platform through find_package alone.
+  #
+  # The payload types are chosen, not incidental: an int goes in — every library agrees about int, so
+  # that half proves only that delivery happens — and a std::string comes back out, which is where a
+  # boundary actually breaks. The type has to be recognised as the same across two separately built
+  # libraries, and the buffer is released by the side that did not allocate it, the contract a
+  # mismatched C++ runtime violates and the ABI handshake cannot see.
+  boundary:
+    name: out-of-tree plugin
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    - name: Build the host and install the SDK
+      # Only the targets this job runs. ATP_BUILD_STUDIO=OFF keeps it from looking for a Qt that is
+      # not here; atp_app_demo_assets is what puts atp_demo_plugin and the configs next to atp_app,
+      # and it is a custom target, so building atp_app alone would not run it.
+      #
+      # --component sdk, because that is what this job wants: the headers and the package, not the
+      # applications. A full install would demand every executable that has an install rule be built
+      # first — it did, and this job went red the day atp_mcp got one.
+      run: |
+        cmake -B build -S . -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DATP_WERROR=ON \
+          -DATP_BUILD_STUDIO=OFF
+        cmake --build build --target atp_app atp_demo_plugin atp_app_demo_assets
+        cmake --install build --component sdk --prefix "${{ runner.temp }}/atp-sdk"
+
+    - name: Build the template as a separate project
+      # A different source directory, a different build directory, and the SDK reachable only through
+      # CMAKE_PREFIX_PATH. If this step needs anything from the platform's tree, the package is
+      # incomplete and that is the finding.
+      run: |
+        cmake -B template-build -S templates/plugin \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DCMAKE_PREFIX_PATH="${{ runner.temp }}/atp-sdk"
+        cmake --build template-build
+
+    - name: Run a pipeline across the plugin boundary
+      # atp_app runs until it is told to stop, so the window is bounded from outside. timeout reports
+      # 124 when it had to stop the process, and that is the success signal here: the pipeline ran the
+      # whole window without an error of its own. Any other status means atp_app returned early, which
+      # it only does on a failure.
+      #
+      # The two greps are the actual assertions, and neither is redundant: the first says the int
+      # reached the out-of-tree module, the second that the string it produced reached a module in the
+      # other library.
+      run: |
+        cp template-build/atp_template_plugin.so build/src/app/config/
+        cp templates/plugin/pipeline.json build/src/app/config/
+        cd build/src/app
+        set +e
+        timeout 10 ./atp_app config/pipeline.json > run.log 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" -ne 124 ]; then
+          echo "::error::atp_app exited with status $rc before the window closed"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^template-plugin: ' run.log; then
+          echo "::error::nothing reached the out-of-tree module — no value crossed into the plugin"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^printer label: ' run.log; then
+          echo "::error::the string from the out-of-tree module never reached the demo plugin"
+          cat run.log
+          exit 1
+        fi
+        echo "crossed the boundary in both directions:"
+        grep -m4 -E '^(template-plugin|printer label): ' run.log
+
+  # Formatting needs no compiler and no build — just the sources and the tool — so this job is the
+  # cheapest of the lot and finishes while the others are still configuring.
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install clang-format
+      # Pinned exactly, and through pip rather than apt, for two reasons: clang-format's output moves
+      # between releases, so an unpinned tool reformats untouched files and fails a branch for reasons
+      # unrelated to its change; and pip gives a developer the identical binary on any platform with
+      # one command, which matters because clang-format ships inside CLion here and is not on PATH.
+      # The same version is named in cmake/Format.cmake — keep the two in step.
+      run: pip install clang-format==22.1.8
+
+    - name: Check formatting
+      # git ls-files rather than a find: a vendored or generated source cannot wander into the list.
+      run: |
+        git ls-files 'include/*.hpp' 'src/*.hpp' 'src/*.cpp' \
+                     'tests/*.hpp' 'tests/*.cpp' 'examples/*.hpp' 'examples/*.cpp' \
+                     'templates/*.hpp' 'templates/*.cpp' \
+          | xargs clang-format --dry-run --Werror \
+          || {
+            echo "::error::formatting differs from .clang-format; run 'cmake --build <dir> --target format', or 'pip install clang-format==22.1.8 && clang-format -i <files>'"
+            exit 1
+          }
+
+  # One toolchain is enough for a linter, so this is a job of its own rather than an entry of the
+  # build matrix: the findings do not differ per platform, and running it four times would only cost
+  # minutes.
+  #
+  # The matrix here is a shard index, not a configuration. The library is header-only and
+  # HeaderFilterRegex matches every atp header, so each translation unit re-analyses the same headers
+  # from scratch and the whole list took ~28 minutes on one runner — this job alone decided when the
+  # run finished, while the other seven were done in 4-8. Splitting the list across runners is the
+  # only lever that shortens it without analysing less: no single unit gets faster, but they no longer
+  # queue behind each other. Total runner minutes stay roughly the same, plus one configure per shard.
+  tidy:
+    name: clang-tidy ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+
+    strategy:
+      # A finding in one shard must not hide the findings in the others.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    - name: Install clang-tidy
+      # Pinned to a major on purpose. clang-tidy's check set and its false positives move between
+      # releases — 18 reports a modernize-loop-convert on a reverse-iterator loop that later versions
+      # correctly leave alone — so an unpinned tool turns a green branch red on a runner-image update,
+      # for reasons that have nothing to do with the change being tested. Bumping this is a commit of
+      # its own, with whatever findings the new version brings.
+      run: sudo apt-get update && sudo apt-get install -y clang-tidy-18
+
+    - name: Configure CMake
+      # Configure only — clang-tidy needs the compilation database, not the objects. The compiler is
+      # clang so that the database describes the flags clang-tidy will actually parse with.
+      run: |
+        cmake -B "${{ github.workspace }}/build" -S "${{ github.workspace }}" \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+    - name: Run clang-tidy
+      # The file list comes from the compilation database rather than from the tree, so a source that
+      # is not built here (the Qt panels, with no Qt on the runner) is not analysed here either.
+      # external/ holds the vendored dependencies and is not ours to lint.
+      #
+      # This job sees one side of every #if defined(_WIN32): the POSIX branches of module_loader and
+      # thread_name are analysed here and the Windows ones are not, because clang-tidy only sees what
+      # the preprocessor keeps. A run on a developer's Windows machine covers the opposite half, and
+      # neither is complete on its own — the dlerror() finding in module_loader reached master
+      # precisely that way.
+      #
+      # The list is sorted by size before it is dealt out round-robin, so the few large units land in
+      # different shards instead of piling into one: with an even split the slowest shard decides the
+      # wall clock, and file size is the only proxy for analysis cost available before running it.
+      run: |
+        jq -r '.[].file' build/compile_commands.json \
+          | sort -u \
+          | grep -v '/external/' \
+          | xargs ls -S \
+          | awk 'NR % 4 == ${{ matrix.shard }} % 4' \
+          | xargs -r -P "$(nproc)" -n1 clang-tidy-18 -p build -quiet --warnings-as-errors='*'

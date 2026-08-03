@@ -127,7 +127,7 @@ const std::vector<link_item*>& canvas_scene::links() const {
 }
 
 void canvas_scene::update_samples() {
-    if (!state_.run.running()) {
+    if (!state_.view->running()) {
         for (link_item* link : links_) {
             link->set_hot(false);
             link->set_label({});
@@ -135,7 +135,7 @@ void canvas_scene::update_samples() {
         prev_writes_.clear();
         return;
     }
-    for (const session::connection_sample& sample : state_.run.sample_connections()) {
+    for (const session::connection_sample& sample : state_.view->sample_connections()) {
         if (sample.group_path != state_.current_group || sample.index >= links_.size()) {
             continue;
         }
@@ -158,7 +158,7 @@ void canvas_scene::dragMoveEvent(QGraphicsSceneDragDropEvent* event) {
 }
 
 void canvas_scene::dropEvent(QGraphicsSceneDragDropEvent* event) {
-    if (state_.run.running()) {
+    if (state_.view->running()) {
         QGraphicsScene::dropEvent(event);
         return;
     }
@@ -197,7 +197,7 @@ void canvas_scene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         event->accept();
         return;
     }
-    if (!state_.run.running() && event->button() == Qt::LeftButton) {
+    if (!state_.view->running() && event->button() == Qt::LeftButton) {
         if (auto* pin = pin_at(event->scenePos())) {
             drag_from_ = pin;
             temp_link_ =
@@ -241,6 +241,7 @@ void canvas_scene::begin_copy_drag() {
     pressed_node_ = nullptr;
 
     std::vector<std::string> names;
+    names.reserve(moving_.size());
     for (const dragged& d : moving_) {
         names.push_back(d.item->child_name());
     }
@@ -524,8 +525,7 @@ std::optional<node_position> canvas_scene::clipboard_origin() const {
         if (!entry.position) {
             continue;
         }
-        origin = origin ? node_position{std::min(origin->x, entry.position->x),
-                                        std::min(origin->y, entry.position->y)}
+        origin = origin ? node_position{std::min(origin->x, entry.position->x), std::min(origin->y, entry.position->y)}
                         : *entry.position;
     }
     return origin;
@@ -571,7 +571,7 @@ void canvas_scene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void canvas_scene::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
-    if (state_.run.running()) {
+    if (state_.view->running()) {
         QGraphicsScene::contextMenuEvent(event);
         return;
     }
@@ -589,8 +589,7 @@ void canvas_scene::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
         event->accept();
         return;
     }
-    const node_position where{static_cast<float>(event->scenePos().x()),
-                              static_cast<float>(event->scenePos().y())};
+    const node_position where{static_cast<float>(event->scenePos().x()), static_cast<float>(event->scenePos().y())};
     if (node_item* node = node_at(event->scenePos())) {
         if (!node->isSelected()) {
             clearSelection();
@@ -684,24 +683,24 @@ void canvas_scene::keyPressEvent(QKeyEvent* event) {
         event->accept();
         return;
     }
-    if (!state_.run.running() && event->matches(QKeySequence::Cut)) {
+    if (!state_.view->running() && event->matches(QKeySequence::Cut)) {
         if (cut_nodes(state_, callbacks_, state_.current_group, selected_node_names())) {
             notify_changed();
         }
         event->accept();
         return;
     }
-    if (!state_.run.running() && event->matches(QKeySequence::Copy)) {
+    if (!state_.view->running() && event->matches(QKeySequence::Copy)) {
         (void)copy_nodes(state_, callbacks_, state_.current_group, selected_node_names());
         event->accept();
         return;
     }
-    if (!state_.run.running() && event->matches(QKeySequence::Paste)) {
+    if (!state_.view->running() && event->matches(QKeySequence::Paste)) {
         paste_at(std::nullopt);
         event->accept();
         return;
     }
-    if (event->key() == Qt::Key_Delete && !state_.run.running()) {
+    if (event->key() == Qt::Key_Delete && !state_.view->running()) {
         delete_selection();
         event->accept();
         return;
@@ -711,7 +710,7 @@ void canvas_scene::keyPressEvent(QKeyEvent* event) {
 
 void canvas_scene::accept_palette_drag(QGraphicsSceneDragDropEvent* event) {
     const QMimeData* mime = event->mimeData();
-    if (!state_.run.running() && mime != nullptr && (mime->hasFormat(module_mime_type) || is_group_mime(mime))) {
+    if (!state_.view->running() && mime != nullptr && (mime->hasFormat(module_mime_type) || is_group_mime(mime))) {
         event->acceptProposedAction();
     } else {
         event->ignore();
@@ -774,7 +773,7 @@ void canvas_scene::build_node(const runtime::child_node& c,
         }
     }
 
-    const double height = node_header + pin_row * static_cast<double>(ports.size()) + 6.0;
+    const double height = node_header + (pin_row * static_cast<double>(ports.size())) + 6.0;
     auto* node = new node_item(name, !c.module, height);
     addItem(node);
 

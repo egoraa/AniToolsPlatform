@@ -14,8 +14,14 @@ namespace atp {
 /// lose their parameters, the context is given in initialize only; 5 — NVI delivery (do_deliver)
 /// plus notifier_base/set_notifier on input_base; 6 — create(config) carrying per-instance
 /// parameters as a config string; 7 — output observation via peek()/write_count(); 8 — module
-/// properties as the third ports section, exposed by module_base::properties().
-inline constexpr unsigned plugin_abi = 8;
+/// properties as the third ports section, exposed by module_base::properties(); 9 — module_context
+/// carries a module_host next to the services, which is where a module logs and wakes its thread.
+///
+/// Bumping this number is also a change to templates/plugin/CMakeLists.txt, which names the ABI it
+/// was written for and is meant to stop configuring until the plugin there has been looked at. CMake
+/// reads the value below out of this file (cmake/Install.cmake) to export it as a package constant,
+/// so the line must stay in this exact shape.
+inline constexpr unsigned plugin_abi = 9;
 
 /// The plugin contract is two C symbols:
 ///

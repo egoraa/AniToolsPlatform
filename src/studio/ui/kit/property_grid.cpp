@@ -20,7 +20,7 @@ namespace atp::studio::ui {
 namespace {
 
 nlohmann::json editor_to_json(const property_editor& e) {
-    const std::string text = e.text();
+    std::string text = e.text();
     switch (e.kind) {
         case io::property_kind::number:
             try {
@@ -33,11 +33,11 @@ nlohmann::json editor_to_json(const property_editor& e) {
                 throw runtime::config_error("'" + text + "' is not a number");
             }
         case io::property_kind::boolean:
-            return nlohmann::json(text == "true");
+            return text == "true";
         case io::property_kind::text:
             break;
     }
-    return nlohmann::json(text);
+    return text;
 }
 
 }  // namespace
@@ -242,11 +242,10 @@ std::string property_grid::current_value(const property_row& row) const {
             }
         }
     }
-    if (state_.run.running()) {
-        if (atp::group* root = state_.run.live_root()) {
-            try {
-                value = runtime::find_property(*root, node_ref{group_path_, child_}.full(), row.info.name).to_string();
-            } catch (const std::exception&) {  // NOLINT(bugprone-empty-catch)
+    if (state_.view->running()) {
+        for (const live_property& p : state_.view->live_properties(node_ref{group_path_, child_}.full())) {
+            if (p.info.name == row.info.name) {
+                value = p.value;
             }
         }
     }
@@ -256,8 +255,8 @@ std::string property_grid::current_value(const property_row& row) const {
 void property_grid::apply(property_row& row) {
     const std::string value = row.editor->text();
     try {
-        if (state_.run.running()) {
-            state_.run.set_property({node_ref{group_path_, child_}.full(), row.info.name, value});
+        if (state_.view->running()) {
+            state_.view->set_property({node_ref{group_path_, child_}.full(), row.info.name, value});
         }
         if (row.info.persistent) {
             state_.doc.set_property(group_path_, child_, row.info.name, editor_to_json(*row.editor));
@@ -274,8 +273,8 @@ void property_grid::apply(property_row& row) {
 
 void property_grid::reset(property_row& row) {
     try {
-        if (state_.run.running()) {
-            state_.run.set_property({node_ref{group_path_, child_}.full(), row.info.name, row.info.default_value});
+        if (state_.view->running()) {
+            state_.view->set_property({node_ref{group_path_, child_}.full(), row.info.name, row.info.default_value});
         }
         state_.doc.clear_property(group_path_, child_, row.info.name);
     } catch (const std::exception& e) {

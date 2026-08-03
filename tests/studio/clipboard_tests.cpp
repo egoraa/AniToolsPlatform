@@ -9,6 +9,8 @@
 #include <atp/studio/clipboard.hpp>
 #include <atp/studio/project.hpp>
 
+#include "support/required.hpp"
+
 namespace {
 
 using atp::runtime::config_error;
@@ -53,8 +55,8 @@ TEST(StudioClipboard, CopyKeepsTheGroupOrderWhateverTheNameOrder) {
     const clipboard clip = proj.copy_children("", {"c", "a"});
 
     ASSERT_EQ(clip.nodes.size(), 2u);
-    EXPECT_EQ(clip.nodes.front().node.module->name, "a");
-    EXPECT_EQ(clip.nodes.back().node.module->name, "c");
+    EXPECT_EQ(atp_tests::required(clip.nodes.front().node.module).name, "a");
+    EXPECT_EQ(atp_tests::required(clip.nodes.back().node.module).name, "c");
 }
 
 TEST(StudioClipboard, CopyCarriesSubtreePositionsAndAssignmentsAsRelativePaths) {
@@ -118,7 +120,7 @@ TEST(StudioClipboard, PasteCarriesTheModuleWithItsPropertiesIntoAnotherGroup) {
 
     ASSERT_EQ(made, std::vector<std::string>{"ticks"});
     ASSERT_EQ(children_of(proj, "dst"), std::vector<std::string>{"ticks"});
-    const atp::runtime::module_node& m = *proj.group_at("dst")->modules.front().module;
+    const atp::runtime::module_node& m = atp_tests::required(proj.group_at("dst")->modules.front().module);
     EXPECT_EQ(m.factory, "counter");
     ASSERT_TRUE(m.factory_version.has_value());
     EXPECT_EQ(*m.factory_version, (atp::version{1, 0}));
@@ -204,9 +206,9 @@ TEST(StudioClipboard, PasteRestoresSubtreePositionsAndAssignmentsUnderTheNewPath
     (void)proj.paste("dst", clip, std::nullopt);
 
     ASSERT_TRUE(proj.position("dst.box").has_value());
-    EXPECT_EQ(*proj.position("dst.box"), (node_position{10.0f, 20.0f}));
+    EXPECT_EQ(atp_tests::required(proj.position("dst.box")), (node_position{10.0f, 20.0f}));
     ASSERT_TRUE(proj.position("dst.box.a").has_value());
-    EXPECT_EQ(*proj.position("dst.box.a"), (node_position{30.0f, 40.0f}));
+    EXPECT_EQ(atp_tests::required(proj.position("dst.box.a")), (node_position{30.0f, 40.0f}));
 
     const auto& assigned = proj.config().assignments;
     const std::pair<std::string, std::string> wanted{"dst.box", "t"};
@@ -241,8 +243,8 @@ TEST(StudioClipboard, PasteAtAPositionKeepsTheRelativeGeometry) {
     ASSERT_EQ(made.size(), 2u);
     ASSERT_TRUE(proj.position("dst.a").has_value());
     ASSERT_TRUE(proj.position("dst.b").has_value());
-    EXPECT_EQ(*proj.position("dst.a"), (node_position{0.0f, 0.0f}));
-    EXPECT_EQ(*proj.position("dst.b"), (node_position{60.0f, 40.0f}));
+    EXPECT_EQ(atp_tests::required(proj.position("dst.a")), (node_position{0.0f, 0.0f}));
+    EXPECT_EQ(atp_tests::required(proj.position("dst.b")), (node_position{60.0f, 40.0f}));
 }
 
 TEST(StudioClipboard, PasteIsOneUndoStep) {

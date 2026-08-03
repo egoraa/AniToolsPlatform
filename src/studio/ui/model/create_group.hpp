@@ -21,7 +21,7 @@ namespace atp::studio::ui {
 /// @param callbacks where the refresh and the error message go
 /// @param position canvas position of the new node; nullopt leaves it to the auto layout
 inline void create_group(app_state& state, ui_callbacks& callbacks, std::optional<node_position> position) {
-    if (state.run.running()) {
+    if (state.view->running()) {
         return;
     }
     try {

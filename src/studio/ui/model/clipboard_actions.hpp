@@ -15,12 +15,6 @@
 
 namespace atp::studio::ui {
 
-// The cut/copy/paste gestures, shared by the canvas and the project tree. They are free functions
-// for the same reason create_group is: the two widgets cannot reach each other, while the state and
-// the callbacks are what both already hold. All of them are no-ops while the pipeline runs — the
-// structure of a running project is read-only. None of them rebuilds the widgets: they report what
-// happened and leave the refresh to the caller, which knows whether it is safe to do it right now.
-
 /// Fills the clipboard from a selection, reporting a failure through the callbacks. The shared step
 /// of copy and cut; on its own it says nothing on success, since the two gestures word it
 /// differently.
@@ -31,7 +25,7 @@ inline bool take_nodes(app_state& state,
                        const std::string& group,
                        const std::vector<std::string>& names,
                        const char* verb) {
-    if (state.run.running() || names.empty()) {
+    if (state.view->running() || names.empty()) {
         return false;
     }
     try {
@@ -83,7 +77,7 @@ inline std::vector<std::string> paste_nodes(app_state& state,
                                             ui_callbacks& callbacks,
                                             const std::string& group,
                                             std::optional<node_position> at) {
-    if (state.run.running() || state.clip.empty()) {
+    if (state.view->running() || state.clip.empty()) {
         return {};
     }
     std::vector<std::string> made;

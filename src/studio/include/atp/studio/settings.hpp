@@ -61,6 +61,11 @@ struct studio_settings {
     std::string style;
     std::string window_geometry;
     std::string window_state;
+
+    /// Endpoint the Attach dialog offers first. A person watches the same host over and over, and
+    /// retyping a port every time is the kind of friction that stops people from looking.
+    std::string attach_host = "127.0.0.1";
+    int attach_port = 0;
 };
 
 /// How many projects the MRU list keeps.
@@ -81,18 +86,33 @@ inline void note_recent(studio_settings& s, const std::filesystem::path& file) {
 /// Default settings file: %APPDATA%/atp_studio on Windows, otherwise $XDG_CONFIG_HOME/atp_studio or
 /// ~/.config/atp_studio. The last fallback is next to the binary — studio has to work in a bare
 /// environment too.
+///
+/// std::getenv is kept despite the MSVC CRT deprecating it in favour of _dupenv_s: the standard
+/// deprecates nothing here, the lookup runs once at startup before the application has a second
+/// thread, and the result is only read — so neither the reentrancy nor the buffer-ownership concern
+/// behind that deprecation applies, and the alternative would be non-portable.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
 [[nodiscard]] inline std::filesystem::path default_settings_path() {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     if (const char* appdata = std::getenv("APPDATA")) {
         return std::filesystem::path(appdata) / "atp_studio" / "settings.json";
     }
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     if (const char* xdg = std::getenv("XDG_CONFIG_HOME")) {
         return std::filesystem::path(xdg) / "atp_studio" / "settings.json";
     }
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     if (const char* home = std::getenv("HOME")) {
         return std::filesystem::path(home) / ".config" / "atp_studio" / "settings.json";
     }
-    return std::filesystem::path("atp_studio_settings.json");
+    return {"atp_studio_settings.json"};
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 /// Reads the settings. A missing or corrupt file yields the defaults: neither a first run nor a
 /// damaged profile should take the application down.
@@ -125,6 +145,12 @@ inline void note_recent(studio_settings& s, const std::filesystem::path& file) {
         if (const auto it = doc.find("window_geometry"); it != doc.end() && it->is_string()) {
             s.window_geometry = it->get<std::string>();
         }
+        if (const auto it = doc.find("attach_host"); it != doc.end() && it->is_string()) {
+            s.attach_host = it->get<std::string>();
+        }
+        if (const auto it = doc.find("attach_port"); it != doc.end() && it->is_number_integer()) {
+            s.attach_port = it->get<int>();
+        }
         if (const auto it = doc.find("window_state"); it != doc.end() && it->is_string()) {
             s.window_state = it->get<std::string>();
         }
@@ -144,6 +170,8 @@ inline void save_settings(const studio_settings& s, const std::filesystem::path&
     doc["style"] = s.style;
     doc["window_geometry"] = s.window_geometry;
     doc["window_state"] = s.window_state;
+    doc["attach_host"] = s.attach_host;
+    doc["attach_port"] = s.attach_port;
     std::ofstream out(file);
     if (!out) {
         throw std::runtime_error("cannot write settings '" + file.string() + "'");

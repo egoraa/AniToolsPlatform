@@ -103,6 +103,21 @@ class io_registry {
         return result;
     }
 
+    /// Every entry paired with the name it is registered under.
+    ///
+    /// Not the same as walking list() and asking each port for its name: an alias publishes someone
+    /// else's port under a name of this registry, and the port object keeps its own. A path is
+    /// written in terms of the registry's name, so anything that has to produce a path — the
+    /// description of a live tree, above all — has to read it from here.
+    [[nodiscard]] std::vector<std::pair<std::string, TBase*>> entries() const {
+        std::vector<std::pair<std::string, TBase*>> result;
+        result.reserve(registry_.size());
+        for (const auto& [name, e] : registry_) {
+            result.emplace_back(name, e.port);
+        }
+        return result;
+    }
+
     /// Owned entries only — the material for the runner's port-to-thread map, from which group
     /// registries drop out on their own, holding nothing but aliases.
     [[nodiscard]] std::vector<TBase*> owned() const {

@@ -591,4 +591,57 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
     EXPECT_EQ(c.received.load(), 42);
 }
 
+TEST(PipelineRunner, StopIsNoexceptEvenWithDetachedGroups) {
+    static_assert(noexcept(std::declval<atp::pipeline_runner&>().stop()),
+                  "stop() is documented as never throwing, and the destructor relies on it");
+
+    rig r;
+    std::latch ticked(2);
+    r.a->first_iterate = &ticked;
+    r.b->first_iterate = &ticked;
+
+    atp::pipeline_runner runner;
+    runner.add_thread("main");
+    runner.add_thread("aux");
+    runner.assign(*r.stage, "aux");
+    runner.start(r.pipe);
+    ticked.wait();
+
+    EXPECT_NO_THROW(runner.stop());
+    EXPECT_NO_THROW(runner.stop());
+    EXPECT_EQ(runner.error(), nullptr);
+}
+
+TEST(PipelineRunner, DestructorStopsAPipelineThatHasDetachedGroups) {
+    rig r;
+    std::latch ticked(2);
+    r.a->first_iterate = &ticked;
+    r.b->first_iterate = &ticked;
+    {
+        atp::pipeline_runner runner;
+        runner.add_thread("main");
+        runner.add_thread("aux");
+        runner.assign(*r.stage, "aux");
+        runner.start(r.pipe);
+        ticked.wait();
+    }
+    const std::vector<std::string> reversed{"d", "c", "b", "a"};
+    EXPECT_EQ(r.log.order_of("stop"), reversed);
+}
+
+TEST(PipelineRunner, ANameLongerThanThePlatformAllowsDoesNotBringTheThreadDown) {
+    rig r;
+    std::latch ticked(1);
+    r.a->first_iterate = &ticked;
+
+    atp::pipeline_runner runner;
+    runner.add_thread(std::string(512, 'x'));
+    runner.start(r.pipe);
+    ticked.wait();
+    runner.stop();
+
+    EXPECT_EQ(runner.error(), nullptr);
+    EXPECT_EQ(runner.stats().size(), 1u);
+}
+
 }  // namespace

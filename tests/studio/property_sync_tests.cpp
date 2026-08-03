@@ -11,6 +11,8 @@
 #include <atp/studio/project.hpp>
 #include <atp/studio/property_sync.hpp>
 
+#include "support/required.hpp"
+
 namespace {
 
 struct sync_props : atp::io::properties {
@@ -39,7 +41,7 @@ TEST(StudioPropertySync, PullsPersistentValuesIntoProject) {
 
     atp::studio::sync_persistent_properties(proj, proj.config(), pipe.root());
 
-    const auto& props = proj.config().pipeline.modules[0].module->properties;
+    const auto& props = atp_tests::required(proj.config().pipeline.modules[0].module).properties;
     ASSERT_EQ(props.size(), 2u);
     EXPECT_EQ(props[0].second, nlohmann::json(42));
     EXPECT_EQ(props[1].second, nlohmann::json(true));
@@ -58,7 +60,7 @@ TEST(StudioPropertySync, DefaultValuesAreDroppedFromProject) {
     pipe.root().find_module("syncer")->properties().at("limit").from_string("10");
 
     atp::studio::sync_persistent_properties(proj, proj.config(), pipe.root());
-    EXPECT_TRUE(proj.config().pipeline.modules[0].module->properties.empty());
+    EXPECT_TRUE(atp_tests::required(proj.config().pipeline.modules[0].module).properties.empty());
 }
 
 }  // namespace

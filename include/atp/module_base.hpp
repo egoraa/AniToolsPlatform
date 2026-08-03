@@ -17,7 +17,7 @@ class properties;
 
 namespace atp {
 
-using work_status = io::work_status;
+using io::work_status;
 
 /// Type-erased base of a module, the peer of io_base/input_base/output_base.
 class module_base {
@@ -75,7 +75,7 @@ class module_base {
 /// pin is empty and this is a plain delete. The pin is a member of the deleter rather than a
 /// shared_ptr control block, so ownership of the module stays unique.
 struct module_deleter {
-    std::shared_ptr<void> pin{};
+    std::shared_ptr<void> pin;
 
     void operator()(module_base* m) const noexcept {
         delete m;

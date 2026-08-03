@@ -18,11 +18,11 @@ namespace detail {
         case io::property_kind::number:
             return nlohmann::json::parse(p.to_string());
         case io::property_kind::boolean:
-            return nlohmann::json(p.to_string() == "true");
+            return p.to_string() == "true";
         case io::property_kind::text:
             break;
     }
-    return nlohmann::json(p.to_string());
+    return p.to_string();
 }
 
 inline void sync_group(project& proj,
@@ -31,7 +31,8 @@ inline void sync_group(project& proj,
                        const std::string& group_path) {
     for (const runtime::child_node& c : node.modules) {
         if (c.module) {
-            const module_base* m = live.find_module(c.module->name);
+            const runtime::module_node& declared = *c.module;
+            const module_base* m = live.find_module(declared.name);
             if (m == nullptr) {
                 continue;
             }
@@ -40,9 +41,9 @@ inline void sync_group(project& proj,
                     continue;
                 }
                 if (p->to_string() == p->default_string()) {
-                    proj.clear_property(group_path, c.module->name, p->name());
+                    proj.clear_property(group_path, declared.name, p->name());
                 } else {
-                    proj.set_property(group_path, c.module->name, p->name(), property_value_to_json(*p));
+                    proj.set_property(group_path, declared.name, p->name(), property_value_to_json(*p));
                 }
             }
         } else {

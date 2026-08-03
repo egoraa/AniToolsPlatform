@@ -70,11 +70,11 @@ class configured_module : public atp::module<> {
     int value_;
 };
 
-template <typename M>
-concept registry_adds_by_own_name = requires(atp::module_registry r) { r.add<M>(); };
+template <typename TModule>
+concept registry_adds_by_own_name = requires(atp::module_registry r) { r.add<TModule>(); };
 
-template <typename M>
-concept registrar_adds_by_own_name = requires(atp::module_registrar r) { r.add<M>(); };
+template <typename TModule>
+concept registrar_adds_by_own_name = requires(atp::module_registrar r) { r.add<TModule>(); };
 
 }  // namespace
 

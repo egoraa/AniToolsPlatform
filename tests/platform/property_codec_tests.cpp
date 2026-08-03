@@ -5,6 +5,8 @@
 
 #include <atp/io/property_codec.hpp>
 
+#include "support/required.hpp"
+
 namespace {
 
 struct percent {
@@ -63,7 +65,7 @@ TEST(PropertyCodec, UserSpecializationSatisfiesConcept) {
     static_assert(atp::io::property_value<percent>);
     static_assert(atp::io::property_value<int>);
     static_assert(!atp::io::property_value<void*>);
-    EXPECT_EQ(atp::io::property_codec<percent>::from_string("15%")->value, 15);
+    EXPECT_EQ(atp_tests::required(atp::io::property_codec<percent>::from_string("15%")).value, 15);
 }
 
 }  // namespace

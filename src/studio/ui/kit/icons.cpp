@@ -33,7 +33,7 @@ class svg_icon final : public QIconEngine {
         if (side <= 0) {
             return;
         }
-        const QPoint at(rect.x() + (rect.width() - side) / 2, rect.y() + (rect.height() - side) / 2);
+        const QPoint at(rect.x() + ((rect.width() - side) / 2), rect.y() + ((rect.height() - side) / 2));
         painter->drawImage(at, render(QSize(side, side), mode));
     }
 

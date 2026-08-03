@@ -40,7 +40,7 @@ class McpCatalogTools : public ::testing::Test {
         std::filesystem::remove_all(root_);
     }
 
-    nlohmann::json call(const char* name, nlohmann::json args = nlohmann::json::object()) {
+    nlohmann::json call(const char* name, const nlohmann::json& args = nlohmann::json::object()) {
         const atp::mcp::tool* t = tools_.find(name);
         EXPECT_NE(t, nullptr) << name;
         return t == nullptr ? nlohmann::json::object() : t->run(args);

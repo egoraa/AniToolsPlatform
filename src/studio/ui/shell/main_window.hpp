@@ -20,6 +20,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QString>
+#include <QTimer>
 
 namespace atp::studio::ui {
 
@@ -78,6 +79,10 @@ class main_window final : public QMainWindow {
 
     void open_dialog();
 
+    void attach_dialog_flow();
+
+    void detach(const QString& reason);
+
     void save(bool ask_path);
 
     void poll();
@@ -97,6 +102,11 @@ class main_window final : public QMainWindow {
     QMenu* recent_menu_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;
+    QAction* attach_action_ = nullptr;
+    QAction* detach_action_ = nullptr;
+    QAction* refresh_mirror_action_ = nullptr;
+    QAction* stop_remote_action_ = nullptr;
+    QTimer* poll_timer_ = nullptr;
     QAction* undo_action_ = nullptr;
     QAction* redo_action_ = nullptr;
     QAction* new_group_action_ = nullptr;

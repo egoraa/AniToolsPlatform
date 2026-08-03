@@ -60,6 +60,7 @@ class property : public property_base {
     /// @param p whether the value is written to the config on save
     /// @param s whether this instance serialises access
     /// @throws std::invalid_argument if the default is outside the type-level value set
+    // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
     explicit property(std::string name, T default_value = T{}, persistence p = atp::io::persistent, safety s = safe)
         : property_base(std::move(name), typeid(T), property_codec<T>::kind, detail::type_options<T>(), p, s)
         , default_(checked(std::move(default_value)))
@@ -82,10 +83,10 @@ class property : public property_base {
 
     /// Writes a value and raises the changed flag.
     /// @throws std::invalid_argument if the value is outside the value set
-    template <typename U>
-        requires std::constructible_from<T, U>
-    void operator()(U&& value) {
-        T incoming = checked(T(std::forward<U>(value)));
+    template <typename TArg>
+        requires std::constructible_from<T, TArg>
+    void operator()(TArg&& value) {
+        T incoming = checked(T(std::forward<TArg>(value)));
         auto guard = lock();
         value_ = std::move(incoming);
         changed_ = true;

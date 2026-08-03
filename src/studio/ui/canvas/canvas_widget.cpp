@@ -81,12 +81,12 @@ void canvas_widget::rebuild_crumbs() {
         }
         begin = dot + 1;
     }
-    auto* row = static_cast<QHBoxLayout*>(crumbs_->layout());
+    auto* row = qobject_cast<QHBoxLayout*>(crumbs_->layout());
     row->addStretch(1);
     auto* add = new QPushButton(QString(QChar(style::glyph::add)) + " group", crumbs_);
     add->setFlat(true);
     add->setToolTip("add an empty group to the group shown");
-    add->setEnabled(!state_.run.running());
+    add->setEnabled(!state_.view->running());
     QObject::connect(add, &QPushButton::clicked, this, [this] { create_group(state_, callbacks_, std::nullopt); });
     row->addWidget(add);
 }

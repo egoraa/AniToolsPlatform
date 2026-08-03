@@ -147,7 +147,7 @@ void project_tree::refresh() {
         item->setSelected(true);
         scrollToItem(item);
     }
-    setEnabled(!state_.run.running());
+    setEnabled(!state_.view->running());
     rebuilding_ = false;
 }
 
@@ -179,7 +179,7 @@ QStringList project_tree::mimeTypes() const {
 }
 
 QMimeData* project_tree::mimeData(const QList<QTreeWidgetItem*>& items) const {
-    if (items.isEmpty() || state_.run.running()) {
+    if (items.isEmpty() || state_.view->running()) {
         return nullptr;
     }
     const QString path = items.front()->data(0, path_role).toString();
@@ -205,7 +205,7 @@ void project_tree::dragLeaveEvent(QDragLeaveEvent* event) {
 
 void project_tree::accept_drag(QDragMoveEvent* event) {
     const QMimeData* mime = event->mimeData();
-    if (state_.run.running() || mime == nullptr ||
+    if (state_.view->running() || mime == nullptr ||
         !(mime->hasFormat(node_mime_type) || mime->hasFormat(module_mime_type) || is_group_mime(mime))) {
         clear_drop_target();
         event->ignore();
@@ -270,7 +270,7 @@ void project_tree::paintEvent(QPaintEvent* event) {
 
 void project_tree::dropEvent(QDropEvent* event) {
     clear_drop_target();
-    if (state_.run.running()) {
+    if (state_.view->running()) {
         event->ignore();
         return;
     }
@@ -413,6 +413,7 @@ void project_tree::commit_rename(QTreeWidgetItem* item) {
 
 bool project_tree::viewportEvent(QEvent* event) {
     if (event->type() == QEvent::ContextMenu) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
         auto* menu_event = static_cast<QContextMenuEvent*>(event);
         show_menu(menu_event->pos(), menu_event->globalPos());
         menu_event->accept();
@@ -422,7 +423,7 @@ bool project_tree::viewportEvent(QEvent* event) {
 }
 
 void project_tree::show_menu(const QPoint& pos, const QPoint& global) {
-    if (state_.run.running()) {
+    if (state_.view->running()) {
         return;
     }
     QTreeWidgetItem* item = itemAt(pos);
@@ -521,7 +522,7 @@ void project_tree::remove_current() {
 }
 
 void project_tree::keyPressEvent(QKeyEvent* event) {
-    if (state_.run.running()) {
+    if (state_.view->running()) {
         QTreeWidget::keyPressEvent(event);
         return;
     }

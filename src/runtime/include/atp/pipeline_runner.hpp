@@ -109,7 +109,7 @@ class pipeline_runner {
             threads_config_.push_back({"main", {}});
         }
         {
-            std::lock_guard lock(error_mutex_);
+            std::scoped_lock lock(error_mutex_);
             error_ = nullptr;
         }
         pipeline_ = &p;
@@ -143,7 +143,13 @@ class pipeline_runner {
 
     /// Requests the stop, joins the threads and runs the stop cascade. Idempotent and never throws:
     /// an error from the cascade is reported through error().
-    void stop() {
+    ///
+    /// The noexcept is the contract itself rather than a decoration: the destructor calls this, and
+    /// a destructor that throws terminates. It is honest because every step under it either cannot
+    /// throw (uninstall_notifiers, undo_detach — see there) or is caught and stored (the cascade).
+    /// What remains is std::system_error out of join() or a mutex, which is a state the process does
+    /// not come back from anyway.
+    void stop() noexcept {
         if (!running_) {
             return;
         }
@@ -172,7 +178,7 @@ class pipeline_runner {
 
     /// First execution error, or nullptr; kept until the next start().
     [[nodiscard]] std::exception_ptr error() const {
-        std::lock_guard lock(error_mutex_);
+        std::scoped_lock lock(error_mutex_);
         return error_;
     }
 
@@ -280,14 +286,21 @@ class pipeline_runner {
         for (const group_node& n : groups_) {
             if (n.parent != nullptr && assigned_.contains(n.node)) {
                 n.parent->set_detached(*n.node, true);
-                detached_.push_back({n.parent, n.node});
+                detached_.emplace_back(n.parent, n.node);
             }
         }
     }
 
-    void undo_detach() {
+    /// Returns every detached subgroup to its parent's iterate.
+    ///
+    /// It clears flags this runner set itself, so a missing child would mean the tree changed
+    /// underneath a running pipeline. That is why the non-throwing form is used and its answer
+    /// discarded: this runs inside stop(), which is noexcept because the destructor calls it, and a
+    /// guarantee that rests on "the child is surely still there" is a guarantee waiting to be broken
+    /// by whoever adds a way to remove one.
+    void undo_detach() noexcept {
         for (auto& [parent, sub] : detached_) {
-            parent->set_detached(*sub, false);
+            (void)parent->try_set_detached(*sub, false);
         }
         detached_.clear();
     }
@@ -299,7 +312,7 @@ class pipeline_runner {
 
         void notify() noexcept override {
             {
-                std::lock_guard lock(mutex);
+                std::scoped_lock lock(mutex);
                 signaled = true;
             }
             cv.notify_one();
@@ -426,21 +439,21 @@ class pipeline_runner {
         }
     }
 
-    void capture_error(std::exception_ptr e) {
+    void capture_error(const std::exception_ptr& e) {
         {
-            std::lock_guard lock(error_mutex_);
+            std::scoped_lock lock(error_mutex_);
             if (!error_) {
-                error_ = std::move(e);
+                error_ = e;
             }
             stop_source_.request_stop();
         }
         error_cv_.notify_all();
     }
 
-    void store_error(std::exception_ptr e) {
-        std::lock_guard lock(error_mutex_);
+    void store_error(const std::exception_ptr& e) {
+        std::scoped_lock lock(error_mutex_);
         if (!error_) {
-            error_ = std::move(e);
+            error_ = e;
         }
     }
 

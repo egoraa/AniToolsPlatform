@@ -1,12 +1,27 @@
 #include "panels/runtime_widget.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <exception>
 #include <string>
+#include <vector>
 
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QTableWidgetItem>
 #include <QVBoxLayout>
 
 namespace atp::studio::ui {
+
+namespace {
+
+constexpr int module_column = 0;
+constexpr int calls_column = 1;
+constexpr int busy_column = 2;
+constexpr int total_column = 3;
+constexpr int max_column = 4;
+
+}  // namespace
 
 runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent)
     : QWidget(parent), state_(state), callbacks_(callbacks) {
@@ -27,6 +42,25 @@ runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidge
     threads_ = new thread_table(state_, callbacks_, this);
     layout->addWidget(threads_, 1);
 
+    layout->addWidget(style::section_header("modules", this));
+    measure_ = new QCheckBox("measure each module's iterate", this);
+    measure_->setToolTip(
+        "Times every iterate. Not free — it cost a quarter of the throughput of a two-module "
+        "pipeline — so switch it on to find the slow module, then off again.");
+    layout->addWidget(measure_);
+    modules_ = new QTableWidget(0, 5, this);
+    modules_->setObjectName("module_metrics");
+    modules_->setHorizontalHeaderLabels({"module", "calls", "busy", "total ms", "max us"});
+    modules_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    modules_->horizontalHeader()->setSectionResizeMode(module_column, QHeaderView::Stretch);
+    modules_->verticalHeader()->setVisible(false);
+    layout->addWidget(modules_, 1);
+
+    QObject::connect(measure_, &QCheckBox::toggled, this, [this](bool on) {
+        (void)state_.view->set_metrics_enabled(on);
+        refresh_modules();
+    });
+
     QObject::connect(run_, &QPushButton::clicked, this, [this] { start(); });
     QObject::connect(stop_, &QPushButton::clicked, this, [this] {
         state_.run.stop();
@@ -35,11 +69,40 @@ runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidge
 }
 
 void runtime_widget::refresh() {
-    const bool running = state_.run.running();
-    run_->setEnabled(!running);
-    stop_->setEnabled(running);
-    status_->setText(running ? "running" : "stopped");
+    const bool running = state_.view->running();
+    const bool attached = state_.attached();
+    run_->setEnabled(!running && !attached);
+    stop_->setEnabled(running && !attached);
+    status_->setText(attached ? QString::fromStdString("attached to " + state_.endpoint())
+                              : QString(running ? "running" : "stopped"));
     threads_->refresh();
+
+    measure_->setEnabled(running);
+    {
+        const QSignalBlocker block(measure_);
+        measure_->setChecked(state_.view->metrics_enabled());
+    }
+    refresh_modules();
+}
+
+void runtime_widget::refresh_modules() {
+    std::vector<group::module_stats> stats = state_.view->module_metrics();
+    std::ranges::sort(stats,
+                      [](const group::module_stats& a, const group::module_stats& b) { return a.total > b.total; });
+    modules_->setRowCount(static_cast<int>(stats.size()));
+    for (std::size_t index = 0; index < stats.size(); ++index) {
+        const group::module_stats& s = stats[index];
+        const int row = static_cast<int>(index);
+        modules_->setItem(row, module_column, new QTableWidgetItem(QString::fromStdString(s.path)));
+        modules_->setItem(row, calls_column, new QTableWidgetItem(QString::number(s.calls)));
+        modules_->setItem(row, busy_column, new QTableWidgetItem(QString::number(s.busy_calls)));
+        modules_->setItem(
+            row, total_column,
+            new QTableWidgetItem(QString::number(std::chrono::duration<double, std::milli>(s.total).count(), 'f', 3)));
+        modules_->setItem(
+            row, max_column,
+            new QTableWidgetItem(QString::number(std::chrono::duration<double, std::micro>(s.max).count(), 'f', 1)));
+    }
 }
 
 void runtime_widget::start() {

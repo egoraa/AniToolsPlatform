@@ -59,6 +59,7 @@ TEST(EnumNames, OptionsKeepDeclarationOrder) {
 }
 
 TEST(EnumNames, ValueOutsideTableHasNoText) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(blend_codec::to_string(static_cast<blend>(99)), "");
 }
 

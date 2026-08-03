@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <atp/module.hpp>
+#include <atp/null_host.hpp>
 
 namespace {
 
@@ -45,7 +46,8 @@ static_assert(full_module::module_version == atp::version{1, 2, 3});
 
 TEST(Module, InitializeOverrideRuns) {
     atp::service_directory services;
-    atp::module_context context{services};
+    atp::null_host host;
+    atp::module_context context{services, host};
     test_module module;
     module.initialize(context);
     EXPECT_TRUE(module.initialized);

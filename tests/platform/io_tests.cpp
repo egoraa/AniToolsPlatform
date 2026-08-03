@@ -353,40 +353,41 @@ TEST(Watcher, HandlerRunsOnPollingThread) {
 
 TEST(QueuedInput, ConcurrentProducersLoseNothing) {
     atp::io::queued_input<int> in{"q_int"};
-    constexpr int kThreads = 4;
-    constexpr int kPerThread = 1000;
+    constexpr int thread_count = 4;
+    constexpr int per_thread = 1000;
     {
         std::vector<std::jthread> producers;
-        for (int t = 0; t < kThreads; ++t) {
+        producers.reserve(thread_count);
+        for (int t = 0; t < thread_count; ++t) {
             producers.emplace_back([&in] {
-                for (int i = 0; i < kPerThread; ++i) {
+                for (int i = 0; i < per_thread; ++i) {
                     in(i);
                 }
             });
         }
     }
-    EXPECT_EQ(in.size(), static_cast<std::size_t>(kThreads) * kPerThread);
+    EXPECT_EQ(in.size(), static_cast<std::size_t>(thread_count) * per_thread);
 }
 
 TEST(QueuedInput, ProducerAndConsumerRunConcurrently) {
     atp::io::queued_input<int> in{"q_int"};
-    constexpr int kCount = 5000;
+    constexpr int count = 5000;
     long long sum = 0;
     int received = 0;
     {
         std::jthread producer([&in] {
-            for (int i = 1; i <= kCount; ++i) {
+            for (int i = 1; i <= count; ++i) {
                 in(i);
             }
         });
-        while (received < kCount) {
+        while (received < count) {
             if (auto item = in.try_pop()) {
                 sum += *item;
                 ++received;
             }
         }
     }
-    EXPECT_EQ(sum, static_cast<long long>(kCount) * (kCount + 1) / 2);
+    EXPECT_EQ(sum, static_cast<long long>(count) * (count + 1) / 2);
 }
 
 TEST(InputsRegistry, TypedFieldAccess) {
@@ -721,19 +722,20 @@ TEST(Output, ConcurrentWritersLoseNothingInQueuedTarget) {
     atp::io::output<int> out{"out_int"};
     atp::io::queued_input<int> q{"q"};
     out.connect(q);
-    constexpr int kThreads = 4;
-    constexpr int kPerThread = 1000;
+    constexpr int thread_count = 4;
+    constexpr int per_thread = 1000;
     {
         std::vector<std::jthread> writers;
-        for (int t = 0; t < kThreads; ++t) {
+        writers.reserve(thread_count);
+        for (int t = 0; t < thread_count; ++t) {
             writers.emplace_back([&out] {
-                for (int i = 0; i < kPerThread; ++i) {
+                for (int i = 0; i < per_thread; ++i) {
                     out(i);
                 }
             });
         }
     }
-    EXPECT_EQ(q.size(), static_cast<std::size_t>(kThreads) * kPerThread);
+    EXPECT_EQ(q.size(), static_cast<std::size_t>(thread_count) * per_thread);
     EXPECT_FALSE(out.empty());
 }
 

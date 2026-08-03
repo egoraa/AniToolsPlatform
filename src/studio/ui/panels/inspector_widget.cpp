@@ -95,7 +95,7 @@ void inspector_widget::sync() {
 }
 
 void inspector_widget::apply_lock() {
-    const bool locked = state_.run.running();
+    const bool locked = state_.view->running();
     for (int i = 0; i < body_layout_->count(); ++i) {
         QWidget* block = body_layout_->itemAt(i)->widget();
         if (block == nullptr) {
@@ -182,7 +182,7 @@ void inspector_widget::build_group_section(const std::string& group_path, const 
     if (renameable) {
         auto* name_edit = new QLineEdit(QString::fromStdString(name), body_);
         form->addRow("name", name_edit);
-        const std::string old_name = name;
+        const std::string& old_name = name;
         QObject::connect(name_edit, &QLineEdit::editingFinished, this,
                          [this, old_name, name_edit] { commit_rename(old_name, name_edit); });
     } else {

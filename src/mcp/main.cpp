@@ -4,7 +4,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -64,7 +63,7 @@ int main(int argc, char** argv) {
 
     try {
         std::FILE* protocol = claim_protocol_stream();
-        atp::mcp::workspace ws(std::move(args->root), std::move(args->plugin_dirs), std::move(args->scan_dirs));
+        atp::mcp::workspace ws(args->root, args->plugin_dirs, args->scan_dirs);
         atp::mcp::tool_registry tools;
         atp::mcp::resource_registry resources;
         atp::mcp::register_catalog_tools(tools, ws);

@@ -1,6 +1,8 @@
 #include <iostream>
 #include <stop_token>
 
+#include <atp/null_host.hpp>
+
 #include "demo_modules.hpp"
 
 int main() {
@@ -14,7 +16,8 @@ int main() {
     }
 
     atp::service_directory services;
-    atp::module_context context{services};
+    atp::null_host host;
+    atp::module_context context{services, host};
 
     auto counter = registry.create("counter");
     counter->initialize(context);

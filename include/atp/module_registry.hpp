@@ -19,7 +19,7 @@ namespace atp {
 /// Contract "the module declares a name of its own": a static module_name member convertible to
 /// string_view and non-empty (module<> derives it from the NTTP; a module written outside the
 /// template declares it by hand). An anonymous module does not satisfy the concept and can only be
-/// registered through an explicit add<M>(name).
+/// registered through an explicit add<TModule>(name).
 template <typename T>
 concept has_module_name = requires {
     { T::module_name } -> std::convertible_to<std::string_view>;
@@ -41,21 +41,21 @@ class module_registry {
 
     /// Registers a module under the name it declares itself (contract has_module_name).
     /// @throws std::runtime_error if this name and version are already registered
-    template <std::derived_from<module_base> M>
-        requires std::constructible_from<M> && has_module_name<M>
+    template <std::derived_from<module_base> TModule>
+        requires std::constructible_from<TModule> && has_module_name<TModule>
     module_factory_base& add() {
-        return add<M>(std::string{M::module_name});
+        return add<TModule>(std::string{TModule::module_name});
     }
 
     /// Registers a module under an explicit name, so one type may be registered under aliases.
     /// @param name registration name
     /// @param args constructor arguments bound to the factory
     /// @throws std::runtime_error if this name and version are already registered
-    template <std::derived_from<module_base> M, typename... TArgs>
-        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
+    template <std::derived_from<module_base> TModule, typename... TArgs>
+        requires std::constructible_from<TModule, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
-        return add(
-            std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name), std::forward<TArgs>(args)...));
+        return add(std::make_unique<module_factory<TModule, std::decay_t<TArgs>...>>(std::move(name),
+                                                                                     std::forward<TArgs>(args)...));
     }
 
     /// Registers a ready-made factory — the shared path, also open to non-standard factories. A
@@ -226,21 +226,21 @@ class module_registrar {
 
     /// Registers a module under the name it declares itself (contract has_module_name).
     /// @throws std::runtime_error if this name and version are already registered
-    template <std::derived_from<module_base> M>
-        requires std::constructible_from<M> && has_module_name<M>
+    template <std::derived_from<module_base> TModule>
+        requires std::constructible_from<TModule> && has_module_name<TModule>
     module_factory_base& add() {
-        return add<M>(std::string{M::module_name});
+        return add<TModule>(std::string{TModule::module_name});
     }
 
     /// Registers a module under an explicit name.
     /// @param name registration name
     /// @param args constructor arguments bound to the factory
     /// @throws std::runtime_error if this name and version are already registered
-    template <std::derived_from<module_base> M, typename... TArgs>
-        requires std::constructible_from<M, const std::decay_t<TArgs>&...>
+    template <std::derived_from<module_base> TModule, typename... TArgs>
+        requires std::constructible_from<TModule, const std::decay_t<TArgs>&...>
     module_factory_base& add(std::string name, TArgs&&... args) {
-        return add(
-            std::make_unique<module_factory<M, std::decay_t<TArgs>...>>(std::move(name), std::forward<TArgs>(args)...));
+        return add(std::make_unique<module_factory<TModule, std::decay_t<TArgs>...>>(std::move(name),
+                                                                                     std::forward<TArgs>(args)...));
     }
 
     /// Registers a ready-made factory, wrapping it into the pin when there is one.

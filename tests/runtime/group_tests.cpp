@@ -8,6 +8,7 @@
 
 #include <atp/group.hpp>
 #include <atp/module.hpp>
+#include <atp/null_host.hpp>
 
 #include "support/pipeline_test_support.hpp"
 
@@ -40,7 +41,8 @@ struct rig {
     atp::group* stage;
     atp::group* deep;
     atp::service_directory services;
-    atp::module_context ctx{services};
+    atp::null_host host;
+    atp::module_context ctx{services, host};
 
     rig() {
         a = &root.make<probe_module>("a", log, "a");

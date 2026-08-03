@@ -35,8 +35,7 @@ class validator {
     }
 
     bool check_name(const nlohmann::json& node, const std::string& path) {
-        if (!node.is_string() || node.get<std::string>().empty() ||
-            node.get<std::string>().find('.') != std::string::npos) {
+        if (!node.is_string() || node.get<std::string>().empty() || node.get<std::string>().contains('.')) {
             error(path, "must be a non-empty string without '.'");
             return false;
         }
@@ -82,7 +81,7 @@ class validator {
             return;
         }
         for (const auto& [alias, port_path] : node.items()) {
-            if (alias.empty() || alias.find('.') != std::string::npos) {
+            if (alias.empty() || alias.contains('.')) {
                 error(path, "bad alias '" + alias + "'");
             }
             check_port_path(port_path, path + "." + alias);
@@ -177,7 +176,7 @@ class validator {
                 if (!node.at("properties").is_object()) {
                     error(ppath, "must be an object of name -> scalar");
                 } else {
-                    const nlohmann::json props = node.at("properties");
+                    const nlohmann::json& props = node.at("properties");
                     for (const auto& [pname, pvalue] : props.items()) {
                         if (!pvalue.is_number() && !pvalue.is_string() && !pvalue.is_boolean()) {
                             error(ppath + "." + pname, "must be a scalar (number, string or boolean)");

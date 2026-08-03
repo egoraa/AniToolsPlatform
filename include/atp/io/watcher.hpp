@@ -63,51 +63,58 @@ class watcher {
     };
 
     template <typename T>
-    struct value_rule : rule_base {
-        value_rule(input<T>& in, std::function<void(const T&)> handler) : in(&in), handler(std::move(handler)) {}
+    struct value_rule final : rule_base {
+        value_rule(input<T>& in, std::function<void(const T&)> handler) : in_(&in), handler_(std::move(handler)) {}
         work_status poll() override {
-            std::optional<T> value = in->take();
+            std::optional<T> value = in_->take();
             if (!value) {
                 return work_status::idle;
             }
-            handler(*value);
+            handler_(*value);
             return work_status::busy;
         }
-        input<T>* in;
-        std::function<void(const T&)> handler;
+
+       private:
+        input<T>* in_;
+        std::function<void(const T&)> handler_;
     };
 
     template <typename T>
-    struct queue_rule : rule_base {
-        queue_rule(queued_input<T>& in, std::function<void(const T&)> handler) : in(&in), handler(std::move(handler)) {}
+    struct queue_rule final : rule_base {
+        queue_rule(queued_input<T>& in, std::function<void(const T&)> handler)
+            : in_(&in), handler_(std::move(handler)) {}
         work_status poll() override {
-            auto batch = in->drain();
+            auto batch = in_->drain();
             if (batch.empty()) {
                 return work_status::idle;
             }
             for (const T& value : batch) {
-                handler(value);
+                handler_(value);
             }
             return work_status::busy;
         }
-        queued_input<T>* in;
-        std::function<void(const T&)> handler;
+
+       private:
+        queued_input<T>* in_;
+        std::function<void(const T&)> handler_;
     };
 
     template <typename T>
-    struct property_rule : rule_base {
+    struct property_rule final : rule_base {
         property_rule(property<T>& prop, std::function<void(const T&)> handler)
-            : prop(&prop), handler(std::move(handler)) {}
+            : prop_(&prop), handler_(std::move(handler)) {}
         work_status poll() override {
-            std::optional<T> value = prop->take();
+            std::optional<T> value = prop_->take();
             if (!value) {
                 return work_status::idle;
             }
-            handler(*value);
+            handler_(*value);
             return work_status::busy;
         }
-        property<T>* prop;
-        std::function<void(const T&)> handler;
+
+       private:
+        property<T>* prop_;
+        std::function<void(const T&)> handler_;
     };
 
     std::vector<std::unique_ptr<rule_base>> rules_;

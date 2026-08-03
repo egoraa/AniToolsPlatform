@@ -92,7 +92,7 @@ inline module_node decode_module(const nlohmann::json& j) {
         m.factory_version = *v;
     }
     if (j.contains("properties")) {
-        const nlohmann::json props = j.at("properties");
+        const nlohmann::json& props = j.at("properties");
         for (const auto& [name, value] : props.items()) {
             m.properties.emplace_back(name, value);
         }

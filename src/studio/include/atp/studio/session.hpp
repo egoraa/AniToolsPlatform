@@ -1,14 +1,9 @@
 #ifndef ATP_STUDIO_SESSION_HPP
 #define ATP_STUDIO_SESSION_HPP
 
-#include <any>
-#include <cstddef>
-#include <cstdint>
 #include <exception>
 #include <memory>
-#include <optional>
 #include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -16,6 +11,7 @@
 #include <atp/pipeline.hpp>
 #include <atp/pipeline_runner.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/connection_sample.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
 #include <atp/runtime/property_override.hpp>
 
@@ -86,38 +82,46 @@ class session {
         return runner_ ? runner_->stats() : std::vector<pipeline_runner::thread_stats>{};
     }
 
-    /// Monitoring sample of one connection. The (group path, index) pair matches the project's,
-    /// since build_group preserves declaration order.
-    struct connection_sample {
-        std::string group_path;
-        std::size_t index = 0;
-        std::optional<std::any> value;
-        std::uint64_t writes = 0;
-    };
+    /// Turns per-module timing on or off for the whole running pipeline; does nothing when nothing
+    /// is running, since the counters live in the tree the runner is driving.
+    ///
+    /// It is a switch rather than a setting because measuring is not free: timing every iterate cost
+    /// a quarter of the throughput of a two-module pipeline (docs/benchmarks.md). Turning it on is
+    /// something a person does while asking "which module is slow", not something a deployment
+    /// leaves on.
+    /// @return false if there is nothing running to enable it on
+    bool set_metrics_enabled(bool on) {
+        if (group* root = live_root()) {
+            root->set_metrics_enabled(on);
+            return true;
+        }
+        return false;
+    }
+
+    /// Whether the running pipeline is timing its modules; false when nothing runs.
+    [[nodiscard]] bool metrics_enabled() const {
+        const group* root = live_root();
+        return root != nullptr && root->metrics_enabled();
+    }
+
+    /// Per-module cost of the running pipeline; empty if nothing has been started or metrics were
+    /// never enabled. The counters accumulate from the moment they are switched on, so a reader
+    /// comparing two samples sees the interval between them.
+    [[nodiscard]] std::vector<group::module_stats> module_metrics() const {
+        const group* root = live_root();
+        return root ? root->metrics() : std::vector<group::module_stats>{};
+    }
+
+    /// Monitoring sample of one connection. The type lives in the runtime, since the headless host
+    /// samples the same way and only one of the two owns a session.
+    using connection_sample = runtime::connection_sample;
 
     /// Samples every connection of the pipeline for monitoring; empty if nothing has been started.
-    [[nodiscard]] std::vector<connection_sample> sample_connections() const {
-        std::vector<connection_sample> out;
-        if (pipe_) {
-            collect(pipe_->root(), "", out);
-        }
-        return out;
+    [[nodiscard]] std::vector<runtime::connection_sample> sample_connections() const {
+        return pipe_ ? runtime::sample_connections(pipe_->root()) : std::vector<runtime::connection_sample>{};
     }
 
    private:
-    void collect(const group& g, const std::string& path, std::vector<connection_sample>& out) const {
-        std::size_t index = 0;
-        for (const group::connection& c : g.connections()) {
-            out.push_back({path, index, c.out->peek(), c.out->write_count()});
-            ++index;
-        }
-        for (const group::child& child : g.children()) {
-            if (const auto* sub = dynamic_cast<const group*>(child.module.get())) {
-                collect(*sub, path.empty() ? child.name : path + "." + child.name, out);
-            }
-        }
-    }
-
     module_registry* registry_;
     std::unique_ptr<pipeline> pipe_;
     std::unique_ptr<pipeline_runner> runner_;

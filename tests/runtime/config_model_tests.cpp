@@ -8,6 +8,8 @@
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
 
+#include "support/required.hpp"
+
 namespace {
 
 TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
@@ -34,14 +36,14 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
 
     ASSERT_EQ(cfg.pipeline.modules.size(), 2u);
     ASSERT_TRUE(cfg.pipeline.modules[0].module.has_value());
-    EXPECT_EQ(cfg.pipeline.modules[0].module->factory, "counter");
-    EXPECT_EQ(cfg.pipeline.modules[0].module->name, "ticks");
-    EXPECT_EQ(cfg.pipeline.modules[0].module->factory_version, (atp::version{1, 0}));
-    ASSERT_EQ(cfg.pipeline.modules[0].module->properties.size(), 3u);
-    EXPECT_EQ(cfg.pipeline.modules[0].module->properties[0].first, "file");
-    EXPECT_EQ(cfg.pipeline.modules[0].module->properties[0].second, nlohmann::json("a.txt"));
-    EXPECT_EQ(cfg.pipeline.modules[0].module->properties[1].second, nlohmann::json(10));
-    EXPECT_EQ(cfg.pipeline.modules[0].module->properties[2].second, nlohmann::json(true));
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).factory, "counter");
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).name, "ticks");
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).factory_version, (atp::version{1, 0}));
+    ASSERT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties.size(), 3u);
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[0].first, "file");
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[0].second, nlohmann::json("a.txt"));
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[1].second, nlohmann::json(10));
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[2].second, nlohmann::json(true));
 
     ASSERT_TRUE(cfg.pipeline.modules[1].group != nullptr);
     EXPECT_EQ(cfg.pipeline.modules[1].group->name, "sub");
@@ -70,9 +72,9 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
     EXPECT_TRUE(cfg.plugins.empty());
     EXPECT_TRUE(cfg.threads.empty());
     ASSERT_EQ(cfg.pipeline.modules.size(), 1u);
-    EXPECT_EQ(cfg.pipeline.modules[0].module->name, "counter");
-    EXPECT_EQ(cfg.pipeline.modules[0].module->factory_version, std::nullopt);
-    EXPECT_TRUE(cfg.pipeline.modules[0].module->properties.empty());
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).name, "counter");
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).factory_version, std::nullopt);
+    EXPECT_TRUE(atp_tests::required(cfg.pipeline.modules[0].module).properties.empty());
 }
 
 TEST(ConfigEncode, RoundTripsCanonicalDocument) {

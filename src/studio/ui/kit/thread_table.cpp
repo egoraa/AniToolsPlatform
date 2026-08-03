@@ -38,7 +38,13 @@ const char* mode_name(thread_mode mode) {
 }
 
 thread_mode mode_at(int index) {
-    return index == 1 ? thread_mode::throttled : (index == 2 ? thread_mode::spinning : thread_mode::on_demand);
+    if (index == 1) {
+        return thread_mode::throttled;
+    }
+    if (index == 2) {
+        return thread_mode::spinning;
+    }
+    return thread_mode::on_demand;
 }
 
 }  // namespace
@@ -76,7 +82,7 @@ void thread_table::refresh() {
         return;
     }
     update_stats();
-    const bool running = state_.run.running();
+    const bool running = state_.view->running();
     add_->setEnabled(!running);
     remove_->setEnabled(!running);
     for (int row = 0; row < table_->rowCount(); ++row) {
@@ -114,7 +120,7 @@ void thread_table::rebuild() {
         const runtime::thread_node& t = threads[i];
 
         auto* name = new QTableWidgetItem(QString::fromStdString(t.name));
-        name->setFlags(name->flags() & ~Qt::ItemIsEditable);
+        name->setFlags(name->flags().setFlag(Qt::ItemIsEditable, false));
         table_->setItem(row, name_column, name);
 
         auto* mode = new QComboBox(table_);
@@ -154,7 +160,7 @@ void thread_table::rebuild() {
             groups += (groups.isEmpty() ? "" : ", ") + QString::fromStdString(path);
         }
         auto* groups_item = new QTableWidgetItem(groups);
-        groups_item->setFlags(groups_item->flags() & ~Qt::ItemIsEditable);
+        groups_item->setFlags(groups_item->flags().setFlag(Qt::ItemIsEditable, false));
         table_->setItem(row, groups_column, groups_item);
 
         table_->setItem(row, passes_column, new QTableWidgetItem("-"));
@@ -164,7 +170,7 @@ void thread_table::rebuild() {
 }
 
 void thread_table::update_stats() {
-    const auto stats = state_.run.stats();
+    const auto stats = state_.view->stats();
     if (stats.empty()) {
         previous_.clear();
         for (int row = 0; row < table_->rowCount(); ++row) {

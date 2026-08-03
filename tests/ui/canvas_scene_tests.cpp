@@ -15,6 +15,7 @@
 #include "canvas/canvas_scene.hpp"
 #include "model/app_state.hpp"
 #include "model/clipboard_actions.hpp"
+#include "support/required.hpp"
 #include "ui/qt_app.hpp"
 
 namespace {
@@ -191,7 +192,7 @@ TEST(UiCanvasScene, PastingOnAGroupNodePutsTheCopyInsideIt) {
     EXPECT_EQ(state.doc.group_at("")->modules.size(), 2u);
     ASSERT_NE(state.doc.group_at("box"), nullptr);
     ASSERT_EQ(state.doc.group_at("box")->modules.size(), 1u);
-    EXPECT_EQ(state.doc.group_at("box")->modules.front().module->name, "a");
+    EXPECT_EQ(atp_tests::required(state.doc.group_at("box")->modules.front().module).name, "a");
 }
 
 TEST(UiCanvasScene, SeedingTheLayoutDoesNotMarkTheProjectModified) {

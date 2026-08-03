@@ -74,7 +74,7 @@ inline void expand_includes(nlohmann::json& node,
             node = std::move(fragment);
             return;
         }
-        for (auto& [key, value] : node.items()) {
+        for (const auto& [key, value] : node.items()) {
             expand_includes(value, dir, stack);
         }
     } else if (node.is_array()) {

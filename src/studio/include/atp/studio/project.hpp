@@ -19,8 +19,11 @@
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
 #include <atp/studio/clipboard.hpp>
+#include <atp/studio/expose_cascade.hpp>
+#include <atp/studio/node_lookup.hpp>
 #include <atp/studio/node_position.hpp>
 #include <atp/studio/node_ref.hpp>
+#include <atp/studio/position_file.hpp>
 
 namespace atp::studio {
 
@@ -32,114 +35,6 @@ struct move_result {
     std::size_t dropped_connections;
     std::size_t dropped_exposes;
 };
-
-namespace detail {
-
-inline const runtime::group_node* find_group(const runtime::group_node& root, const std::string& path) {
-    const runtime::group_node* current = &root;
-    std::size_t begin = 0;
-    while (!path.empty()) {
-        const std::size_t dot = path.find('.', begin);
-        const std::string segment = path.substr(begin, dot == std::string::npos ? dot : dot - begin);
-        const runtime::group_node* next = nullptr;
-        for (const runtime::child_node& c : current->modules) {
-            if (c.group && c.group->name == segment) {
-                next = c.group.get();
-                break;
-            }
-        }
-        if (next == nullptr) {
-            return nullptr;
-        }
-        current = next;
-        if (dot == std::string::npos) {
-            break;
-        }
-        begin = dot + 1;
-    }
-    return current;
-}
-
-inline runtime::group_node* find_group(runtime::group_node& root, const std::string& path) {
-    return const_cast<runtime::group_node*>(find_group(std::as_const(root), path));
-}
-
-inline void check_name(const std::string& name, const char* what) {
-    if (name.empty() || name.find('.') != std::string::npos) {
-        throw runtime::config_error(std::string(what) + " '" + name + "' must be non-empty and contain no '.'");
-    }
-}
-
-inline std::string port_path_child(const std::string& path) {
-    const std::size_t dot = path.find('.');
-    if (dot == std::string::npos || dot == 0 || dot + 1 == path.size() ||
-        path.find('.', dot + 1) != std::string::npos) {
-        throw runtime::config_error("expected '<child>.<port>', got '" + path + "'");
-    }
-    return path.substr(0, dot);
-}
-
-inline const std::string& child_name(const runtime::child_node& c) {
-    return c.module ? c.module->name : c.group->name;
-}
-
-inline runtime::child_node* find_child(runtime::group_node& g, const std::string& name) {
-    for (runtime::child_node& c : g.modules) {
-        if (child_name(c) == name) {
-            return &c;
-        }
-    }
-    return nullptr;
-}
-
-/// Deep copy of a child. A subgroup is owned through a unique_ptr, so there is no implicit copy and
-/// the recursion is spelled out; a module is a plain value and copies itself. The subgroup's own
-/// connections and exported ports travel with it because they name only things inside the subtree,
-/// which the copy reproduces whole.
-/// @param c child to clone
-/// @return an independent child holding no reference to the original
-[[nodiscard]] inline runtime::child_node clone_child(const runtime::child_node& c) {
-    runtime::child_node copy;
-    if (c.module) {
-        copy.module = c.module;
-        return copy;
-    }
-    copy.group = std::make_unique<runtime::group_node>();
-    copy.group->name = c.group->name;
-    copy.group->expose_inputs = c.group->expose_inputs;
-    copy.group->expose_outputs = c.group->expose_outputs;
-    copy.group->connections = c.group->connections;
-    for (const runtime::child_node& child : c.group->modules) {
-        copy.group->modules.push_back(clone_child(child));
-    }
-    return copy;
-}
-
-/// Name for a new child of @p g: @p base, with a numeric suffix if the name is taken. A null group
-/// yields the base name — reporting a missing group is the caller's operation, not the name's.
-[[nodiscard]] inline std::string unique_child_name(const runtime::group_node* g, const std::string& base) {
-    auto taken = [&](const std::string& name) {
-        return g != nullptr &&
-               std::ranges::any_of(g->modules, [&](const runtime::child_node& c) { return child_name(c) == name; });
-    };
-    if (!taken(base)) {
-        return base;
-    }
-    for (int i = 2;; ++i) {
-        const std::string candidate = base + "_" + std::to_string(i);
-        if (!taken(candidate)) {
-            return candidate;
-        }
-    }
-}
-
-inline void rewrite_port_prefix(std::string& port_path, const std::string& old_name, const std::string& new_name) {
-    if (port_path.starts_with(old_name + ".")) {
-        port_path = new_name + port_path.substr(old_name.size());
-    }
-}
-
-}  // namespace detail
 
 /// An editable project: the typed config model plus editor metadata. Every editing operation
 /// checks its invariants and pushes a snapshot onto the undo stack; node positions are a visual
@@ -154,6 +49,25 @@ class project {
         return p;
     }
 
+    /// Builds a project from a config document already in memory. Shared with open(), and the entry
+    /// point for a document nobody wrote to disk — the mirror of a remote pipeline.
+    /// @param doc config document, schema 2.0
+    /// @throws runtime::config_error with every validation error aggregated into one message
+    [[nodiscard]] static project from_document(const nlohmann::json& doc) {
+        const std::vector<std::string> errors = runtime::validate(doc);
+        if (!errors.empty()) {
+            std::string message = "invalid config:";
+            for (const std::string& e : errors) {
+                message += "\n  " + e;
+            }
+            throw runtime::config_error(message);
+        }
+        project p;
+        p.cfg_ = runtime::decode(doc);
+        p.saved_ = runtime::encode(p.cfg_);
+        return p;
+    }
+
     /// Opens a config together with its layout sidecar.
     /// @throws runtime::config_error if the file cannot be read or fails validation; every
     ///         validation error is aggregated into that one exception, so the caller needs no
@@ -164,7 +78,7 @@ class project {
             std::ifstream in(file);
             std::stringstream raw;
             raw << in.rdbuf();
-            p.had_includes_ = raw.str().find("\"$include\"") != std::string::npos;
+            p.had_includes_ = raw.str().contains("\"$include\"");
         }
         const nlohmann::json doc = runtime::load_config(file);
         const std::vector<std::string> errors = runtime::validate(doc);
@@ -175,10 +89,10 @@ class project {
             }
             throw runtime::config_error(message);
         }
-        p.cfg_ = runtime::decode(doc);
-        p.saved_ = runtime::encode(p.cfg_);
-        p.load_layout(layout_path(file));
-        return p;
+        project opened = from_document(doc);
+        opened.had_includes_ = p.had_includes_;
+        load_positions(layout_sidecar_path(file), opened.positions_);
+        return opened;
     }
 
     /// Writes the config in canonical form and its layout sidecar next to it.
@@ -189,7 +103,7 @@ class project {
             throw runtime::config_error("cannot write config '" + file.string() + "'");
         }
         out << runtime::encode(cfg_).dump(4) << '\n';
-        save_layout(layout_path(file));
+        save_positions(layout_sidecar_path(file), positions_);
         saved_ = runtime::encode(cfg_);
     }
 
@@ -381,7 +295,7 @@ class project {
         }
         positions_ = std::move(moved_positions);
 
-        const cascade_count above = cascade_lost_aliases(from_group, std::move(lost));
+        const cascade_count above = cascade_lost_aliases(cfg_.pipeline, from_group, std::move(lost));
         result.dropped_connections += above.connections;
         result.dropped_exposes += above.exposes;
         return result;
@@ -452,8 +366,7 @@ class project {
     ///        is what makes a paste reproduce the lifecycle order of the original
     /// @return the snapshot; empty if @p names is empty
     /// @throws runtime::config_error if the group is missing or it has no child under some name
-    [[nodiscard]] clipboard copy_children(const std::string& group_path,
-                                          const std::vector<std::string>& names) const {
+    [[nodiscard]] clipboard copy_children(const std::string& group_path, const std::vector<std::string>& names) const {
         const runtime::group_node* g = detail::find_group(cfg_.pipeline, group_path);
         if (g == nullptr) {
             throw runtime::config_error("no group at path '" + group_path + "'");
@@ -526,9 +439,9 @@ class project {
             if (!entry.position) {
                 continue;
             }
-            origin = origin ? node_position{std::min(origin->x, entry.position->x),
-                                            std::min(origin->y, entry.position->y)}
-                            : *entry.position;
+            origin = origin
+                         ? node_position{std::min(origin->x, entry.position->x), std::min(origin->y, entry.position->y)}
+                         : *entry.position;
         }
 
         std::vector<std::string> made;
@@ -922,7 +835,7 @@ class project {
                       [&](const auto& a) { return a.first == full || a.first.starts_with(full + "."); });
         std::erase_if(g.modules, [&](const runtime::child_node& c) { return detail::child_name(c) == name; });
         std::erase_if(positions_, [&](const auto& p) { return p.first == full || p.first.starts_with(full + "."); });
-        (void)cascade_lost_aliases(group_path, std::move(lost));
+        (void)cascade_lost_aliases(cfg_.pipeline, group_path, std::move(lost));
     }
 
     void require_free_name(const runtime::group_node& g, const std::string& name) const {
@@ -930,160 +843,6 @@ class project {
             if (detail::child_name(c) == name) {
                 throw runtime::config_error("duplicate child name '" + name + "'");
             }
-        }
-    }
-
-    /// Checks that a "<child>.<port>" path names something the group actually has. A subgroup's
-    /// ports are its exported aliases, which the model knows in full, so a path into one is
-    /// verified here and a reference to a port that is not there can never be recorded. A module's
-    /// port list lives in the registry, which the project has no access to; for those only the
-    /// child is checked and the port is left to the studio's type check and, failing that, to the
-    /// runtime — refusing an edit out of ignorance would be worse.
-    /// @param input true when the path must name an input, false for an output
-    /// @throws runtime::config_error if the path is malformed, the child is missing, or a subgroup
-    ///         exports no such port
-    void require_port(runtime::group_node& g, const std::string& group_path, const std::string& port_path, bool input) {
-        const std::string child = detail::port_path_child(port_path);
-        const runtime::child_node* c = detail::find_child(g, child);
-        if (c == nullptr) {
-            throw runtime::config_error("no child '" + child + "' in group '" + group_path + "' for '" + port_path +
-                                        "'");
-        }
-        if (!c->group) {
-            return;
-        }
-        const std::string port = port_path.substr(child.size() + 1);
-        const auto& exported = input ? c->group->expose_inputs : c->group->expose_outputs;
-        if (std::ranges::none_of(exported, [&](const auto& e) { return e.first == port; })) {
-            throw runtime::config_error("group '" + child + "' exports no " + (input ? "input" : "output") + " '" +
-                                        port + "' (path '" + port_path + "' in group '" + group_path + "')");
-        }
-    }
-
-    /// Exported aliases of one group, split by direction — what something above may still point at.
-    struct lost_aliases {
-        std::vector<std::string> inputs;
-        std::vector<std::string> outputs;
-
-        [[nodiscard]] bool empty() const {
-            return inputs.empty() && outputs.empty();
-        }
-        [[nodiscard]] std::size_t size() const {
-            return inputs.size() + outputs.size();
-        }
-    };
-
-    /// What a cascade removed above the group it started from.
-    struct cascade_count {
-        std::size_t exposes = 0;
-        std::size_t connections = 0;
-    };
-
-    /// Drops every export of @p g whose target starts with @p prefix, reporting which aliases went.
-    static lost_aliases take_exports_of(runtime::group_node& g, const std::string& prefix) {
-        lost_aliases lost;
-        std::erase_if(g.expose_inputs, [&](const auto& e) {
-            if (!e.second.starts_with(prefix)) {
-                return false;
-            }
-            lost.inputs.push_back(e.first);
-            return true;
-        });
-        std::erase_if(g.expose_outputs, [&](const auto& e) {
-            if (!e.second.starts_with(prefix)) {
-                return false;
-            }
-            lost.outputs.push_back(e.first);
-            return true;
-        });
-        return lost;
-    }
-
-    /// Propagates the disappearance of a group's exported aliases upward. A group's alias is
-    /// visible from outside only, so everything that referenced it sits in the parent: a re-export
-    /// there loses its target and goes, taking the alias the parent published with it — which is
-    /// why the walk repeats one level higher — and a connection naming it is dropped as well. The
-    /// root ends the walk, having no parent that could reference it.
-    /// @param group_path group whose aliases vanished; "" is the root and nothing is done
-    /// @param lost aliases that vanished from it
-    /// @return how many exports and connections the walk removed above that group
-    cascade_count cascade_lost_aliases(const std::string& group_path, lost_aliases lost) {
-        cascade_count removed;
-        std::string path = group_path;
-        while (!path.empty() && !lost.empty()) {
-            const node_ref self = node_ref::parse(path);
-            runtime::group_node* parent = detail::find_group(cfg_.pipeline, self.group);
-            if (parent == nullptr) {
-                return removed;
-            }
-            auto names = [&](const std::vector<std::string>& aliases, const std::string& port_path) {
-                return std::ranges::any_of(
-                    aliases, [&](const std::string& alias) { return port_path == self.name + "." + alias; });
-            };
-            const std::size_t connections_before = parent->connections.size();
-            std::erase_if(parent->connections, [&](const runtime::connection_node& c) {
-                return names(lost.outputs, c.from) || names(lost.inputs, c.to);
-            });
-            removed.connections += connections_before - parent->connections.size();
-
-            lost_aliases next;
-            std::erase_if(parent->expose_inputs, [&](const auto& e) {
-                if (!names(lost.inputs, e.second)) {
-                    return false;
-                }
-                next.inputs.push_back(e.first);
-                return true;
-            });
-            std::erase_if(parent->expose_outputs, [&](const auto& e) {
-                if (!names(lost.outputs, e.second)) {
-                    return false;
-                }
-                next.outputs.push_back(e.first);
-                return true;
-            });
-            removed.exposes += next.size();
-
-            path = self.group;
-            lost = std::move(next);
-        }
-        return removed;
-    }
-
-    /// Points the parent's references at an alias's new name: its re-export and the connections
-    /// naming it. One level is enough — the alias the parent publishes keeps its own name, so
-    /// nothing changes for anyone above.
-    void rewrite_alias_above(const std::string& group_path,
-                             const std::string& old_alias,
-                             const std::string& new_alias,
-                             bool input) {
-        if (group_path.empty()) {
-            return;
-        }
-        const node_ref self = node_ref::parse(group_path);
-        runtime::group_node* parent = detail::find_group(cfg_.pipeline, self.group);
-        if (parent == nullptr) {
-            return;
-        }
-        const std::string was = self.name + "." + old_alias;
-        const std::string now = self.name + "." + new_alias;
-        for (auto& [alias, path] : input ? parent->expose_inputs : parent->expose_outputs) {
-            if (path == was) {
-                path = now;
-            }
-        }
-        for (runtime::connection_node& c : parent->connections) {
-            std::string& side = input ? c.to : c.from;
-            if (side == was) {
-                side = now;
-            }
-        }
-    }
-
-    static void rewrite_full_path(std::string& path, const std::string& old_full, const std::string& new_full) {
-        if (path == old_full) {
-            path = new_full;
-        } else if (path.starts_with(old_full + ".")) {
-            path = new_full + path.substr(old_full.size());
         }
     }
 
@@ -1116,7 +875,7 @@ class project {
         std::erase_if(map, [&](const auto& e) { return e.first == alias; });
         lost_aliases lost;
         (input ? lost.inputs : lost.outputs).push_back(alias);
-        (void)cascade_lost_aliases(group_path, std::move(lost));
+        (void)cascade_lost_aliases(cfg_.pipeline, group_path, std::move(lost));
     }
 
     void rename_expose(std::vector<std::pair<std::string, std::string>>& map,
@@ -1137,42 +896,7 @@ class project {
         }
         snapshot();
         it->first = new_alias;
-        rewrite_alias_above(group_path, alias, new_alias, input);
-    }
-
-    [[nodiscard]] static std::filesystem::path layout_path(std::filesystem::path file) {
-        file.replace_extension(".layout.json");
-        return file;
-    }
-
-    void load_layout(const std::filesystem::path& file) {
-        std::ifstream in(file);
-        if (!in) {
-            return;
-        }
-        try {
-            const nlohmann::json doc = nlohmann::json::parse(in);
-            const nlohmann::json positions = doc.value("positions", nlohmann::json::object());
-            for (const auto& [path, p] : positions.items()) {
-                if (p.is_object() && p.contains("x") && p.contains("y")) {
-                    positions_[path] = {p.at("x").get<float>(), p.at("y").get<float>()};
-                }
-            }
-        } catch (const nlohmann::json::parse_error&) {  // NOLINT(bugprone-empty-catch)
-        }
-    }
-
-    void save_layout(const std::filesystem::path& file) const {
-        nlohmann::json positions = nlohmann::json::object();
-        for (const auto& [path, p] : positions_) {
-            positions[path] = {{"x", p.x}, {"y", p.y}};
-        }
-        nlohmann::json doc;
-        doc["positions"] = std::move(positions);
-        std::ofstream out(file);
-        if (out) {
-            out << doc.dump(4) << '\n';
-        }
+        rewrite_alias_above(cfg_.pipeline, group_path, alias, new_alias, input);
     }
 
     runtime::config cfg_;

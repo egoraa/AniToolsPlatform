@@ -26,7 +26,7 @@ constexpr double dimmed_pin_opacity = 0.25;
 constexpr double hovered_pin_scale = 1.6;
 
 QPen idle_node_pen() {
-    return QPen(QColor(140, 140, 150), 1);
+    return {QColor(140, 140, 150), 1};
 }
 
 QColor type_color(const std::optional<std::type_index>& type) {

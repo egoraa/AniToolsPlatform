@@ -16,20 +16,20 @@ namespace atp::mcp {
 /// cases rather than printing a lie.
 [[nodiscard]] inline nlohmann::json value_to_json(const std::any& value) {
     nlohmann::json json{{"type", type_name(value.type())}, {"value", nullptr}};
-    if (const int* v = std::any_cast<int>(&value)) {
-        json["value"] = *v;
-    } else if (const unsigned* v = std::any_cast<unsigned>(&value)) {
-        json["value"] = *v;
-    } else if (const std::int64_t* v = std::any_cast<std::int64_t>(&value)) {
-        json["value"] = *v;
-    } else if (const double* v = std::any_cast<double>(&value)) {
-        json["value"] = *v;
-    } else if (const float* v = std::any_cast<float>(&value)) {
-        json["value"] = *v;
-    } else if (const bool* v = std::any_cast<bool>(&value)) {
-        json["value"] = *v;
-    } else if (const std::string* v = std::any_cast<std::string>(&value)) {
-        json["value"] = *v;
+    if (const int* i = std::any_cast<int>(&value)) {
+        json["value"] = *i;
+    } else if (const unsigned* u = std::any_cast<unsigned>(&value)) {
+        json["value"] = *u;
+    } else if (const std::int64_t* i64 = std::any_cast<std::int64_t>(&value)) {
+        json["value"] = *i64;
+    } else if (const double* d = std::any_cast<double>(&value)) {
+        json["value"] = *d;
+    } else if (const float* f = std::any_cast<float>(&value)) {
+        json["value"] = *f;
+    } else if (const bool* b = std::any_cast<bool>(&value)) {
+        json["value"] = *b;
+    } else if (const std::string* s = std::any_cast<std::string>(&value)) {
+        json["value"] = *s;
     }
     return json;
 }

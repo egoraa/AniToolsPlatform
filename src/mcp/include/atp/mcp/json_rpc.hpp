@@ -56,7 +56,7 @@ struct rpc_request {
         throw rpc_error(rpc_invalid_request, "a JSON-RPC message must be an object");
     }
     if (message.value("jsonrpc", std::string{}) != "2.0") {
-        throw rpc_error(rpc_invalid_request, "expected \"jsonrpc\": \"2.0\"");
+        throw rpc_error(rpc_invalid_request, R"(expected "jsonrpc": "2.0")");
     }
     if (!message.contains("method") || !message.at("method").is_string()) {
         throw rpc_error(rpc_invalid_request, "missing string field \"method\"");

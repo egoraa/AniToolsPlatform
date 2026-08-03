@@ -23,15 +23,15 @@ class workspace {
     /// @param plugin_dirs extra directories plugins may additionally be loaded from
     /// @param scan_dirs directories scanned for plugins right away and by every later rescan; naming
     ///        one is already a statement of trust, so it widens the plugin path policy as well
-    explicit workspace(std::filesystem::path root,
-                       std::vector<std::filesystem::path> plugin_dirs = {},
-                       std::vector<std::filesystem::path> scan_dirs = {})
-        : root_(std::filesystem::weakly_canonical(std::move(root))) {
-        for (std::filesystem::path& dir : plugin_dirs) {
-            plugin_dirs_.push_back(std::filesystem::weakly_canonical(std::move(dir)));
+    explicit workspace(const std::filesystem::path& root,
+                       const std::vector<std::filesystem::path>& plugin_dirs = {},
+                       const std::vector<std::filesystem::path>& scan_dirs = {})
+        : root_(std::filesystem::weakly_canonical(root)) {
+        for (const std::filesystem::path& dir : plugin_dirs) {
+            plugin_dirs_.push_back(std::filesystem::weakly_canonical(dir));
         }
-        for (std::filesystem::path& dir : scan_dirs) {
-            std::filesystem::path canonical = std::filesystem::weakly_canonical(std::move(dir));
+        for (const std::filesystem::path& dir : scan_dirs) {
+            std::filesystem::path canonical = std::filesystem::weakly_canonical(dir);
             plugin_dirs_.push_back(canonical);
             modules_.add_search_dir(std::move(canonical));
         }

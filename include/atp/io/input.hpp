@@ -32,10 +32,10 @@ class input : public input_base {
 
     /// Writes a value into the input. Accepts lvalues, rvalues and anything T is constructible
     /// from.
-    template <typename U>
-        requires std::constructible_from<T, U>
-    void operator()(U&& value) {
-        T incoming(std::forward<U>(value));
+    template <typename TArg>
+        requires std::constructible_from<T, TArg>
+    void operator()(TArg&& value) {
+        T incoming(std::forward<TArg>(value));
         auto guard = lock();
         store(std::move(incoming));
     }

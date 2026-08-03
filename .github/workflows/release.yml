@@ -1,0 +1,163 @@
+# Builds the distributable package on each platform and, when the run was started by a tag, attaches
+# the results to the release for that tag.
+#
+# A workflow of its own rather than more jobs in the CI one: this is triggered by a tag, it needs Qt on
+# every runner, and it must not run on every push to master — the thirteen jobs there already answer
+# the question of whether the code is good, and this one answers whether it can be handed to someone.
+#
+# workflow_dispatch is not a convenience. Without it the whole thing would first execute on a tag, at
+# the least convenient moment to discover that a deployment step is wrong on a platform nobody could
+# test locally; run by hand it does everything except publish, and packages one platform at a time.
+name: Release
+
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to package by hand; a tag always packages all three"
+        type: choice
+        default: linux
+        options: [ linux, windows, macos, all ]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # A manual run packages one platform, chosen above; a tag packages all three, because a release
+  # without one of them is not a release. The reason for the split is minutes: this workflow installs
+  # Qt and builds the studio on every runner it touches, and the runners are not priced alike — macOS
+  # bills at ten times the Linux rate and Windows at twice — so a full three-platform run to re-check
+  # one deployment script is the expensive way to learn one thing. Hence the default of linux.
+  #
+  # The matrix is computed in a job of its own because the matrix context is not available in a job's
+  # `if:`, so entries cannot be filtered where they are declared.
+  plan:
+    name: pick the platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+    - id: pick
+      shell: bash
+      run: |
+        case "${{ github.event_name == 'push' && 'all' || inputs.platform }}" in
+          all)     m='[{"label":"windows","os":"windows-latest"},{"label":"linux","os":"ubuntu-latest"},{"label":"macos","os":"macos-latest"}]' ;;
+          windows) m='[{"label":"windows","os":"windows-latest"}]' ;;
+          linux)   m='[{"label":"linux","os":"ubuntu-latest"}]' ;;
+          macos)   m='[{"label":"macos","os":"macos-latest"}]' ;;
+          *)       echo "::error::unknown platform '${{ inputs.platform }}'"; exit 1 ;;
+        esac
+        echo "matrix=$m" >> "$GITHUB_OUTPUT"
+        echo "packaging: $m"
+
+  package:
+    name: package / ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    needs: plan
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    - name: Install the Qt link-time dependencies
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.10.3'
+        cache: true
+
+    - name: Configure CMake
+      # ATP_WERROR stays off here on purpose. A release is cut from a commit the CI workflow has
+      # already gated with it; failing the packaging of a finished version because a newer compiler
+      # found a new warning would block a delivery over something that is not a defect in it.
+      run: |
+        cmake -B build -S . -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+    - name: Build what gets shipped
+      # Named targets rather than everything: the tests and their googletest are not part of a
+      # release, and building them here would roughly double the job for nothing. Every target listed
+      # has an install rule, and cpack fails if one of them was not built.
+      run: cmake --build build --config ${{ env.BUILD_TYPE }} --target atp_studio atp_app atp_mcp atp_demo_plugin
+
+    - name: Check that the Qt runtime is in the install tree
+      # The assertion this workflow was missing. A package whose Qt failed to deploy still builds,
+      # still packages and still reports success — it just cannot start on a machine without Qt, which
+      # is every machine it is meant for. Naming no path on purpose: the layout differs per platform
+      # (bin/ on Windows, lib/ on Linux, a framework inside the bundle on macOS) and the requirement
+      # does not.
+      #
+      # The prefix has to be absolute: Qt's deploy script derives the qt.conf path from it and refuses
+      # a relative one ("Given qt.conf path is not an absolute path"). cpack never hits this because it
+      # installs into an absolute staging directory of its own.
+      shell: bash
+      run: |
+        cmake --install build --config ${{ env.BUILD_TYPE }} --prefix "$PWD/staging" > /dev/null
+        if ! find staging -iname '*qtcore*' | grep -q .; then
+          echo "::error::no Qt runtime in the install tree — atp_studio would not start from this package"
+          find staging -maxdepth 3 | head -40
+          exit 1
+        fi
+        find staging -iname '*qtcore*' | head -3
+
+    - name: Package
+      run: cpack --config build/CPackConfig.cmake -C ${{ env.BUILD_TYPE }} -B packages
+
+    - name: Show what came out
+      shell: bash
+      run: ls -lh packages/
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: package-${{ matrix.label }}
+        # The archives only. cpack leaves its staging tree in _CPack_Packages beside them, and a bare
+        # `packages/*` takes that too: it tripled the size of the artefact, and on a tag it would have
+        # handed a directory to `gh release upload`, which cannot take one. Only one of these three
+        # patterns matches on any given runner, and if-no-files-found looks at the set as a whole.
+        path: |
+          packages/*.zip
+          packages/*.tar.gz
+          packages/*.dmg
+        if-no-files-found: error
+
+  # One job for the release, after all three packages exist, rather than an upload step inside each.
+  # Three matrix jobs racing to create the same release is a race with a confusing failure, and
+  # `gh release create || true` would paper over real errors along with the expected collision.
+  publish:
+    name: attach to the release
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: packages
+        merge-multiple: true
+
+    - name: Create or update the release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        if ! gh release view "${{ github.ref_name }}" -R "${{ github.repository }}" >/dev/null 2>&1; then
+          gh release create "${{ github.ref_name }}" -R "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" --generate-notes
+        fi
+        ls -l packages
+        gh release upload "${{ github.ref_name }}" -R "${{ github.repository }}" packages/* --clobber

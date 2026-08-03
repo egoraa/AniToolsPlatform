@@ -66,6 +66,11 @@ template <std::size_t N>
 struct fixed_string {
     std::array<char, N> chars{};
 
+    /// Takes a raw array rather than a std::array on purpose: a literal is the only way to spell a
+    /// string as a template value parameter, and std::array is not deducible from one.
+    ///
+    /// @param text string literal, the terminating NUL included in N
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     constexpr fixed_string(const char (&text)[N]) {
         std::ranges::copy(text, chars.begin());
     }
@@ -85,7 +90,7 @@ constexpr version parse_version(std::string_view text) {
             if (part > (std::numeric_limits<unsigned>::max() - digit) / 10) {
                 throw std::invalid_argument("version part overflows unsigned");
             }
-            part = part * 10 + digit;
+            part = (part * 10) + digit;
             has_digit = true;
         } else if (c == '.') {
             if (!has_digit) {

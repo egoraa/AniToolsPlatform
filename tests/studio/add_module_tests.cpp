@@ -9,14 +9,19 @@
 
 namespace {
 
-const std::filesystem::path test_root = std::filesystem::temp_directory_path() / "atp-add-module";
-const std::filesystem::path config_dir = test_root / "cfg";
+std::filesystem::path test_root() {
+    return std::filesystem::temp_directory_path() / "atp-add-module";
+}
+
+std::filesystem::path config_dir() {
+    return test_root() / "cfg";
+}
 
 atp::studio::add_module_request request(const char* factory) {
     atp::studio::add_module_request r;
     r.factory = factory;
-    r.plugin = config_dir / "libdemo.so";
-    r.config_dir = config_dir;
+    r.plugin = config_dir() / "libdemo.so";
+    r.config_dir = config_dir();
     return r;
 }
 
@@ -63,7 +68,7 @@ TEST(StudioAddModule, PluginInsideConfigDirBecomesRelative) {
 TEST(StudioAddModule, PluginOutsideConfigDirWalksUp) {
     atp::studio::project proj = atp::studio::project::create();
     auto r = request("counter");
-    r.plugin = test_root / "opt" / "atp" / "libdemo.so";
+    r.plugin = test_root() / "opt" / "atp" / "libdemo.so";
     const auto result = atp::studio::add_module(proj, r);
     ASSERT_EQ(proj.config().plugins.size(), 1u);
     EXPECT_EQ(proj.config().plugins[0], "../opt/atp/libdemo.so");
@@ -76,7 +81,7 @@ TEST(StudioAddModule, UnsavedProjectKeepsAbsolutePluginAndWarns) {
     r.config_dir.clear();
     const auto result = atp::studio::add_module(proj, r);
     ASSERT_EQ(proj.config().plugins.size(), 1u);
-    EXPECT_EQ(proj.config().plugins[0], (config_dir / "libdemo.so").generic_string());
+    EXPECT_EQ(proj.config().plugins[0], (config_dir() / "libdemo.so").generic_string());
     EXPECT_FALSE(result.warning.empty());
 }
 

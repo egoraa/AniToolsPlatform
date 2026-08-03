@@ -8,6 +8,8 @@
 #include <atp/mcp/options.hpp>
 #include <atp/mcp/workspace.hpp>
 
+#include "support/required.hpp"
+
 namespace {
 
 std::optional<atp::mcp::options> parse(std::vector<const char*> argv) {
@@ -17,9 +19,9 @@ std::optional<atp::mcp::options> parse(std::vector<const char*> argv) {
 TEST(McpOptions, DefaultsToTheCurrentDirectoryAndNoDirectories) {
     const std::optional<atp::mcp::options> parsed = parse({"atp_mcp"});
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_EQ(parsed->root, std::filesystem::current_path());
-    EXPECT_TRUE(parsed->plugin_dirs.empty());
-    EXPECT_TRUE(parsed->scan_dirs.empty());
+    EXPECT_EQ(atp_tests::required(parsed).root, std::filesystem::current_path());
+    EXPECT_TRUE(atp_tests::required(parsed).plugin_dirs.empty());
+    EXPECT_TRUE(atp_tests::required(parsed).scan_dirs.empty());
 }
 
 TEST(McpOptions, ReadsTheRootAndBothRepeatableDirectoryFlags) {
@@ -27,13 +29,13 @@ TEST(McpOptions, ReadsTheRootAndBothRepeatableDirectoryFlags) {
         parse({"atp_mcp", "--root", "/work", "--plugin-dir", "/trusted", "--scan-dir", "/first", "--scan-dir",
                "/second", "--plugin-dir", "/also_trusted"});
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_EQ(parsed->root, std::filesystem::path("/work"));
-    ASSERT_EQ(parsed->plugin_dirs.size(), 2u);
-    EXPECT_EQ(parsed->plugin_dirs.at(0), std::filesystem::path("/trusted"));
-    EXPECT_EQ(parsed->plugin_dirs.at(1), std::filesystem::path("/also_trusted"));
-    ASSERT_EQ(parsed->scan_dirs.size(), 2u);
-    EXPECT_EQ(parsed->scan_dirs.at(0), std::filesystem::path("/first"));
-    EXPECT_EQ(parsed->scan_dirs.at(1), std::filesystem::path("/second"));
+    EXPECT_EQ(atp_tests::required(parsed).root, std::filesystem::path("/work"));
+    ASSERT_EQ(atp_tests::required(parsed).plugin_dirs.size(), 2u);
+    EXPECT_EQ(atp_tests::required(parsed).plugin_dirs.at(0), std::filesystem::path("/trusted"));
+    EXPECT_EQ(atp_tests::required(parsed).plugin_dirs.at(1), std::filesystem::path("/also_trusted"));
+    ASSERT_EQ(atp_tests::required(parsed).scan_dirs.size(), 2u);
+    EXPECT_EQ(atp_tests::required(parsed).scan_dirs.at(0), std::filesystem::path("/first"));
+    EXPECT_EQ(atp_tests::required(parsed).scan_dirs.at(1), std::filesystem::path("/second"));
 }
 
 TEST(McpOptions, RejectsUnknownFlagsAndFlagsWithoutAValue) {

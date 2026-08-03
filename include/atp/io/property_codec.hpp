@@ -1,6 +1,7 @@
 #ifndef ANITOOLSPLATFORM_IO_PROPERTY_CODEC_HPP
 #define ANITOOLSPLATFORM_IO_PROPERTY_CODEC_HPP
 
+#include <array>
 #include <charconv>
 #include <concepts>
 #include <optional>
@@ -29,6 +30,7 @@ template <typename T>
 std::optional<T> parse_number(std::string_view text) {
     T value{};
     const char* end = text.data() + text.size();
+    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
     const auto [ptr, ec] = std::from_chars(text.data(), end, value);
     if (ec != std::errc{} || ptr != end) {
         return std::nullopt;
@@ -38,9 +40,9 @@ std::optional<T> parse_number(std::string_view text) {
 
 template <typename T>
 std::string print_number(T value) {
-    char buffer[64];
-    const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
-    return std::string(buffer, result.ptr);
+    std::array<char, 64> buffer;
+    const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    return std::string(buffer.data(), result.ptr);
 }
 
 }  // namespace detail

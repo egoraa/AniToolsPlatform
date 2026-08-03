@@ -47,7 +47,7 @@ void palette_widget::refresh() {
         }
     }
     expandAll();
-    setEnabled(!state_.run.running());
+    setEnabled(!state_.view->running());
 }
 
 QStringList palette_widget::mimeTypes() const {
@@ -55,7 +55,7 @@ QStringList palette_widget::mimeTypes() const {
 }
 
 QMimeData* palette_widget::mimeData(const QList<QTreeWidgetItem*>& items) const {
-    if (items.size() != 1 || state_.run.running()) {
+    if (items.size() != 1 || state_.view->running()) {
         return nullptr;
     }
     QTreeWidgetItem* item = items.front();
@@ -70,7 +70,7 @@ QMimeData* palette_widget::mimeData(const QList<QTreeWidgetItem*>& items) const 
 }
 
 void palette_widget::add_from_item(QTreeWidgetItem* item) {
-    if (item == nullptr || state_.run.running()) {
+    if (item == nullptr || state_.view->running()) {
         return;
     }
     if (item->data(0, group_role).toBool()) {

@@ -60,7 +60,7 @@ inline bool copy_properties(app_state& state,
                             ui_callbacks& callbacks,
                             const std::string& group,
                             const std::string& name) {
-    if (state.run.running()) {
+    if (state.view->running()) {
         return false;
     }
     const runtime::group_node* g = state.doc.group_at(group);
@@ -96,7 +96,7 @@ inline bool paste_properties(app_state& state,
                              ui_callbacks& callbacks,
                              const std::string& group,
                              const std::string& name) {
-    if (state.run.running() || state.clip_properties.empty()) {
+    if (state.view->running() || state.clip_properties.empty()) {
         return false;
     }
     const runtime::group_node* g = state.doc.group_at(group);
@@ -145,9 +145,8 @@ inline bool paste_properties(app_state& state,
         callbacks.error(QString::fromStdString(std::string("paste properties: ") + e.what()));
         return false;
     }
-    QString note = QString("pasted %1 property value(s) onto '%2'")
-                       .arg(wanted.size())
-                       .arg(QString::fromStdString(name));
+    QString note =
+        QString("pasted %1 property value(s) onto '%2'").arg(wanted.size()).arg(QString::fromStdString(name));
     if (!skipped.isEmpty()) {
         note += QString("; skipped %1").arg(skipped.join(QStringLiteral(", ")));
     }

@@ -1,0 +1,159 @@
+---
+# Static analysis policy. The formatting half of the style spec is .clang-format; this file covers
+# what the formatter cannot see — the naming table of docs/code_style.md and the defect checks.
+#
+# The exclusion list has two halves and they mean different things. The first, down to
+# readability-use-concise-preprocessor-directives, is permanent: each entry is a deliberate contract
+# of the platform or a convention it does not hold — raw pointers, reinterpret_cast at the library
+# boundary, public data members. The second, from bugprone-exception-escape onwards, is debt: those
+# checks report real findings nobody has fixed yet. This list is the ledger and the only one — #42,
+# which tracked the debt while the config was being adopted, was closed with these seven still off,
+# because what is left of them is ordinary work rather than adoption debt; its final comment holds
+# the counts and the reasoning as of 2026-08-03. A check moves out of the second half by having its
+# hits fixed, never by being reclassified into the first — the single exception is
+# readability-redundant-parentheses, moved only because its fix-it was shown to change the meaning of
+# correct code, and the demonstration is recorded with it below.
+#
+# clang-analyzer-* is spelled out although clang-tidy enables it by default: left implicit, a reader
+# of this file cannot tell what is actually running, and its findings are path sensitive, so they
+# surface on a version bump rather than on the change that introduced them.
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  concurrency-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  cppcoreguidelines-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-special-member-functions,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-use-auto,
+  -modernize-use-designated-initializers,
+  -modernize-use-trailing-return-type,
+  -performance-enum-size,
+  -performance-inefficient-string-concatenation,
+  -portability-template-virtual-member-function,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-redundant-parentheses,
+  -readability-trailing-comma,
+  -readability-uppercase-literal-suffix,
+  -readability-use-concise-preprocessor-directives,
+  -bugprone-exception-escape,
+  -cppcoreguidelines-prefer-member-initializer,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-type-member-init,
+  -modernize-use-nodiscard,
+  -readability-convert-member-functions-to-static,
+  -readability-make-member-function-const
+
+# Why each of the above is off:
+#   bugprone-easily-swappable-parameters       — fires on every (name, safety) and (from, to) pair.
+#   cppcoreguidelines-avoid-const-or-ref-data-members
+#                                              — module_context holds service_directory& by design,
+#                                                and the io sections bind ports as reference members.
+#   *-non-private-member-variables-in-classes  — group::child, thread_options and the config model
+#                                                are aggregates on purpose.
+#   cppcoreguidelines-owning-memory            — an output holds raw input_base* and owns nothing;
+#                                                lifetime is a documented caller contract.
+#   cppcoreguidelines-pro-bounds-*             — the plugin C interface deals in raw arrays, and the
+#                                                unchecked-container-access flavour fires on every
+#                                                subscript in the codebase.
+#   cppcoreguidelines-pro-type-reinterpret-cast— required by GetProcAddress/dlsym in module_loader
+#                                                and by SetThreadDescription in thread_name.
+#   cppcoreguidelines-special-member-functions — the io elements and module_base delete the copy
+#                                                operations, which suppresses the moves already;
+#                                                spelling four more deletions out adds no safety.
+#   misc-const-correctness                     — a local-const preference the style spec does not
+#                                                make, and it wants const on ports the tests write to.
+#   misc-include-cleaner                       — reports every transitively used symbol; a
+#                                                header-only library drowns in it.
+#   misc-no-recursion                          — the composite group walks itself recursively, which
+#                                                is the whole point of a composite.
+#   modernize-use-trailing-return-type         — contradicts the declaration style of the codebase.
+#   performance-enum-size                      — work_status and property_kind cross the plugin
+#                                                boundary; narrowing their base type to save three
+#                                                bytes would be an ABI break for no measured gain.
+#   readability-identifier-length              — single-letter names are idiomatic in the templates.
+#   readability-named-parameter                — an unnamed parameter is how a tag overload
+#                                                (connect(in, replay_t)) says the argument is unused.
+#   readability-redundant-parentheses          — sees an overloaded operator and stops accounting for
+#                                                precedence: it calls the parentheses in (a + b) / 2
+#                                                and (f & m) != 0 redundant when the operands are
+#                                                class types, and its fix-it deletes them, leaving
+#                                                code that compiles and computes something else.
+#                                                Both hits in this tree were of that kind; built-in
+#                                                operators are handled correctly (clang-tidy 23).
+#   readability-trailing-comma                 — clang-format decides how an initialiser list is
+#                                                packed, and it is the authority on formatting.
+#   readability-uppercase-literal-suffix       — a convention the style spec does not state.
+#   readability-implicit-bool-conversion       — `if (ptr)` is how the codebase reads.
+#   readability-use-concise-preprocessor-directives
+#                                              — the platform checks compound conditions
+#                                                (`#if defined(_WIN32)`), so the concise form does
+#                                                not apply uniformly and half-converting is worse.
+#   modernize-use-auto, modernize-use-designated-initializers
+#                                              — the codebase spells types and initialises
+#                                                aggregates positionally on purpose.
+#   performance-inefficient-string-concatenation
+#                                              — every hit builds an exception message on a cold
+#                                                path, where readability is the only thing that
+#                                                matters.
+#   portability-template-virtual-member-function
+#                                              — fires on every virtual of module<>, which is the
+#                                                shape of the SDK; the functions all have bodies and
+#                                                the vtable instantiates them together.
+#   *-magic-numbers                            — mostly test data.
+
+# The naming table of docs/code_style.md, made enforceable. Public data members take no trailing
+# underscore (module_context::services, group::child::name); private and protected ones do.
+CheckOptions:
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.ClassCase: lower_case
+  readability-identifier-naming.StructCase: lower_case
+  readability-identifier-naming.UnionCase: lower_case
+  readability-identifier-naming.EnumCase: lower_case
+  readability-identifier-naming.EnumConstantCase: lower_case
+  readability-identifier-naming.FunctionCase: lower_case
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.MemberCase: lower_case
+  readability-identifier-naming.PublicMemberCase: lower_case
+  readability-identifier-naming.ProtectedMemberCase: lower_case
+  readability-identifier-naming.ProtectedMemberSuffix: _
+  readability-identifier-naming.PrivateMemberCase: lower_case
+  readability-identifier-naming.PrivateMemberSuffix: _
+  readability-identifier-naming.ClassConstantCase: lower_case
+  readability-identifier-naming.ConstexprVariableCase: lower_case
+  readability-identifier-naming.GlobalConstantCase: lower_case
+  readability-identifier-naming.StaticConstantCase: lower_case
+  readability-identifier-naming.TypeAliasCase: lower_case
+  readability-identifier-naming.TypedefCase: lower_case
+  readability-identifier-naming.TypeTemplateParameterCase: CamelCase
+  readability-identifier-naming.TypeTemplateParameterPrefix: T
+  readability-identifier-naming.TypeTemplateParameterIgnoredRegexp: '^T$'
+  readability-identifier-naming.TemplateTemplateParameterCase: CamelCase
+  readability-identifier-naming.TemplateTemplateParameterPrefix: T
+  readability-identifier-naming.ValueTemplateParameterCase: CamelCase
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+FormatStyle: file
+HeaderFilterRegex: '.*[/\\]atp[/\\].*'
+...

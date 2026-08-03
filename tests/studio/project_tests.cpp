@@ -9,6 +9,8 @@
 #include <atp/runtime/config_validator.hpp>
 #include <atp/studio/project.hpp>
 
+#include "support/required.hpp"
+
 namespace {
 
 class ProjectFiles : public ::testing::Test {
@@ -97,7 +99,7 @@ TEST_F(ProjectFiles, SaveWritesValidConfigAndLayoutSidecar) {
 
     const atp::studio::project reopened = atp::studio::project::open(saved);
     ASSERT_TRUE(reopened.position("left.src").has_value());
-    EXPECT_EQ(*reopened.position("left.src"), (atp::studio::node_position{30.0f, 40.0f}));
+    EXPECT_EQ(atp_tests::required(reopened.position("left.src")), (atp::studio::node_position{30.0f, 40.0f}));
     EXPECT_EQ(reopened.position("ghost"), std::nullopt);
 }
 
@@ -117,7 +119,7 @@ TEST(ProjectEdit, BuildsPipelineThroughOperations) {
 
     const atp::runtime::config& cfg = proj.config();
     ASSERT_EQ(cfg.pipeline.modules.size(), 2u);
-    EXPECT_EQ(cfg.pipeline.modules[1].group->modules[0].module->name, "printer");
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[1].group->modules[0].module).name, "printer");
     ASSERT_EQ(cfg.pipeline.connections.size(), 1u);
     EXPECT_TRUE(cfg.pipeline.connections[0].replay);
     ASSERT_EQ(cfg.threads.size(), 1u);
@@ -204,11 +206,11 @@ TEST(ProjectEdit, SetPropertyAddsAndReplaces) {
     auto proj = atp::studio::project::create();
     proj.add_module("", "counter");
     proj.set_property("", "counter", "limit", 5);
-    ASSERT_EQ(proj.config().pipeline.modules[0].module->properties.size(), 1u);
-    EXPECT_EQ(proj.config().pipeline.modules[0].module->properties[0].second, nlohmann::json(5));
+    ASSERT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties.size(), 1u);
+    EXPECT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties[0].second, nlohmann::json(5));
     proj.set_property("", "counter", "limit", 7);
-    ASSERT_EQ(proj.config().pipeline.modules[0].module->properties.size(), 1u);
-    EXPECT_EQ(proj.config().pipeline.modules[0].module->properties[0].second, nlohmann::json(7));
+    ASSERT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties.size(), 1u);
+    EXPECT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties[0].second, nlohmann::json(7));
     EXPECT_TRUE(proj.can_undo());
 }
 
@@ -224,7 +226,7 @@ TEST(ProjectEdit, ClearPropertyRemovesPair) {
     proj.add_module("", "counter");
     proj.set_property("", "counter", "limit", 5);
     proj.clear_property("", "counter", "limit");
-    EXPECT_TRUE(proj.config().pipeline.modules[0].module->properties.empty());
+    EXPECT_TRUE(atp_tests::required(proj.config().pipeline.modules[0].module).properties.empty());
     proj.clear_property("", "counter", "ghost");
 }
 
@@ -337,7 +339,7 @@ TEST(ProjectMove, MovesAModuleWithItsProperties) {
     ASSERT_NE(proj.group_at("b"), nullptr);
     ASSERT_EQ(proj.group_at("b")->modules.size(), 1u);
     ASSERT_TRUE(proj.group_at("b")->modules.front().module.has_value());
-    const atp::runtime::module_node& m = *proj.group_at("b")->modules.front().module;
+    const atp::runtime::module_node& m = atp_tests::required(proj.group_at("b")->modules.front().module);
     EXPECT_EQ(m.name, "src");
     EXPECT_EQ(m.factory, "counter");
     ASSERT_EQ(m.properties.size(), 1u);
@@ -379,8 +381,8 @@ TEST(ProjectMove, SuffixesANameTakenInTheTargetGroup) {
     EXPECT_EQ(r.new_name, "src_2");
     ASSERT_EQ(proj.group_at("b")->modules.size(), 2u);
     ASSERT_TRUE(proj.group_at("b")->modules.at(1).module.has_value());
-    EXPECT_EQ(proj.group_at("b")->modules.at(1).module->name, "src_2");
-    EXPECT_EQ(proj.group_at("b")->modules.at(1).module->factory, "counter");
+    EXPECT_EQ(atp_tests::required(proj.group_at("b")->modules.at(1).module).name, "src_2");
+    EXPECT_EQ(atp_tests::required(proj.group_at("b")->modules.at(1).module).factory, "counter");
 }
 
 TEST(ProjectMove, MovingAGroupRewritesAssignmentsAndPositionsOfItsSubtree) {
@@ -406,9 +408,9 @@ TEST(ProjectMove, MovingAGroupRewritesAssignmentsAndPositionsOfItsSubtree) {
 
     EXPECT_FALSE(proj.position("stage").has_value());
     ASSERT_TRUE(proj.position("outer.stage").has_value());
-    EXPECT_EQ(proj.position("outer.stage")->x, 1.0f);
+    EXPECT_EQ(atp_tests::required(proj.position("outer.stage")).x, 1.0f);
     ASSERT_TRUE(proj.position("outer.stage.src").has_value());
-    EXPECT_EQ(proj.position("outer.stage.src")->y, 4.0f);
+    EXPECT_EQ(atp_tests::required(proj.position("outer.stage.src")).y, 4.0f);
 }
 
 TEST(ProjectMove, RefusesImpossibleMoves) {
@@ -467,7 +469,7 @@ TEST(ProjectCopy, CopiesAModuleWithItsPropertiesAndLeavesTheOriginal) {
 
     ASSERT_EQ(proj.group_at("a")->modules.size(), 1u);
     ASSERT_EQ(proj.group_at("b")->modules.size(), 1u);
-    const atp::runtime::module_node& m = *proj.group_at("b")->modules.front().module;
+    const atp::runtime::module_node& m = atp_tests::required(proj.group_at("b")->modules.front().module);
     EXPECT_EQ(m.name, "src");
     EXPECT_EQ(m.factory, "counter");
     ASSERT_EQ(m.properties.size(), 1u);
@@ -481,8 +483,8 @@ TEST(ProjectCopy, IntoTheSameGroupDuplicatesUnderASuffixedName) {
     EXPECT_EQ(proj.copy_child("", "src", ""), "src_2");
 
     ASSERT_EQ(proj.group_at("")->modules.size(), 2u);
-    EXPECT_EQ(proj.group_at("")->modules.at(0).module->name, "src");
-    EXPECT_EQ(proj.group_at("")->modules.at(1).module->name, "src_2");
+    EXPECT_EQ(atp_tests::required(proj.group_at("")->modules.at(0).module).name, "src");
+    EXPECT_EQ(atp_tests::required(proj.group_at("")->modules.at(1).module).name, "src_2");
 }
 
 TEST(ProjectCopy, LeavesTheSourceGroupsConnectionsAlone) {
@@ -530,8 +532,8 @@ TEST(ProjectCopy, TheCopyIsIndependentOfTheOriginal) {
     proj.set_property("stage", "src", "limit", 7);
 
     ASSERT_NE(proj.group_at("outer.stage"), nullptr);
-    EXPECT_TRUE(proj.group_at("outer.stage")->modules.front().module->properties.empty());
-    EXPECT_EQ(proj.group_at("stage")->modules.front().module->properties.size(), 1u);
+    EXPECT_TRUE(atp_tests::required(proj.group_at("outer.stage")->modules.front().module).properties.empty());
+    EXPECT_EQ(atp_tests::required(proj.group_at("stage")->modules.front().module).properties.size(), 1u);
 }
 
 TEST(ProjectCopy, DuplicatesAssignmentsAndPositionsOfTheSubtree) {
@@ -553,9 +555,9 @@ TEST(ProjectCopy, DuplicatesAssignmentsAndPositionsOfTheSubtree) {
 
     ASSERT_TRUE(proj.position("stage").has_value());
     ASSERT_TRUE(proj.position("outer.stage").has_value());
-    EXPECT_EQ(proj.position("outer.stage")->x, 1.0f);
+    EXPECT_EQ(atp_tests::required(proj.position("outer.stage")).x, 1.0f);
     ASSERT_TRUE(proj.position("outer.stage.src").has_value());
-    EXPECT_EQ(proj.position("outer.stage.src")->y, 4.0f);
+    EXPECT_EQ(atp_tests::required(proj.position("outer.stage.src")).y, 4.0f);
 }
 
 TEST(ProjectCopy, CopyingAGroupIntoItsOwnSubtreeNestsASnapshot) {
@@ -729,7 +731,7 @@ TEST(ProjectEdit, RemoveChildrenIsOneUndoStep) {
 
     proj.remove_children("", {"a", "c"});
     ASSERT_EQ(proj.config().pipeline.modules.size(), 1u);
-    EXPECT_EQ(proj.config().pipeline.modules.front().module->name, "b");
+    EXPECT_EQ(atp_tests::required(proj.config().pipeline.modules.front().module).name, "b");
     EXPECT_TRUE(proj.config().pipeline.connections.empty());
 
     ASSERT_TRUE(proj.undo());

@@ -1,0 +1,39 @@
+@PACKAGE_INIT@
+
+# The SDK is header-only, so there is one exported target and it is atp::platform. The host runtime
+# (atp_runtime) is not part of this package on purpose — see cmake/Install.cmake in the source tree
+# for why. A find_package asking for it by component therefore fails, which is the intended answer
+# rather than an oversight.
+include("${CMAKE_CURRENT_LIST_DIR}/AniToolsPlatformTargets.cmake")
+
+# atp_add_plugin(): declaring a plugin correctly means a handful of target properties that are load
+# bearing rather than cosmetic, so the SDK ships the function instead of documenting the list.
+include("${CMAKE_CURRENT_LIST_DIR}/AniToolsPlatformPluginHelpers.cmake")
+
+# The plugin ABI of this SDK, read out of include/atp/plugin.hpp when the package was configured.
+set(AniToolsPlatform_PLUGIN_ABI @ATP_PLUGIN_ABI@)
+
+# Turns an ABI mismatch into a configure error. Without it the mismatch surfaces at the
+# atp_abi_version() handshake, that is on the machine running the host, after a successful build and
+# a deployment — which is exactly the feedback a versioned ABI exists to avoid.
+#
+#     find_package(AniToolsPlatform REQUIRED)
+#     atp_require_plugin_abi(9)
+function(atp_require_plugin_abi abi)
+    if (NOT abi MATCHES "^[0-9]+$")
+        message(FATAL_ERROR "atp_require_plugin_abi: expected an ABI number, got '${abi}'")
+    endif ()
+    if (NOT abi EQUAL AniToolsPlatform_PLUGIN_ABI)
+        # AniToolsPlatform_DIR and not PACKAGE_PREFIX_DIR: the latter is the config file's own working
+        # variable and is gone by the time anything the file defined gets called. The former is set by
+        # find_package itself, and it names the directory a reader would change to pick another SDK.
+        message(FATAL_ERROR
+                "plugin ABI mismatch: this plugin is written for AniToolsPlatform ABI ${abi}, but the "
+                "SDK found at ${AniToolsPlatform_DIR} provides ABI ${AniToolsPlatform_PLUGIN_ABI}. "
+                "Building it would produce a library the host refuses to load. Point CMake at a "
+                "matching SDK, or port the plugin to ABI ${AniToolsPlatform_PLUGIN_ABI} and say so "
+                "here.")
+    endif ()
+endfunction()
+
+check_required_components(AniToolsPlatform)

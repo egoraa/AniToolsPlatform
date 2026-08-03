@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <stop_token>
+#include <string>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -71,7 +72,7 @@ class McpExecutionTools : public ::testing::Test {
         std::filesystem::remove_all(root_);
     }
 
-    nlohmann::json call(const char* name, nlohmann::json args = nlohmann::json::object()) {
+    nlohmann::json call(const char* name, const nlohmann::json& args = nlohmann::json::object()) {
         const atp::mcp::tool* t = tools_.find(name);
         EXPECT_NE(t, nullptr) << name;
         return t == nullptr ? nlohmann::json::object() : t->run(args);
@@ -106,6 +107,44 @@ TEST_F(McpExecutionTools, RunsThePipelineAndShowsTheValueTravellingTheConnection
 
     call("stop");
     EXPECT_EQ(call("get_status").at("running"), false);
+}
+
+TEST_F(McpExecutionTools, MeasuresModulesOnlyOnceMetricsAreEnabled) {
+    call("add_module", {{"group_path", ""}, {"factory", "run_source"}, {"name", "src"}});
+    call("add_module", {{"group_path", ""}, {"factory", "run_sink"}, {"name", "dst"}});
+    call("connect", {{"group_path", ""}, {"from", "src.value"}, {"to", "dst.value"}});
+    call("run");
+
+    const nlohmann::json before = call("read_module_metrics");
+    EXPECT_EQ(before.at("enabled"), false);
+    for (const nlohmann::json& m : before.at("modules")) {
+        EXPECT_EQ(m.at("calls").get<std::uint64_t>(), 0U);
+    }
+
+    EXPECT_EQ(call("set_module_metrics", {{"enabled", true}}).at("enabled"), true);
+
+    nlohmann::json measured;
+    for (int i = 0; i < 500 && measured.is_null(); ++i) {
+        const nlohmann::json snapshot = call("read_module_metrics");
+        for (const nlohmann::json& m : snapshot.at("modules")) {
+            if (m.at("calls").get<std::uint64_t>() > 0) {
+                measured = m;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    ASSERT_FALSE(measured.is_null());
+    EXPECT_TRUE(measured.at("path").get<std::string>() == "src" || measured.at("path").get<std::string>() == "dst");
+    EXPECT_GE(measured.at("total_ns").get<std::int64_t>(), measured.at("max_ns").get<std::int64_t>());
+
+    EXPECT_EQ(call("set_module_metrics", {{"enabled", false}}).at("enabled"), false);
+    EXPECT_EQ(call("read_module_metrics").at("enabled"), false);
+    call("stop");
+}
+
+TEST_F(McpExecutionTools, RefusesToMeasureWhenNothingRuns) {
+    EXPECT_THROW((void)call("set_module_metrics", {{"enabled", true}}), atp::runtime::config_error);
+    EXPECT_TRUE(call("read_module_metrics").at("modules").empty());
 }
 
 TEST_F(McpExecutionTools, ReportsABuildFailureAndStaysUsable) {

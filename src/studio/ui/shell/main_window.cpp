@@ -2,8 +2,11 @@
 
 #include "kit/icons.hpp"
 #include "model/create_group.hpp"
+#include "shell/attach_dialog.hpp"
 
+#include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
 
 #include <QActionGroup>
@@ -33,7 +36,15 @@ namespace {
 
 constexpr int window_state_version = 2;
 
-constexpr char site_url[] = "https://anitools.studio";
+constexpr std::string_view site_url = "https://anitools.studio";
+
+/// Refresh period of the local view: reading a pointer costs nothing, so it runs at the rate the eye
+/// wants.
+constexpr int local_poll_ms = 100;
+
+/// Refresh period while attached. Every tick is a round trip over a socket, and a remote pipeline is
+/// watched, not played — four times a second is enough to see it move and cheap enough to leave on.
+constexpr int remote_poll_ms = 250;
 
 }  // namespace
 
@@ -86,9 +97,9 @@ main_window::main_window(app_state& state) : state_(state), default_style_(QAppl
     apply_default_layout();
     restore_layout();
 
-    auto* timer = new QTimer(this);
-    QObject::connect(timer, &QTimer::timeout, this, [this] { poll(); });
-    timer->start(100);
+    poll_timer_ = new QTimer(this);
+    QObject::connect(poll_timer_, &QTimer::timeout, this, [this] { poll(); });
+    poll_timer_->start(local_poll_ms);
 
     refresh_all();
 }
@@ -135,12 +146,20 @@ void main_window::closeEvent(QCloseEvent* event) {
 }
 
 void main_window::refresh_all() {
-    const bool locked = state_.run.running();
+    const bool locked = state_.view->running();
+    const bool attached = state_.attached();
     undo_action_->setEnabled(!locked && state_.doc.can_undo());
     redo_action_->setEnabled(!locked && state_.doc.can_redo());
     new_group_action_->setEnabled(!locked);
-    save_action_->setEnabled(true);
+    // Save writes to the project's own path, and a mirror has none — the path put aside belongs to
+    // someone else. Save As stays on: the mirror is a valid config, so exporting it is free.
+    save_action_->setEnabled(!attached);
     save_as_action_->setEnabled(true);
+    attach_action_->setEnabled(!attached);
+    detach_action_->setEnabled(attached);
+    refresh_mirror_action_->setEnabled(attached);
+    stop_remote_action_->setEnabled(attached);
+    poll_timer_->setInterval(attached ? remote_poll_ms : local_poll_ms);
     recent_menu_->setEnabled(!state_.settings.recent_projects.empty());
     tree_->refresh();
     manager_->refresh();
@@ -152,10 +171,43 @@ void main_window::refresh_all() {
 }
 
 void main_window::update_title() {
+    if (state_.attached()) {
+        setWindowTitle(QString("attached to %1 - ATP Studio").arg(QString::fromStdString(state_.endpoint())));
+        setWindowModified(false);
+        return;
+    }
     const QString name =
         state_.doc_path ? QString::fromStdWString(state_.doc_path->filename().wstring()) : QString("Untitled");
     setWindowTitle(name + "[*] - ATP Studio");
     setWindowModified(state_.doc.is_modified());
+}
+
+void main_window::attach_dialog_flow() {
+    attach_dialog dialog(QString::fromStdString(state_.settings.attach_host), state_.settings.attach_port, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    try {
+        state_.attach(dialog.host().toStdString(), static_cast<std::uint16_t>(dialog.port()));
+        state_.settings.attach_host = dialog.host().toStdString();
+        state_.settings.attach_port = dialog.port();
+        save_settings(state_.settings, state_.settings_file);
+        report(QString("attached to %1").arg(QString::fromStdString(state_.endpoint())));
+    } catch (const std::exception& e) {
+        report("attach", e);
+    }
+    refresh_all();
+}
+
+void main_window::detach(const QString& reason) {
+    if (!state_.attached()) {
+        return;
+    }
+    const QString endpoint = QString::fromStdString(state_.endpoint());
+    state_.detach();
+    report(reason.isEmpty() ? QString("detached from %1").arg(endpoint)
+                            : QString("detached from %1: %2").arg(endpoint, reason));
+    refresh_all();
 }
 
 void main_window::report(const QString& text) {
@@ -219,6 +271,36 @@ void main_window::build_menus() {
     new_group_action_ = edit->addAction(icons::new_group(), "New &group", QKeySequence("Ctrl+Shift+G"),
                                         [this] { create_group(state_, callbacks_, std::nullopt); });
 
+    QMenu* host = menuBar()->addMenu("&Host");
+    attach_action_ = host->addAction("&Attach to a running host...", [this] { attach_dialog_flow(); });
+    refresh_mirror_action_ = host->addAction("&Refresh the mirror", [this] {
+        try {
+            state_.refresh_mirror();
+            report(QString("re-read the pipeline of %1").arg(QString::fromStdString(state_.endpoint())));
+        } catch (const std::exception& e) {
+            report("refresh", e);
+        }
+        refresh_all();
+    });
+    detach_action_ = host->addAction("&Detach", [this] { detach(QString()); });
+    host->addSeparator();
+    stop_remote_action_ = host->addAction("&Stop the remote host...", [this] {
+        const QString endpoint = QString::fromStdString(state_.endpoint());
+        const auto answer = QMessageBox::question(
+            this, "Stop the remote host",
+            QString("Shut down the pipeline host at %1?\n\nIts process exits; the studio cannot start it again.")
+                .arg(endpoint));
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+        try {
+            state_.stop_remote();
+            report(QString("asked %1 to stop").arg(endpoint));
+        } catch (const std::exception& e) {
+            report("stop remote", e);
+        }
+    });
+
     QMenu* view = menuBar()->addMenu("&View");
     build_view_menu(view);
 
@@ -240,10 +322,10 @@ void main_window::build_view_menu(QMenu* view) {
 void main_window::build_theme_menu(QMenu* view) {
     QMenu* theme = view->addMenu("&Theme");
     auto* group = new QActionGroup(theme);
-    const std::pair<app_theme, QString> entries[] = {{app_theme::system, QStringLiteral("&System")},
-                                                     {app_theme::light, QStringLiteral("&Light")},
-                                                     {app_theme::dark, QStringLiteral("&Dark")}};
-    for (const auto& [value, label] : entries) {
+    group->setExclusive(true);
+    for (const auto& [value, label] :
+         {std::pair{app_theme::system, QStringLiteral("&System")},
+          std::pair{app_theme::light, QStringLiteral("&Light")}, std::pair{app_theme::dark, QStringLiteral("&Dark")}}) {
         QAction* action = theme->addAction(label);
         action->setCheckable(true);
         action->setChecked(state_.settings.theme == value);
@@ -398,6 +480,13 @@ void main_window::save(bool ask_path) {
             }
         }
         state_.doc.save(target);
+        if (state_.attached()) {
+            report(QString("saved a mirror of %1: it carries the graph, not the plugins, threads, "
+                           "assignments or replay flags the host was started with")
+                       .arg(QString::fromStdString(state_.endpoint())));
+            refresh_all();
+            return;
+        }
         state_.doc_path = target;
         note_recent(state_.settings, target);
         save_settings(state_.settings, state_.settings_file);
@@ -408,19 +497,23 @@ void main_window::save(bool ask_path) {
 }
 
 void main_window::poll() {
-    if (std::exception_ptr error = state_.run.error()) {
-        try {
-            std::rethrow_exception(error);
-        } catch (const std::exception& e) {
-            report("pipeline", e);
-        } catch (...) {
-            report(QString("pipeline: unknown error"));
+    if (state_.attached()) {
+        if (!state_.view->running()) {
+            const std::string reason = state_.view->error_text();
+            detach(QString::fromStdString(reason.empty() ? "the host is gone" : reason));
+            return;
         }
+        runtime_->refresh();
+        canvas_->scene().update_samples();
+        return;
+    }
+    if (const std::string error = state_.view->error_text(); !error.empty()) {
+        report(QString::fromStdString("pipeline: " + error));
         state_.run.stop();
         refresh_all();
         return;
     }
-    if (state_.run.running()) {
+    if (state_.view->running()) {
         runtime_->refresh();
         canvas_->scene().update_samples();
     }

@@ -115,12 +115,13 @@ inline void connect_ports(project& proj,
     std::vector<std::string> result;
     for (const runtime::child_node& c : g.modules) {
         if (c.module) {
-            const module_info* info = describe(c.module->factory, c.module->factory_version);
+            const runtime::module_node& declared = *c.module;
+            const module_info* info = describe(declared.factory, declared.factory_version);
             if (info == nullptr) {
                 continue;
             }
             for (const port_info& p : inputs ? info->inputs : info->outputs) {
-                result.push_back(c.module->name + "." + p.name);
+                result.push_back(declared.name + "." + p.name);
             }
         } else if (c.group) {
             for (const auto& [alias, path] : inputs ? c.group->expose_inputs : c.group->expose_outputs) {

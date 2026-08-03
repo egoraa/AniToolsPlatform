@@ -1,0 +1,30 @@
+{
+    "version": "2.0",
+    "plugins": ["atp_demo_plugin", "atp_template_plugin"],
+    "pipeline": {
+        "modules": [
+            {
+                "module": "counter",
+                "name": "ticks",
+                "properties": { "start_at": 1, "step": 1 }
+            },
+            {
+                "module": "doubler",
+                "name": "scale",
+                "properties": { "factor": 3 }
+            },
+            {
+                "module": "printer",
+                "name": "sink",
+                "properties": { "tag": "sink" }
+            }
+        ],
+        "connections": [
+            { "from": "ticks.count", "to": "scale.value" },
+            { "from": "scale.report", "to": "sink.label" }
+        ]
+    },
+    "threads": [
+        { "name": "main", "mode": "throttled", "period_ms": 100 }
+    ]
+}

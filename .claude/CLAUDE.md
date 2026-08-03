@@ -28,6 +28,36 @@ above are no-ops in the single-config case.
 
 Run a subset of the tests with `atp_tests --gtest_filter='Group.*'`; `--gtest_brief=1` keeps the output short.
 
+**Quality knobs**, both off by default so an ordinary build is unaffected. `-DATP_WERROR=ON` turns warnings
+into errors — CI sets it on every job, a local build should not, because a new compiler version routinely
+finds new ones. `-DATP_SANITIZER=<value>` takes a `-fsanitize=` value (`thread`, `address`,
+`address,undefined`) and instruments the **whole** build tree, vendored dependencies included, since mixing
+instrumented and uninstrumented code costs ASan false positives and blinds TSan. MSVC implements
+AddressSanitizer only and the configure step says so for the rest, so `thread` — the one that checks the io
+layer's threading contracts — means clang or gcc. Its findings are what `.clang-tidy` and the compiler cannot
+see; the two CI jobs are `sanitizer / thread` and `sanitizer / address,undefined`.
+
+Static analysis is `.clang-tidy` at the repo root (naming rules from `docs/code_style.md` included), run by
+the `clang-tidy` CI job over the compilation database. Its exclusion list has two halves and the file says
+which is which: permanent contracts of the platform, and checks whose findings are still unfixed.
+
+Locally the same analysis is `cmake --build <build-dir> --target tidy --parallel <n>`: one command per
+translation unit, so the build system parallelises it and re-analyses only what changed. **It needs a
+compilation database** (`CMAKE_EXPORT_COMPILE_COMMANDS`, which the Visual Studio generator does not
+produce) and a `clang-tidy` on PATH or in `ATP_CLANG_TIDY`; without either the target is skipped with a
+reason. The stamps depend on **every** header, not just the unit's own source — in a header-only library a
+header reaches almost every unit, and a narrower dependency would report a clean tree that was never
+analysed. The version is not pinned here, only compared against the major CI enforces and reported when it
+differs: a newer analyser is useful locally as long as its verdict is not mistaken for the one that gates
+the branch.
+
+Formatting is `.clang-format`, enforced by the `clang-format` CI job. **The version is pinned** — the tool's
+output moves between releases, so an unpinned one reformats files nobody touched — and the pin lives in two
+places that must stay in step: `cmake/Format.cmake` and the workflow. Install exactly that version with
+`pip install clang-format==22.1.8`; it works on any platform and needs no LLVM install. `cmake --build
+<build-dir> --target format` reformats every tracked source in place (the target appears when a
+clang-format is found, and configure reports it if its major differs from the pinned one).
+
 **API reference**: `docs/Doxyfile` (run by hand from the repo root as `doxygen docs/Doxyfile`, or through the
 optional `docs` CMake target, which appears only when `find_package(Doxygen)` succeeds — a machine without
 doxygen configures unchanged). Output goes to `build/doxygen/html` (gitignored). `EXTRACT_ALL=NO`, so the run
@@ -36,11 +66,25 @@ an undocumented namespace together with the free functions, enums and constants 
 
 `atp_studio` needs Qt 6 Widgets: pass the kit as `-DCMAKE_PREFIX_PATH` on the first configure (the cache keeps
 it afterwards). It is built when `ATP_BUILD_STUDIO` is `ON` (the default) and Qt6 is found, so a machine
-without Qt configures unchanged.
+without Qt configures unchanged. The option gates **the GUI only** — the headless studio core
+(`atp_studio_lib`) and `atp_mcp` are built either way, since they never mention Qt and `atp_tests` covers
+them; `OFF` additionally skips looking for Qt at all. The `ubuntu / clang` CI job builds with `OFF` so that
+configuration keeps being exercised.
 
 Plugin file names are **toolchain-agnostic** (`PREFIX ""` + `OUTPUT_NAME`, e.g. `atp_demo_plugin.dll` /
 `atp_demo_plugin.so` from the same target name), and plugin paths in configs may omit the extension —
-`module_loader` appends the platform one (`atp::plugin_extension`: `.dll`/`.so`/`.dylib`).
+`module_loader` appends the platform one (`atp::plugin_extension`: `.dll`/`.so`/`.dylib`). Declaring a
+plugin is `atp_add_plugin(<name> SOURCES ...)` from `cmake/AniToolsPlatformPluginHelpers.cmake`, which
+sets that naming plus hidden visibility, the `MODULE` type and a link to `atp::platform` alone. The
+file is installed verbatim into the package and included both by the package config and by the root
+`CMakeLists.txt`, so the in-tree plugins are declared by the very function an out-of-tree author calls
+— **do not hand-roll a plugin target**, and when changing the helper remember both callers.
+
+`templates/plugin/` is a plugin project **outside** this build — it is not `add_subdirectory`'d and
+reaches the SDK only through `find_package`. It doubles as the fixture of the `out-of-tree plugin` CI
+job, the one place where both ends of a connection come from different libraries. It names the ABI it
+targets (`atp_require_plugin_abi(8)`), so **bumping `plugin_abi` means editing that file too** or the
+job stops configuring — which is the intended feedback, not breakage.
 
 ## Targets and layout
 
@@ -53,7 +97,7 @@ when adding one, but new io-layer headers go into the umbrella `include/atp/io.h
 `version.hpp` are not part of it).
 
 Executables: `atp_demo` (pipeline demo), `atp_host_static`/`atp_host_dynamic` + `atp_demo_plugin` (plugin
-demo), `atp_app` (JSON-config-driven host). `atp_app` is deliberately a **thin `main.cpp`** over `atp_runtime`
+demo), `atp_app` (JSON-config-driven host). `atp_app` also takes `--metrics` (per-module timing, printed as a table on shutdown), `--run-for <ms>` (a bounded run, which is what makes a measurement repeatable and scriptable) and `--control <port>` (an MCP control channel on `127.0.0.1`, off unless asked for, `0` = pick a free port and print it; unauthenticated by decision, and `stop` over it ends the process). `atp_app` is deliberately a **thin `main.cpp`** over `atp_runtime`
 (`src/app`, own CMakeLists) — the config machinery itself (`config_loader`, `config_model`,
 `config_validator`, `pipeline_builder`) lives in `atp_runtime` under `<atp/runtime/...>`, which is how
 `atp_tests` covers it without linking anything app-specific. Sample configs in `src/app/config/` are copied
@@ -61,6 +105,24 @@ next to the binary together with the demo plugin, so `atp_app config/demo.json` 
 directory. `atp_studio_lib` is the headless studio core (`src/studio`, included as `<atp/studio/...>`), also
 linked into `atp_tests`. The GUI is `atp_studio`: Qt 6 Widgets, panels as private hpp/cpp pairs in
 `src/studio/ui/` (namespace `atp::studio::ui`, no Q_OBJECT/moc), custom QGraphicsScene canvas.
+
+**Installing the SDK**: `cmake --install <build-dir> --prefix <p>` gives a package that
+`find_package(AniToolsPlatform)` consumes out of tree, exporting exactly one target, `atp::platform`
+(also an alias in-tree, so both spellings name the same thing). Rules live in `cmake/Install.cmake`
+plus the template `cmake/AniToolsPlatformConfig.cmake.in`; `ATP_INSTALL` defaults to
+`PROJECT_IS_TOP_LEVEL`. The package carries `AniToolsPlatform_PLUGIN_ABI` and
+`atp_require_plugin_abi(<n>)`, which turns an ABI mismatch into a **configure** error instead of a
+runtime handshake failure; the number is parsed out of `include/atp/plugin.hpp` at configure time, so
+the header stays the single source of truth. `atp_runtime` is deliberately **not** exported — a plugin
+must not link the host runtime, and it would drag the FetchContent'd nlohmann/json along; the reasons
+are written out in `cmake/Install.cmake` and `docs/architecture.md`.
+
+**Packaging**: the same `ATP_INSTALL` switch also installs `atp_studio`/`atp_app`/`atp_mcp` into
+`bin/` and the demo plugin plus the sample configs into `bin/config/`, with the Qt runtime placed in
+the install tree by `qt_generate_deploy_app_script` (the build-tree `atp_deploy_qt()` knows nothing
+about it). `cmake/Packaging.cmake` configures CPack — ZIP on Windows, DMG on macOS, TGZ on Linux — and
+is included **last**, because `include(CPack)` freezes the rules and variables as they stand. Releases
+are a separate workflow, `.github/workflows/release.yml`, on `v*` tags and on `workflow_dispatch`.
 
 Third-party sources are vendored into `external/` by FetchContent rather than a system package: nlohmann/json
 (`src/runtime/CMakeLists.txt`, reaches everything through `atp_runtime`) and googletest
@@ -85,7 +147,7 @@ protocol is tested without spawning a process.
 
 Full style spec: `docs/code_style.md`. Essentials:
 
-- All code comments are written in English; keep that convention. Public entities carry Doxygen `///` docs (brief first sentence, then `@param`/`@return`/`@throws` as needed); inside function bodies and on private members only short notes at genuinely non-obvious spots. Comments explain design rationale ("why"), not mechanics.
+- All code comments are written in English, live in headers only, and are Doxygen `///` blocks attached to a declaration (brief first sentence, then `@param`/`@return`/`@throws` as needed). **`.cpp` files carry no comments at all** — test files included; a `}  // namespace x` closer is layout and a `// NOLINT(...)` marker is a directive to a tool, neither of them a comment. A header has no floating `//` block over a namespace or a group of functions either: the explanation belongs to the declaration it is about. Comments explain design rationale ("why"), not mechanics; a "why" with no declaration to sit on goes into `docs/architecture.md` — commit messages are one line and hold no prose.
 - clang-format: Chromium base, 4-space indent, 120-column limit, mandatory braces on `if`/loops (`.clang-format`).
 - Naming (STL-style, unified across the codebase):
   - Files: snake_case, one class per header, file name = class name (`queued_input.hpp` → `queued_input`).
@@ -95,6 +157,11 @@ Full style spec: `docs/code_style.md`. Essentials:
   - Template parameters: PascalCase with `T` prefix (`TBase`, `TItem`, `TInputs`).
   - Method prefixes: `try_` for non-throwing variants (`try_pop`), `do_` for private virtuals behind an NVI wrapper (`do_connect`).
   - gtest suite/test names stay PascalCase — that is googletest's own convention.
+
+## Git
+
+- **A commit message is one line.** No body, no trailer, no bullet list — the subject says what the change does and nothing else. Anything that needs a paragraph is documentation and belongs in `docs/` (`architecture.md` for design rationale, `code_style.md` for conventions), where it is read and kept up to date; a commit body is neither.
+- **Every change goes on a branch.** `master` is never committed to directly: branch first, work there, merge when it is done and green.
 
 ## Architecture
 

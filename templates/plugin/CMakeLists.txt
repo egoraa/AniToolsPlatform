@@ -15,6 +15,6 @@ find_package(AniToolsPlatform REQUIRED)
 # The ABI this plugin was written against. Stating it turns a mismatch into a configure error here
 # instead of a refused load inside the host. When the platform bumps plugin_abi, this line is meant
 # to fail until the plugin has been looked at — that is the point of it, not an oversight.
-atp_require_plugin_abi(9)
+atp_require_plugin_abi(10)
 
 atp_add_plugin(atp_template_plugin SOURCES plugin.cpp)

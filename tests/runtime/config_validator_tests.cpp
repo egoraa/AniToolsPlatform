@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <string>
 #include <vector>
 
@@ -12,7 +13,7 @@ using nlohmann::json;
 
 json valid_config() {
     return json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "plugins": ["demo.dll"],
         "pipeline": {
             "modules": [
@@ -21,7 +22,7 @@ json valid_config() {
                 {"group": "right", "modules": [{"module": "printer"}],
                  "expose": {"inputs": {"in": "printer.value"}}}
             ],
-            "connections": [{"from": "left.out", "to": "right.in", "replay": true}]
+            "connections": [{"from": "left.out", "to": "right.in"}]
         },
         "threads": [
             {"name": "a", "mode": "on_demand"},
@@ -45,14 +46,34 @@ TEST(ConfigValidator, VersionRules) {
     EXPECT_FALSE(check(doc).empty());
 
     doc = valid_config();
-    doc["version"] = "3.0";
+    doc["version"] = "4.0";
     EXPECT_FALSE(check(doc).empty());
 
-    doc["version"] = "2.99";
+    doc["version"] = "3.99";
     EXPECT_FALSE(check(doc).empty());
 
     doc["version"] = "not-a-version";
     EXPECT_FALSE(check(doc).empty());
+}
+
+TEST(ConfigValidator, RejectsTheRemovedReplayKey) {
+    const json doc = json::parse(R"({
+        "version": "3.0",
+        "pipeline": {
+            "modules": [{"module": "left"}, {"module": "right"}],
+            "connections": [{"from": "left.out", "to": "right.in", "replay": true}]
+        }
+    })");
+    const auto errors = check(doc);
+    ASSERT_FALSE(errors.empty());
+    EXPECT_NE(errors[0].find("replay"), std::string::npos);
+}
+
+TEST(ConfigValidator, RejectsTheSupersededSchemaVersion) {
+    const json doc = json::parse(R"({"version": "2.0", "pipeline": {"modules": []}})");
+    const auto errors = check(doc);
+    ASSERT_FALSE(errors.empty());
+    EXPECT_NE(errors[0].find("3.0"), std::string::npos);
 }
 
 TEST(ConfigValidator, UnknownKeysRejectedWithPath) {
@@ -118,7 +139,7 @@ TEST(ConfigValidator, AssignRules) {
 
 TEST(ConfigValidator, PropertiesMustBeScalarObject) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [
             {"module": "m1", "properties": {"ok": 5, "bad": {"nested": 1}}},
             {"module": "m2", "properties": [1, 2]}
@@ -132,7 +153,7 @@ TEST(ConfigValidator, PropertiesMustBeScalarObject) {
 
 TEST(ConfigValidator, OldParamsKeyIsRejected) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "m", "params": {"x": 1}}]}
     })");
     const auto errors = atp::runtime::validate(doc);
@@ -142,7 +163,7 @@ TEST(ConfigValidator, OldParamsKeyIsRejected) {
 
 TEST(ConfigValidator, OldChildrenKeyIsRejected) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"children": [{"module": "m"}]}
     })");
     const auto errors = atp::runtime::validate(doc);
@@ -152,7 +173,7 @@ TEST(ConfigValidator, OldChildrenKeyIsRejected) {
 
 TEST(ConfigValidator, AggregatesAllErrors) {
     json doc = valid_config();
-    doc["version"] = "3.0";
+    doc["version"] = "4.0";
     doc["threads"][0]["mode"] = "warp";
     doc["assign"]["left"] = "nowhere";
     EXPECT_GE(check(doc).size(), 3u);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "panels/palette_widget.hpp"
 
 #include "model/create_group.hpp"

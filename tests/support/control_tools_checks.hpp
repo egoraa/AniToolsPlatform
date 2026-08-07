@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_TESTS_SUPPORT_CONTROL_TOOLS_CHECKS_HPP
 #define ATP_TESTS_SUPPORT_CONTROL_TOOLS_CHECKS_HPP
 
@@ -51,6 +52,11 @@ class pipeline_view {
         return root ? root->metrics() : std::vector<atp::group::module_stats>{};
     }
 
+    [[nodiscard]] std::vector<atp::group::port_stats> input_metrics() const {
+        const atp::group* root = live_root();
+        return root ? root->input_metrics() : std::vector<atp::group::port_stats>{};
+    }
+
     [[nodiscard]] bool metrics_enabled() const {
         const atp::group* root = live_root();
         return root != nullptr && root->metrics_enabled();
@@ -77,7 +83,7 @@ class pipeline_view {
 /// connection, and a property to edit. Written once, because the point of the checks below is that
 /// the two hosts answer identically about the same pipeline.
 inline constexpr const char* control_target_config = R"({
-    "version": "2.0",
+    "version": "3.0",
     "pipeline": {
         "modules": [
             {"module": "control_source", "name": "src"},
@@ -121,6 +127,15 @@ inline void check_control_tools(const atp::mcp::tool_registry& tools) {
     EXPECT_EQ(call_tool(tools, "read_module_metrics").at("enabled"), true);
     EXPECT_EQ(call_tool(tools, "read_module_metrics").at("modules").size(), 2u);
     EXPECT_EQ(call_tool(tools, "set_module_metrics", {{"enabled", false}}).at("enabled"), false);
+
+    const nlohmann::json ports = call_tool(tools, "read_input_metrics").at("ports");
+    ASSERT_EQ(ports.size(), 1u);
+    EXPECT_EQ(ports.at(0).at("path"), "dst.number");
+    EXPECT_EQ(ports.at(0).at("capacity"), 32u);
+    EXPECT_GT(ports.at(0).at("received").get<std::uint64_t>(), 0u);
+    EXPECT_TRUE(ports.at(0).contains("discarded"));
+    EXPECT_TRUE(ports.at(0).contains("pending"));
+    EXPECT_TRUE(ports.at(0).contains("peak_pending"));
 
     EXPECT_EQ(call_tool(tools, "set_live_property", {{"path", "src.step"}, {"value", 3}}).at("set"), "src.step");
     EXPECT_THROW((void)call_tool(tools, "set_live_property", {{"path", "src.nope"}, {"value", 1}}),

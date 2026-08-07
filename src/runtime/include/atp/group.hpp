@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_GROUP_HPP
 #define ANITOOLSPLATFORM_GROUP_HPP
 
@@ -71,6 +72,11 @@ class group : public module_base {
         /// child and destroyed with it, which is why a module may keep the reference it was given
         /// in initialize for as long as it lives.
         std::unique_ptr<host_node> host = std::make_unique<host_node>();
+        /// The child seen as a composite, or nullptr for an ordinary module. Recorded once by add(),
+        /// the single funnel every child goes through, rather than recovered by dynamic_cast at each
+        /// of the places that walk the tree: whoever puts a subgroup here knows statically that it is
+        /// one, and the field keeps that knowledge instead of throwing it away and guessing it back.
+        group* subgroup = nullptr;
     };
 
     /// What one module cost, as the composite that ran it observed.
@@ -88,6 +94,17 @@ class group : public module_base {
         std::chrono::nanoseconds max{};
     };
 
+    /// Counters of one input, addressed the way the runtime addresses everything else.
+    ///
+    /// The path lives here rather than in io::input_stats because a dotted path is a runtime
+    /// notion: an input knows what it received, not that it sits inside a tree, and teaching the
+    /// SDK about trees to save a wrapper would be the wrong trade.
+    struct port_stats {
+        /// Dotted path from the group that was asked, as "module.port".
+        std::string path;
+        io::input_stats stats;
+    };
+
     /// @param name group name, used for diagnostics
     explicit group(std::string name) : name_(std::move(name)) {}
 
@@ -100,6 +117,12 @@ class group : public module_base {
     }
 
     /// Takes over a ready-made module, module_registry::create() results included.
+    ///
+    /// This is the one place a child enters a group — make() and add_group() both come through here —
+    /// so it is also the one place that asks whether the child is a composite, recording the answer
+    /// in the entry. The cast stays here rather than moving into make() as a static test, because
+    /// this overload takes module_registry::create() results and a group can arrive through it: a
+    /// static test would leave the invariant resting on "nobody adds a group this way".
     /// @throws std::invalid_argument on a null module or an empty name
     /// @throws std::runtime_error if the name is already taken in this group
     module_base& add(std::string name, module_ptr module) {
@@ -109,7 +132,9 @@ class group : public module_base {
         ensure_unique(name);
         children_.push_back({std::move(name), std::move(module), false, std::make_unique<child_counters>(),
                              std::make_unique<host_node>()});
-        return *children_.back().module;
+        child& entry = children_.back();
+        entry.subgroup = dynamic_cast<group*>(entry.module.get());
+        return *entry.module;
     }
 
     /// Creates a child module in place.
@@ -155,7 +180,8 @@ class group : public module_base {
 
     /// Child subgroup by name; nullptr if there is none or the child is an ordinary module.
     [[nodiscard]] group* find_group(const std::string& name) const {
-        return dynamic_cast<group*>(find_module(name));
+        const child* c = find_child(name);
+        return c != nullptr ? c->subgroup : nullptr;
     }
 
     /// Service hook for the runner: a subgroup assigned to its own thread is excluded from the
@@ -216,14 +242,7 @@ class group : public module_base {
     /// @throws std::invalid_argument on a malformed path
     /// @throws std::runtime_error if a child or a port is missing, or the ports are incompatible
     void connect(const std::string& from, const std::string& to) {
-        link(from, to, false);
-    }
-
-    /// Connects two ports and immediately delivers the output's cached value, if there is one.
-    /// @throws std::invalid_argument on a malformed path
-    /// @throws std::runtime_error if a child or a port is missing, or the ports are incompatible
-    void connect(const std::string& from, const std::string& to, io::replay_t) {
-        link(from, to, true);
+        link(from, to);
     }
 
     /// Connections recorded by this group, in creation order.
@@ -360,8 +379,8 @@ class group : public module_base {
             return;
         }
         for (const child& c : children_) {
-            if (auto* nested = dynamic_cast<group*>(c.module.get())) {
-                nested->set_metrics_enabled(on, true);
+            if (c.subgroup != nullptr) {
+                c.subgroup->set_metrics_enabled(on, true);
             }
         }
     }
@@ -377,11 +396,22 @@ class group : public module_base {
         return out;
     }
 
+    /// What every input under this group received and lost, depth first, addressed as "module.port".
+    ///
+    /// Kept apart from module_stats rather than folded into it: the key is a port and not a module,
+    /// and unlike the timing these counters are never switched off — they cost an increment under a
+    /// lock the writer already holds, so there is nothing to save by hiding them and a switch would
+    /// only give an operator a way to be blind to data loss.
+    [[nodiscard]] std::vector<port_stats> input_metrics() const {
+        std::vector<port_stats> out;
+        collect_input_metrics(std::string(), out);
+        return out;
+    }
+
     /// Drains the log buffers of the subtree, composing each module's dotted path as it walks.
     ///
     /// It empties what it reads, so exactly one caller may do this — the host draining into its
-    /// sink. The cast is the same one #38 is about replacing with a virtual as_group(); when that
-    /// lands, this site changes with the others.
+    /// sink.
     /// @param prefix path of this group, empty for the root
     /// @param out lines are appended, oldest first within one module
     void collect_logs(const std::string& prefix, std::vector<log_line>& out) {
@@ -390,15 +420,14 @@ class group : public module_base {
             c.host->ring().drain([&out, &path](log_level level, std::string_view text, bool truncated) {
                 out.push_back({path, level, std::string(text), truncated});
             });
-            if (auto* nested = dynamic_cast<group*>(c.module.get())) {
-                nested->collect_logs(path, out);
+            if (c.subgroup != nullptr) {
+                c.subgroup->collect_logs(path, out);
             }
         }
     }
 
    private:
-    /// Depth-first walk building the dotted paths. The cast is the same one #38 is about
-    /// replacing with a virtual as_group(); when that lands, this site changes with the other three.
+    /// Depth-first walk building the dotted paths.
     void collect_metrics(const std::string& prefix, std::vector<module_stats>& out) const {
         for (const child& c : children_) {
             const std::string path = prefix.empty() ? c.name : prefix + "." + c.name;
@@ -406,8 +435,24 @@ class group : public module_base {
                            c.counters->busy.load(std::memory_order_relaxed),
                            std::chrono::nanoseconds(c.counters->total_ns.load(std::memory_order_relaxed)),
                            std::chrono::nanoseconds(c.counters->max_ns.load(std::memory_order_relaxed))});
-            if (const auto* nested = dynamic_cast<const group*>(c.module.get())) {
+            if (const group* nested = c.subgroup) {
                 nested->collect_metrics(path, out);
+            }
+        }
+    }
+
+    /// Depth-first walk of the ports, skipping a group's own registry on the way down: what a group
+    /// declares are aliases to the children's ports, and reporting both would count one input twice
+    /// under two names.
+    void collect_input_metrics(const std::string& prefix, std::vector<port_stats>& out) const {
+        for (const child& c : children_) {
+            const std::string path = prefix.empty() ? c.name : prefix + "." + c.name;
+            if (const group* nested = c.subgroup) {
+                nested->collect_input_metrics(path, out);
+                continue;
+            }
+            for (const auto& [port_name, in] : c.module->inputs().entries()) {
+                out.push_back({path + "." + port_name, in->stats()});
             }
         }
     }
@@ -462,14 +507,10 @@ class group : public module_base {
         return *port;
     }
 
-    void link(const std::string& from, const std::string& to, bool deliver_cached) {
+    void link(const std::string& from, const std::string& to) {
         io::output_base& out = resolve_output(from);
         io::input_base& in = resolve_input(to);
-        if (deliver_cached) {
-            out.connect(in, io::replay);
-        } else {
-            out.connect(in);
-        }
+        out.connect(in);
         connections_.push_back({&out, &in});
     }
 

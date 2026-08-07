@@ -133,11 +133,18 @@ jobs:
     - name: Configure CMake
       # ATP_WERROR stays off here: this job is about runtime findings, and a warning that the four
       # build jobs already gate on should not be reported twice.
+      #
+      # The Python bridge is off for the same reason the whole tree is instrumented: mixing
+      # instrumented and uninstrumented code is what these jobs exist to avoid, and libpython is not
+      # ours to rebuild. An embedded interpreter would hand TSan a lock protocol it cannot see through
+      # and ASan a heap it never watched being allocated, and the findings would be about CPython
+      # rather than about this repository.
       run: |
         cmake -B "${{ github.workspace }}/build" -S "${{ github.workspace }}" \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-          -DATP_SANITIZER=${{ matrix.sanitizer }}
+          -DATP_SANITIZER=${{ matrix.sanitizer }} \
+          -DATP_BUILD_PYTHON_BRIDGE=OFF
 
     - name: Build
       run: cmake --build "${{ github.workspace }}/build"
@@ -237,8 +244,9 @@ jobs:
 
     - name: Build the host and install the SDK
       # Only the targets this job runs. ATP_BUILD_STUDIO=OFF keeps it from looking for a Qt that is
-      # not here; atp_app_demo_assets is what puts atp_demo_plugin and the configs next to atp_app,
-      # and it is a custom target, so building atp_app alone would not run it.
+      # not here; atp_app_demo_assets is what lays out config/ and plugins/ next to atp_app, and it is
+      # a custom target, so building atp_app alone would not run it — nor create the directory this
+      # job's own plugin is copied into.
       #
       # --component sdk, because that is what this job wants: the headers and the package, not the
       # applications. A full install would demand every executable that has an install rule be built
@@ -271,7 +279,7 @@ jobs:
       # reached the out-of-tree module, the second that the string it produced reached a module in the
       # other library.
       run: |
-        cp template-build/atp_template_plugin.so build/src/app/config/
+        cp template-build/atp_template_plugin.so build/src/app/plugins/
         cp templates/plugin/pipeline.json build/src/app/config/
         cd build/src/app
         set +e
@@ -283,7 +291,7 @@ jobs:
           cat run.log
           exit 1
         fi
-        if ! grep -q '^template-plugin: ' run.log; then
+        if ! grep -q '^doubler: ' run.log; then
           echo "::error::nothing reached the out-of-tree module — no value crossed into the plugin"
           cat run.log
           exit 1
@@ -294,7 +302,223 @@ jobs:
           exit 1
         fi
         echo "crossed the boundary in both directions:"
-        grep -m4 -E '^(template-plugin|printer label): ' run.log
+        grep -m4 -E '^(doubler|printer label): ' run.log
+
+  # plugin_c.h is the one header a plugin in another language reads, and it is included by builds that
+  # have no C++ compiler at all. Nothing else in the tree would notice it drifting into C++: the in-tree
+  # C plugin does compile it, but under whatever dialect the platform compiler defaults to and without
+  # -pedantic, so a C++-only construct or a C11-only one would go unnoticed on some toolchain and
+  # surface as a broken build in somebody else's project. Two compilers and the oldest dialect the
+  # header claims to support are what make that a finding here instead.
+  c_header:
+    name: c header is C
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Compile plugin_c.h as strict C99 and C11
+      run: |
+        cat > probe.c <<'EOF'
+        #include <atp/plugin_c.h>
+
+        int main(void) {
+            atp_value value;
+            value.kind = ATP_KIND_I32;
+            value.as.i32 = ATP_C_ABI;
+            return value.as.i32 - 1;
+        }
+        EOF
+        for cc in gcc clang; do
+          for std in c99 c11; do
+            echo "== $cc -std=$std"
+            $cc -std=$std -pedantic -Wall -Wextra -Werror -Iinclude -c probe.c -o /dev/null || {
+              echo "::error::plugin_c.h does not compile as $std with $cc — it must stay a C header"
+              exit 1
+            }
+          done
+        done
+
+  # A module written in Rust, which is the whole point of the C path: this job is the only place that
+  # proves a plugin needs no C++ compiler, since everything else in the tree is built by one. It has no
+  # install step for the same reason — cargo never sees the SDK, only templates/plugin_rust/src/abi.rs,
+  # a hand-written mirror of the header.
+  rust:
+    name: rust plugin
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    - uses: dtolnay/rust-toolchain@stable
+
+    - name: Build the host
+      run: |
+        cmake -B build -S . -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DATP_WERROR=ON \
+          -DATP_BUILD_STUDIO=OFF
+        cmake --build build --target atp_app atp_demo_plugin atp_app_demo_assets
+
+    - name: Build the plugin with cargo alone
+      run: cargo build --release --manifest-path templates/plugin_rust/Cargo.toml
+
+    - name: Run a pipeline with a module written in Rust
+      # The rename is not incidental: cargo gives a cdylib the platform's own "lib" prefix and cannot be
+      # told not to, while plugin file names here are prefix-free so that a config stays portable. The
+      # template's README says the same thing, and this is where it is checked.
+      #
+      # Two greps, two different claims: the first says an int crossed from a C++ module into the Rust
+      # one and came back as a string, the second that a double did too — a second payload kind, on a
+      # port the first says nothing about.
+      run: |
+        cp templates/plugin_rust/target/release/libatp_rust_plugin.so build/src/app/plugins/atp_rust_plugin.so
+        cp templates/plugin_rust/pipeline.json build/src/app/config/
+        cd build/src/app
+        set +e
+        timeout 10 ./atp_app config/pipeline.json > run.log 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" -ne 124 ]; then
+          echo "::error::atp_app exited with status $rc before the window closed"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^printer label: rust_averager: ' run.log; then
+          echo "::error::nothing came back from the Rust module"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^sink.measure: ' run.log; then
+          echo "::error::the Rust module's f64 output never reached the C++ one"
+          cat run.log
+          exit 1
+        fi
+        echo "a module written in Rust ran inside the C++ host:"
+        grep -m4 -E '^(printer label|sink\.measure): ' run.log
+
+    - name: A panic becomes a reported error, not undefined behaviour
+      # The one Rust-specific hazard of this boundary, and the reason src/lib.rs wraps every entry point
+      # in catch_unwind. Without the guard an unwind crosses into a C++ frame, which is undefined; with
+      # it, the pipeline stops with the panic's own text in the message. atp_app is expected to fail
+      # here — a status of 124 would mean the panic never became an error at all.
+      run: |
+        cd build/src/app
+        set +e
+        timeout 10 ./atp_app -p mean.panic=true config/pipeline.json > panic.log 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" -eq 124 ] || [ "$rc" -eq 0 ]; then
+          echo "::error::a panic in the module did not stop the pipeline (status $rc)"
+          cat panic.log
+          exit 1
+        fi
+        if ! grep -q 'panicked' panic.log; then
+          echo "::error::the pipeline stopped, but not with the panic's text — the guard did not report it"
+          cat panic.log
+          exit 1
+        fi
+        echo "the panic was reported as a module error:"
+        grep -m2 'panicked' panic.log
+
+  # A module written in Python, which is the other thing the C path exists for. Unlike the rust job
+  # this one does build from the SDK — the bridge is part of the tree — and what it proves is the
+  # opposite end: that the module itself is a script nobody compiled, discovered at load time and
+  # connected to C++ modules with no adapter in the config.
+  python:
+    name: python plugin
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    # The floor of the stable ABI the bridge is built against. Pinning the oldest supported version
+    # rather than the newest is deliberate: a bridge that compiles here is one every later CPython
+    # can load, which is the property Py_LIMITED_API is there to buy.
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Build the host and the bridge
+      run: |
+        cmake -B build -S . -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DATP_WERROR=ON \
+          -DATP_BUILD_STUDIO=OFF
+        cmake --build build --target atp_app atp_demo_plugin atp_app_demo_assets atp_app_python_assets
+
+    - name: Fail if the bridge was skipped
+      # find_package is QUIET and the subdirectory returns early without it, so a runner whose Python
+      # has no development files would otherwise produce a green job that tested nothing at all.
+      run: |
+        if [ ! -f build/src/app/plugins/atp_python_bridge.so ]; then
+          echo "::error::the Python bridge was not built — CPython development files were not found"
+          exit 1
+        fi
+
+    - name: Run a pipeline with a module written in Python
+      # Two greps, two claims: an int crossed from a C++ module into the script and came back as a
+      # string, and a double came back on a port the first says nothing about.
+      run: |
+        cd build/src/app
+        set +e
+        timeout 10 ./atp_app config/pipeline_python.json > run.log 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" -ne 124 ]; then
+          echo "::error::atp_app exited with status $rc before the window closed"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^printer label: py_averager: ' run.log; then
+          echo "::error::nothing came back from the Python module"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^sink.measure: ' run.log; then
+          echo "::error::the Python module's f64 output never reached the C++ one"
+          cat run.log
+          exit 1
+        fi
+        echo "a module written in Python ran inside the C++ host:"
+        grep -m4 -E '^(printer label|sink\.measure): ' run.log
+
+    - name: An exception becomes a reported error
+      # The Python counterpart of the rust job's panic step. An exception left pending at the boundary
+      # would make the next call into the interpreter fail for a reason nobody could see; the bridge
+      # turns it into the module error that stops the pipeline, with the script's own file and line in
+      # the message.
+      run: |
+        cd build/src/app
+        set +e
+        timeout 10 ./atp_app -p mean.fail=true config/pipeline_python.json > fail.log 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" -eq 124 ] || [ "$rc" -eq 0 ]; then
+          echo "::error::an exception in the module did not stop the pipeline (status $rc)"
+          cat fail.log
+          exit 1
+        fi
+        if ! grep -q 'the fail property was set' fail.log; then
+          echo "::error::the pipeline stopped, but not with the script's own text"
+          cat fail.log
+          exit 1
+        fi
+        echo "the exception was reported as a module error:"
+        grep -m2 'the fail property was set' fail.log
 
   # Formatting needs no compiler and no build — just the sources and the tool — so this job is the
   # cheapest of the lot and finishes while the others are still configuring.
@@ -316,8 +540,9 @@ jobs:
     - name: Check formatting
       # git ls-files rather than a find: a vendored or generated source cannot wander into the list.
       run: |
-        git ls-files 'include/*.hpp' 'src/*.hpp' 'src/*.cpp' \
-                     'tests/*.hpp' 'tests/*.cpp' 'examples/*.hpp' 'examples/*.cpp' \
+        git ls-files 'include/*.hpp' 'include/*.h' 'src/*.hpp' 'src/*.cpp' \
+                     'tests/*.hpp' 'tests/*.cpp' 'tests/*.c' \
+                     'examples/*.hpp' 'examples/*.cpp' 'examples/*.h' 'examples/*.c' \
                      'templates/*.hpp' 'templates/*.cpp' \
           | xargs clang-format --dry-run --Werror \
           || {

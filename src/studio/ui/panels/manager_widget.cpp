@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "panels/manager_widget.hpp"
 
 #include <cstddef>

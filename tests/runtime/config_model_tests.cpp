@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <chrono>
 #include <string>
 #include <utility>
@@ -14,7 +15,7 @@ namespace {
 
 TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "plugins": ["p.dll"],
         "pipeline": {
             "modules": [
@@ -23,7 +24,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
                 {"group": "sub", "modules": [{"module": "printer"}],
                  "expose": {"inputs": {"in": "printer.value"}}}
             ],
-            "connections": [{"from": "ticks.count", "to": "sub.in", "replay": true}]
+            "connections": [{"from": "ticks.count", "to": "sub.in"}]
         },
         "threads": [{"name": "t", "mode": "throttled", "period_ms": 5}],
         "assign": {"sub": "t"}
@@ -31,7 +32,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     ASSERT_TRUE(atp::runtime::validate(doc).empty());
 
     const atp::runtime::config cfg = atp::runtime::decode(doc);
-    EXPECT_EQ(cfg.schema, (atp::version{2, 0}));
+    EXPECT_EQ(cfg.schema, (atp::version{3, 0}));
     ASSERT_EQ(cfg.plugins.size(), 1u);
 
     ASSERT_EQ(cfg.pipeline.modules.size(), 2u);
@@ -51,7 +52,8 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     EXPECT_EQ(cfg.pipeline.modules[1].group->expose_inputs[0].second, "printer.value");
 
     ASSERT_EQ(cfg.pipeline.connections.size(), 1u);
-    EXPECT_TRUE(cfg.pipeline.connections[0].replay);
+    EXPECT_EQ(cfg.pipeline.connections[0].from, "ticks.count");
+    EXPECT_EQ(cfg.pipeline.connections[0].to, "sub.in");
 
     ASSERT_EQ(cfg.threads.size(), 1u);
     EXPECT_EQ(cfg.threads[0].mode, atp::thread_mode::throttled);
@@ -63,7 +65,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
 
 TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "counter"}]}
     })");
     ASSERT_TRUE(atp::runtime::validate(doc).empty());
@@ -79,7 +81,7 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
 
 TEST(ConfigEncode, RoundTripsCanonicalDocument) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "plugins": ["p.dll"],
         "pipeline": {
             "modules": [
@@ -88,7 +90,7 @@ TEST(ConfigEncode, RoundTripsCanonicalDocument) {
                 {"group": "sub", "modules": [{"module": "printer"}],
                  "expose": {"inputs": {"in": "printer.value"}}}
             ],
-            "connections": [{"from": "ticks.count", "to": "sub.in", "replay": true}]
+            "connections": [{"from": "ticks.count", "to": "sub.in"}]
         },
         "threads": [{"name": "t", "mode": "throttled", "period_ms": 5}],
         "assign": {"sub": "t"}
@@ -99,7 +101,7 @@ TEST(ConfigEncode, RoundTripsCanonicalDocument) {
 
 TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
     const nlohmann::json doc = nlohmann::json::parse(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {
             "modules": [
                 {"module": "counter", "name": "counter"},

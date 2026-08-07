@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <filesystem>
 #include <optional>
@@ -43,6 +44,23 @@ TEST(McpOptions, RejectsUnknownFlagsAndFlagsWithoutAValue) {
     EXPECT_FALSE(parse({"atp_mcp", "--scan-dir"}).has_value());
     EXPECT_FALSE(parse({"atp_mcp", "--root"}).has_value());
     EXPECT_FALSE(parse({"atp_mcp", "/bare/positional"}).has_value());
+}
+
+TEST(McpOptions, ParsesTheLogThreshold) {
+    const std::optional<atp::mcp::options> parsed = parse({"atp_mcp", "--log", "debug"});
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->log_threshold, atp::log_level::debug);
+}
+
+TEST(McpOptions, DefaultsTheLogThresholdToInfo) {
+    const std::optional<atp::mcp::options> parsed = parse({"atp_mcp"});
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->log_threshold, atp::log_level::info);
+}
+
+TEST(McpOptions, RejectsAnUnknownLevel) {
+    EXPECT_FALSE(parse({"atp_mcp", "--log", "loud"}).has_value());
+    EXPECT_FALSE(parse({"atp_mcp", "--log"}).has_value());
 }
 
 TEST(McpWorkspaceScanDirs, FillsTheCatalogAtConstruction) {

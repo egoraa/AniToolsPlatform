@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -30,7 +31,7 @@ class ProjectFiles : public ::testing::Test {
 };
 
 constexpr const char* sample_config = R"({
-    "version": "2.0",
+    "version": "3.0",
     "pipeline": {
         "modules": [
             {"group": "left", "modules": [{"module": "src"}],
@@ -64,7 +65,7 @@ TEST_F(ProjectFiles, OpenReadsModelAndGroupAtNavigates) {
 }
 
 TEST_F(ProjectFiles, OpenRejectsInvalidConfigWithAggregatedErrors) {
-    const auto file = write("bad.json", R"({"version": "2.0", "pipeline": {"typo": 1}})");
+    const auto file = write("bad.json", R"({"version": "3.0", "pipeline": {"typo": 1}})");
     try {
         (void)atp::studio::project::open(file);
         FAIL() << "expected config_error";
@@ -76,7 +77,7 @@ TEST_F(ProjectFiles, OpenRejectsInvalidConfigWithAggregatedErrors) {
 TEST_F(ProjectFiles, OpenFlagsIncludes) {
     write("part.json", R"({"group": "g", "modules": []})");
     const auto file = write("proj.json", R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"$include": "part.json"}]}
     })");
     const atp::studio::project proj = atp::studio::project::open(file);
@@ -111,7 +112,7 @@ TEST(ProjectEdit, BuildsPipelineThroughOperations) {
     proj.add_group("", "right");
     proj.add_module("right", "printer");
     proj.set_expose_input("right", "in", "printer.value");
-    proj.connect("", "left.out", "right.in", true);
+    proj.connect("", "left.out", "right.in");
     proj.add_thread("main_loop", atp::thread_mode::throttled, std::chrono::milliseconds(5));
     proj.set_assignment("left", "main_loop");
     proj.add_plugin("libdemo.dll");
@@ -121,7 +122,7 @@ TEST(ProjectEdit, BuildsPipelineThroughOperations) {
     ASSERT_EQ(cfg.pipeline.modules.size(), 2u);
     EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[1].group->modules[0].module).name, "printer");
     ASSERT_EQ(cfg.pipeline.connections.size(), 1u);
-    EXPECT_TRUE(cfg.pipeline.connections[0].replay);
+    EXPECT_EQ(cfg.pipeline.connections[0].from, "left.out");
     ASSERT_EQ(cfg.threads.size(), 1u);
     ASSERT_EQ(cfg.assignments.size(), 1u);
     ASSERT_EQ(cfg.plugins.size(), 1u);

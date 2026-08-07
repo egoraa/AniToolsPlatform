@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_MCP_APPLICATION_CONTROL_HPP
 #define ATP_MCP_APPLICATION_CONTROL_HPP
 
@@ -58,6 +59,12 @@ class application_control {
     [[nodiscard]] std::vector<group::module_stats> module_metrics() const {
         const group* root = live_root();
         return root ? root->metrics() : std::vector<group::module_stats>{};
+    }
+
+    /// What every input of the running pipeline received and lost; empty if nothing runs.
+    [[nodiscard]] std::vector<group::port_stats> input_metrics() const {
+        const group* root = live_root();
+        return root ? root->input_metrics() : std::vector<group::port_stats>{};
     }
 
     /// Whether the running pipeline is timing its modules.

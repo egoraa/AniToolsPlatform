@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <gtest/gtest.h>
 
 #include <QCheckBox>
@@ -21,6 +22,10 @@ QTableWidget* modules_table(runtime_widget& w) {
     return w.findChild<QTableWidget*>(QStringLiteral("module_metrics"));
 }
 
+QTableWidget* ports_table(runtime_widget& w) {
+    return w.findChild<QTableWidget*>(QStringLiteral("input_metrics"));
+}
+
 TEST(UiRuntimeWidget, OffersTheModuleTableAndTheMeasureSwitch) {
     (void)atp_ui_tests::ensure_app();
     app_state state;
@@ -32,6 +37,30 @@ TEST(UiRuntimeWidget, OffersTheModuleTableAndTheMeasureSwitch) {
     EXPECT_EQ(modules->columnCount(), 5);
     EXPECT_EQ(modules->horizontalHeaderItem(0)->text(), QStringLiteral("module"));
     EXPECT_NE(measure_box(widget), nullptr);
+}
+
+TEST(UiRuntimeWidget, OffersThePortTableAlongsideTheModuleOne) {
+    (void)atp_ui_tests::ensure_app();
+    app_state state;
+    ui_callbacks callbacks;
+    runtime_widget widget(state, callbacks);
+
+    QTableWidget* ports = ports_table(widget);
+    ASSERT_NE(ports, nullptr);
+    EXPECT_EQ(ports->columnCount(), 6);
+    EXPECT_EQ(ports->horizontalHeaderItem(0)->text(), QStringLiteral("port"));
+    EXPECT_EQ(ports->horizontalHeaderItem(2)->text(), QStringLiteral("discarded"));
+}
+
+TEST(UiRuntimeWidget, PortTableStaysEmptyWhileNothingRuns) {
+    (void)atp_ui_tests::ensure_app();
+    app_state state;
+    ui_callbacks callbacks;
+    runtime_widget widget(state, callbacks);
+
+    widget.refresh();
+
+    EXPECT_EQ(ports_table(widget)->rowCount(), 0);
 }
 
 TEST(UiRuntimeWidget, RefusesToMeasureWhileNothingRuns) {

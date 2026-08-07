@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <cstdio>
 #include <exception>
 #include <iostream>
@@ -64,6 +65,12 @@ int main(int argc, char** argv) {
     try {
         std::FILE* protocol = claim_protocol_stream();
         atp::mcp::workspace ws(args->root, args->plugin_dirs, args->scan_dirs);
+        atp::log_pump logs([&ws] { return ws.run_session().collect_logs(); },
+                           [threshold = args->log_threshold](const atp::log_line& line) {
+                               if (line.level <= threshold) {
+                                   std::cerr << atp::format_log_line(line) << '\n';
+                               }
+                           });
         atp::mcp::tool_registry tools;
         atp::mcp::resource_registry resources;
         atp::mcp::register_catalog_tools(tools, ws);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_MCP_CONTROL_TOOLS_HPP
 #define ATP_MCP_CONTROL_TOOLS_HPP
 
@@ -15,7 +16,6 @@
 #include <atp/mcp/arguments.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/mcp/type_name.hpp>
-#include <atp/mcp/value_json.hpp>
 #include <atp/module_base.hpp>
 #include <atp/pipeline_runner.hpp>
 #include <atp/runtime/connection_sample.hpp>
@@ -38,6 +38,7 @@ concept control_target = requires(T& t, const T& ct, bool on, const runtime::pro
     { ct.live_root() } -> std::same_as<group*>;
     { ct.sample_connections() } -> std::same_as<std::vector<runtime::connection_sample>>;
     { ct.module_metrics() } -> std::same_as<std::vector<group::module_stats>>;
+    { ct.input_metrics() } -> std::same_as<std::vector<group::port_stats>>;
     { ct.metrics_enabled() } -> std::same_as<bool>;
     { t.set_metrics_enabled(on) } -> std::same_as<bool>;
     t.set_property(o);
@@ -172,7 +173,7 @@ inline void describe_group(const group& g, const std::string& path, nlohmann::js
     for (const group::child& c : g.children()) {
         const std::string child_path = path.empty() ? c.name : path + "." + c.name;
         const module_base& m = *c.module;
-        const auto* sub = dynamic_cast<const group*>(c.module.get());
+        const group* sub = c.subgroup;
         nlohmann::json node{{"path", child_path},
                             {"module", std::string(m.get_name())},
                             {"version", m.get_version().to_string()},
@@ -236,14 +237,13 @@ void register_control_tools(tool_registry& tools, TTarget& target) {
                }});
 
     tools.add({"read_connections",
-               "Samples every connection: the last value that travelled it and how many writes it "
-               "has seen. This is how you tell a running pipeline from a merely valid one.",
+               "Samples every connection: how many writes it has seen. This is how you tell a running "
+               "pipeline from a merely valid one.",
                no_arguments_schema(), [&target](const nlohmann::json&) {
                    nlohmann::json connections = nlohmann::json::array();
                    for (const auto& s : target.sample_connections()) {
-                       nlohmann::json entry{{"group_path", s.group_path}, {"index", s.index}, {"writes", s.writes}};
-                       entry["value"] = s.value ? value_to_json(*s.value) : nlohmann::json(nullptr);
-                       connections.push_back(std::move(entry));
+                       connections.push_back(
+                           nlohmann::json{{"group_path", s.group_path}, {"index", s.index}, {"writes", s.writes}});
                    }
                    return nlohmann::json{{"connections", std::move(connections)}};
                }});
@@ -280,6 +280,26 @@ void register_control_tools(tool_registry& tools, TTarget& target) {
                                           {"max_ns", m.max.count()}});
                    }
                    return nlohmann::json{{"enabled", target.metrics_enabled()}, {"modules", std::move(modules)}};
+               }});
+
+    tools.add({"read_input_metrics",
+               "What every input of the running pipeline took in and what it lost: how many values "
+               "arrived, how many were discarded because there was no room for them, how deep the "
+               "queue is now and how deep it ever got, against the capacity the module declared. A "
+               "non-zero discarded is the pipeline telling you it is losing data, which nothing "
+               "else here will say. Unlike read_module_metrics this needs nothing switched on — the "
+               "counters cost nothing and are always kept.",
+               no_arguments_schema(), [&target](const nlohmann::json&) {
+                   nlohmann::json ports = nlohmann::json::array();
+                   for (const auto& p : target.input_metrics()) {
+                       ports.push_back({{"path", p.path},
+                                        {"received", p.stats.received},
+                                        {"discarded", p.stats.discarded},
+                                        {"pending", p.stats.pending},
+                                        {"peak_pending", p.stats.peak_pending},
+                                        {"capacity", p.stats.capacity}});
+                   }
+                   return nlohmann::json{{"ports", std::move(ports)}};
                }});
 
     tools.add({"set_live_property",

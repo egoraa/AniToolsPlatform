@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -98,6 +99,55 @@ BENCHMARK(deliver_payload<1024UL>)->Name("deliver_payload/1KiB");
 BENCHMARK(deliver_payload<64UL * 1024UL>)->Name("deliver_payload/64KiB");
 BENCHMARK(deliver_payload<256UL * 1024UL>)->Name("deliver_payload/256KiB");
 
+template <std::size_t N>
+void deliver_payload_fanout(benchmark::State& state) {
+    using payload = payload_of<N>;
+    const auto count = static_cast<std::size_t>(state.range(0));
+    auto out = std::make_unique<atp::io::output<payload>>("out");
+    std::vector<std::unique_ptr<atp::io::input<payload>>> inputs;
+    inputs.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        inputs.push_back(std::make_unique<atp::io::input<payload>>("in" + std::to_string(i)));
+        out->connect(*inputs.back());
+    }
+    auto value = std::make_unique<payload>();
+    for (auto _ : state) {
+        (*out)(*value);
+        benchmark::ClobberMemory();
+    }
+    for (auto& in : inputs) {
+        (void)out->disconnect(*in);
+    }
+}
+BENCHMARK(deliver_payload_fanout<1024UL>)->Name("fanout/1KiB")->Arg(0)->Arg(1)->Arg(2)->Arg(4);
+BENCHMARK(deliver_payload_fanout<64UL * 1024UL>)->Name("fanout/64KiB")->Arg(0)->Arg(1)->Arg(2)->Arg(4);
+BENCHMARK(deliver_payload_fanout<256UL * 1024UL>)->Name("fanout/256KiB")->Arg(0)->Arg(1)->Arg(2)->Arg(4);
+
+struct movable_payload {
+    std::vector<std::uint8_t> bytes;
+};
+
+template <std::size_t N>
+void deliver_movable(benchmark::State& state) {
+    const bool by_move = state.range(0) != 0;
+    auto out = std::make_unique<atp::io::output<movable_payload>>("out");
+    auto in = std::make_unique<atp::io::input<movable_payload>>("in");
+    out->connect(*in);
+    for (auto _ : state) {
+        movable_payload fresh{std::vector<std::uint8_t>(N)};
+        if (by_move) {
+            (*out)(std::move(fresh));
+        } else {
+            (*out)(fresh);
+        }
+        benchmark::ClobberMemory();
+    }
+    (void)out->disconnect(*in);
+}
+BENCHMARK(deliver_movable<1024UL>)->Name("movable/1KiB")->Arg(0)->Arg(1);
+BENCHMARK(deliver_movable<64UL * 1024UL>)->Name("movable/64KiB")->Arg(0)->Arg(1);
+BENCHMARK(deliver_movable<256UL * 1024UL>)->Name("movable/256KiB")->Arg(0)->Arg(1);
+
 void read_state_input(benchmark::State& state) {
     atp::io::output<int> out("out");
     atp::io::input<int> in("in");
@@ -126,7 +176,7 @@ BENCHMARK(read_queued_pop);
 void read_queued_drain(benchmark::State& state) {
     const auto batch = static_cast<std::size_t>(state.range(0));
     atp::io::output<int> out("out");
-    atp::io::queued_input<int> in("in");
+    atp::io::queued_input<int> in("in", atp::io::drop_oldest(1024));
     out.connect(in);
     int value = 0;
     for (auto _ : state) {
@@ -145,7 +195,7 @@ BENCHMARK(read_queued_drain)->Arg(16)->Arg(256);
 void read_queued_pop_batch(benchmark::State& state) {
     const auto batch = static_cast<std::size_t>(state.range(0));
     atp::io::output<int> out("out");
-    atp::io::queued_input<int> in("in");
+    atp::io::queued_input<int> in("in", atp::io::drop_oldest(1024));
     out.connect(in);
     int value = 0;
     for (auto _ : state) {

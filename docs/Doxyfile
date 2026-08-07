@@ -38,3 +38,10 @@ PREDEFINED             = ATP_PLUGIN_EXPORT=
 
 GENERATE_LATEX         = NO
 SORT_MEMBER_DOCS       = NO
+
+# The generated reference is a redistributable artefact of its own, so it carries the copyright and
+# the license on every page. A custom footer replaces doxygen's default one wholesale, which is why
+# footer.html repeats $generatedby and $doxygenversion: without them the attribution doxygen puts on
+# each page would simply disappear. The path is relative to the working directory, like INPUT above —
+# doxygen is run from the project root.
+HTML_FOOTER            = docs/footer.html

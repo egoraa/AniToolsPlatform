@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "kit/icons.hpp"
 #include "model/app_state.hpp"
 #include "shell/main_window.hpp"

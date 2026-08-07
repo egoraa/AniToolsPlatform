@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_RUNTIME_COMMAND_QUEUE_HPP
 #define ATP_RUNTIME_COMMAND_QUEUE_HPP
 

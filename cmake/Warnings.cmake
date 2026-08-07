@@ -29,6 +29,19 @@ set(ATP_WARNINGS_GNU
         -Wdouble-promotion
         -Wformat=2)
 
+# The same policy for the C sources of the tree, which are the plugins of the pure C ABI
+# (include/atp/plugin_c.h). It is the GNU set minus the options that are C++-only: gcc and clang
+# diagnose being handed one for a C translation unit, and under ATP_WERROR that complaint is itself
+# the build failure.
+set(ATP_WARNINGS_GNU_C
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wshadow
+        -Wcast-qual
+        -Wdouble-promotion
+        -Wformat=2)
+
 # /permissive- is what makes MSVC agree with gcc and clang about two-phase lookup, which a
 # header-only template library depends on: without it MSVC accepts code the other three reject.
 set(ATP_WARNINGS_MSVC
@@ -37,10 +50,14 @@ set(ATP_WARNINGS_MSVC
 
 target_compile_options(atp_warnings INTERFACE
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:${ATP_WARNINGS_MSVC}>
-        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:${ATP_WARNINGS_GNU}>)
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:${ATP_WARNINGS_GNU}>
+        $<$<AND:$<COMPILE_LANGUAGE:C>,$<C_COMPILER_ID:MSVC>>:/W4>
+        $<$<AND:$<COMPILE_LANGUAGE:C>,$<NOT:$<C_COMPILER_ID:MSVC>>>:${ATP_WARNINGS_GNU_C}>)
 
 if (ATP_WERROR)
     target_compile_options(atp_warnings INTERFACE
             $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/WX>
-            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>)
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>
+            $<$<AND:$<COMPILE_LANGUAGE:C>,$<C_COMPILER_ID:MSVC>>:/WX>
+            $<$<AND:$<COMPILE_LANGUAGE:C>,$<NOT:$<C_COMPILER_ID:MSVC>>>:-Werror>)
 endif ()

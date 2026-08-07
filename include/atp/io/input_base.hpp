@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_IO_INPUT_BASE_HPP
 #define ANITOOLSPLATFORM_IO_INPUT_BASE_HPP
 
 #include <any>
+#include <cstddef>
+#include <cstdint>
 #include <typeindex>
 #include <typeinfo>
 
@@ -19,6 +22,23 @@ class notifier_base {
 
    protected:
     ~notifier_base() = default;
+};
+
+/// What an input took in and what did not survive the taking.
+///
+/// The vocabulary is values, not storage: how an input holds what it accepted is its own business,
+/// and a caller reading these numbers is asking whether the pipeline is losing data, not how the
+/// losing is arranged. A non-zero discarded is that answer.
+///
+/// Observable on safe instances only. An unsafe one answers zeros, because reading its counters
+/// from another thread is the very race the tag exists to declare away and a plausible wrong number
+/// is worse than an obvious refusal — the same answer output<T> gives for write_count().
+struct input_stats {
+    std::uint64_t received = 0;
+    std::uint64_t discarded = 0;
+    std::size_t pending = 0;
+    std::size_t peak_pending = 0;
+    std::size_t capacity = 0;
 };
 
 /// Type-erased base of an input: what the inputs registry stores, what output_base::connect takes
@@ -49,12 +69,29 @@ class input_base : public io_base {
     /// delivery.
     [[nodiscard]] virtual bool accepts(std::type_index produced) const = 0;
 
+    /// What this input received and what it lost. Pure virtual for the same reason accepts() is:
+    /// only the input knows what became of the values, and a kind that inherited a silent zero
+    /// would report a healthy port while quietly dropping everything that arrived.
+    [[nodiscard]] virtual input_stats stats() const = 0;
+
     /// Delivers a value and fires the notifier.
     /// @param value points at an object of type `meta.type`
     /// @param meta metadata of the produced type; the pairing with @p value is guaranteed by the
     ///        output and backed by the accepts() check performed at connect time
     void deliver(const void* value, const erased_type& meta) {
         do_deliver(value, meta);
+        if (notifier_ != nullptr) {
+            notifier_->notify();
+        }
+    }
+
+    /// Delivers a value the writer hands over, and fires the notifier. The writer must not use the
+    /// object afterwards, and gets this path only for the last subscriber of a write it owns — an
+    /// input kind that cannot take ownership simply copies, which is what the default does.
+    /// @param value points at an object of type `meta.type`, owned by the caller until this returns
+    /// @param meta metadata of the produced type, as in deliver()
+    void deliver_move(void* value, const erased_type& meta) {
+        do_deliver_move(value, meta);
         if (notifier_ != nullptr) {
             notifier_->notify();
         }
@@ -74,6 +111,10 @@ class input_base : public io_base {
 
    private:
     virtual void do_deliver(const void* value, const erased_type& meta) = 0;
+
+    virtual void do_deliver_move(void* value, const erased_type& meta) {
+        do_deliver(value, meta);
+    }
 
     notifier_base* notifier_ = nullptr;
 };

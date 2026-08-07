@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_RUNTIME_VIEW_BASE_HPP
 #define ATP_STUDIO_RUNTIME_VIEW_BASE_HPP
 
@@ -42,11 +43,15 @@ class runtime_view_base {
     /// Pass counters per thread.
     [[nodiscard]] virtual std::vector<pipeline_runner::thread_stats> stats() const = 0;
 
-    /// Every connection with the last value that travelled it.
+    /// Every connection with the number of writes that have travelled it.
     [[nodiscard]] virtual std::vector<runtime::connection_sample> sample_connections() const = 0;
 
     /// Per-module cost; empty when nothing runs or metrics were never enabled.
     [[nodiscard]] virtual std::vector<group::module_stats> module_metrics() const = 0;
+
+    /// What every input received and lost; empty when nothing runs. Needs nothing enabled, which is
+    /// why it is not paired with metrics_enabled() the way module_metrics() is.
+    [[nodiscard]] virtual std::vector<group::port_stats> input_metrics() const = 0;
 
     /// Whether the pipeline is timing its modules.
     [[nodiscard]] virtual bool metrics_enabled() const = 0;

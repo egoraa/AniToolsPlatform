@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "panels/runtime_widget.hpp"
 
 #include <algorithm>
@@ -20,6 +21,13 @@ constexpr int calls_column = 1;
 constexpr int busy_column = 2;
 constexpr int total_column = 3;
 constexpr int max_column = 4;
+
+constexpr int port_column = 0;
+constexpr int received_column = 1;
+constexpr int discarded_column = 2;
+constexpr int pending_column = 3;
+constexpr int peak_column = 4;
+constexpr int capacity_column = 5;
 
 }  // namespace
 
@@ -56,6 +64,15 @@ runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidge
     modules_->verticalHeader()->setVisible(false);
     layout->addWidget(modules_, 1);
 
+    layout->addWidget(style::section_header("ports", this));
+    ports_ = new QTableWidget(0, 6, this);
+    ports_->setObjectName("input_metrics");
+    ports_->setHorizontalHeaderLabels({"port", "received", "discarded", "pending", "peak", "capacity"});
+    ports_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ports_->horizontalHeader()->setSectionResizeMode(port_column, QHeaderView::Stretch);
+    ports_->verticalHeader()->setVisible(false);
+    layout->addWidget(ports_, 1);
+
     QObject::connect(measure_, &QCheckBox::toggled, this, [this](bool on) {
         (void)state_.view->set_metrics_enabled(on);
         refresh_modules();
@@ -83,6 +100,25 @@ void runtime_widget::refresh() {
         measure_->setChecked(state_.view->metrics_enabled());
     }
     refresh_modules();
+    refresh_ports();
+}
+
+void runtime_widget::refresh_ports() {
+    std::vector<group::port_stats> ports = state_.view->input_metrics();
+    std::ranges::sort(ports, [](const group::port_stats& a, const group::port_stats& b) {
+        return a.stats.discarded > b.stats.discarded;
+    });
+    ports_->setRowCount(static_cast<int>(ports.size()));
+    for (std::size_t index = 0; index < ports.size(); ++index) {
+        const group::port_stats& p = ports[index];
+        const int row = static_cast<int>(index);
+        ports_->setItem(row, port_column, new QTableWidgetItem(QString::fromStdString(p.path)));
+        ports_->setItem(row, received_column, new QTableWidgetItem(QString::number(p.stats.received)));
+        ports_->setItem(row, discarded_column, new QTableWidgetItem(QString::number(p.stats.discarded)));
+        ports_->setItem(row, pending_column, new QTableWidgetItem(QString::number(p.stats.pending)));
+        ports_->setItem(row, peak_column, new QTableWidgetItem(QString::number(p.stats.peak_pending)));
+        ports_->setItem(row, capacity_column, new QTableWidgetItem(QString::number(p.stats.capacity)));
+    }
 }
 
 void runtime_widget::refresh_modules() {

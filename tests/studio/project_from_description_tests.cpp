@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <string>
 
 #include <gtest/gtest.h>
@@ -30,7 +31,7 @@ class mirror_source
 class mirror_sink : public atp::module<atp::io::ports<number_inputs>, "mirror_sink"> {};
 
 constexpr const char* mirror_config = R"({
-    "version": "2.0",
+    "version": "3.0",
     "pipeline": {
         "modules": [
             {"module": "mirror_source", "name": "src", "properties": {"step": 7, "tag": "loud"}},

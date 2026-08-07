@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_IO_OUTPUT_HPP
 #define ANITOOLSPLATFORM_IO_OUTPUT_HPP
 
@@ -8,9 +9,9 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <typeinfo>
 #include <utility>
 #include <vector>
@@ -21,7 +22,11 @@
 
 namespace atp::io {
 
-/// Output: push delivery to the connected inputs plus a cache of the last written value.
+/// Output: push delivery to the connected inputs.
+///
+/// Keeps no copy of what it wrote. An output used to cache the last value for tooling to read, which
+/// made every write pay a copy of the payload for a reader that polls a few times a second — and for
+/// the headless runs that have no reader at all.
 ///
 /// Compatibility is decided by the input itself through accepts(), once per connect; there are no
 /// hierarchy casts at all. Delivery runs outside the output's lock — every input takes its own
@@ -35,20 +40,29 @@ class output : public output_base {
     /// @param s whether this instance serialises access
     explicit output(std::string name, safety s = safe) : output_base(std::move(name), typeid(T), s) {}
 
-    /// Writes a value: caches it and delivers it to every connected input.
+    /// Writes a value: delivers it to every connected input.
+    ///
+    /// The consistent snapshot every subscriber sees is the caller's own object — it outlives the
+    /// call — so a write of an exact-type value materialises nothing at all. Only a converting write
+    /// needs a T of its own, and that one goes to the heap above heap_copy_threshold, which is what
+    /// keeps a large payload from overflowing the writer's stack.
     template <typename TArg>
         requires std::constructible_from<T, TArg>
     void operator()(TArg&& value) {
-        T incoming(std::forward<TArg>(value));
         subscriber_list targets;
         {
             auto guard = lock();
             targets = targets_;
-            value_ = incoming;
             ++writes_;
         }
-        for (input_base* in : *targets) {
-            in->deliver(&incoming, input_base::erased_of<T>());
+        if constexpr (std::same_as<std::remove_cvref_t<TArg>, T>) {
+            dispatch(*targets, std::forward<TArg>(value));
+        } else if constexpr (sizeof(T) <= heap_copy_threshold) {
+            T converted(std::forward<TArg>(value));
+            dispatch(*targets, std::move(converted));
+        } else {
+            auto converted = std::make_unique<T>(std::forward<TArg>(value));
+            dispatch(*targets, std::move(*converted));
         }
     }
 
@@ -56,13 +70,7 @@ class output : public output_base {
     /// are hidden deliberately (see output_base).
     /// @throws std::runtime_error if the input is already connected
     void connect(input<T>& in) {
-        attach(in, false);
-    }
-
-    /// Connects a typed input and immediately delivers the cached value, if there is one.
-    /// @throws std::runtime_error if the input is already connected
-    void connect(input<T>& in, replay_t) {
-        attach(in, true);
+        attach(in);
     }
 
     /// A universal input connects to any output statically; the requires clause keeps this pair
@@ -71,15 +79,7 @@ class output : public output_base {
     void connect(input<std::any>& in)
         requires(!std::same_as<T, std::any>)
     {
-        attach(in, false);
-    }
-
-    /// Connects a universal input and immediately delivers the cached value, if there is one.
-    /// @throws std::runtime_error if the input is already connected
-    void connect(input<std::any>& in, replay_t)
-        requires(!std::same_as<T, std::any>)
-    {
-        attach(in, true);
+        attach(in);
     }
 
     bool disconnect(const input_base& in) override {
@@ -104,34 +104,6 @@ class output : public output_base {
         return targets_->size();
     }
 
-    /// Whether nothing has been written yet.
-    [[nodiscard]] bool empty() const {
-        auto guard = lock();
-        return !value_.has_value();
-    }
-
-    /// Copy of the cached value; a reference would be a race, since another thread may overwrite
-    /// it at any moment.
-    /// @throws std::runtime_error if nothing has been written yet
-    [[nodiscard]] T get() const {
-        auto guard = lock();
-        if (!value_) {
-            throw std::runtime_error("output '" + name() + "' has no value");
-        }
-        return *value_;
-    }
-
-    [[nodiscard]] std::optional<std::any> peek() const override {
-        if (!thread_safe()) {
-            return std::nullopt;
-        }
-        auto guard = lock();
-        if (!value_) {
-            return std::nullopt;
-        }
-        return std::any(*value_);
-    }
-
     [[nodiscard]] std::uint64_t write_count() const override {
         if (!thread_safe()) {
             return 0;
@@ -140,45 +112,50 @@ class output : public output_base {
         return writes_;
     }
 
-    /// Clears the cache only; connections survive — use disconnect_all() to break them.
+    /// Zeroes the write counter; connections survive — use disconnect_all() to break them.
     void reset() override {
         auto guard = lock();
-        value_.reset();
+        writes_ = 0;
     }
 
    private:
-    /// Registers the input and, for a replay connect, takes a copy of the cached value to deliver
-    /// once the lock is gone — delivery never runs under the output's own lock.
+    /// Hands the value to every subscriber. Runs outside the output's lock: an input takes its own
+    /// mutex in store(), and nesting the two would be a lock order to reason about.
     ///
-    /// Unwrapping the optional and letting `snapshot` be assigned the value rather than the whole
-    /// optional is deliberate, though it reads as a round trip: assigning the optional directly
-    /// changes how GCC 13 inlines the replay path into a universal input and trips its known
-    /// -Warray-bounds false positive inside <any>, which -Werror then turns into a failed build.
-    void attach(input_base& in, bool deliver_cached) {
-        std::optional<T> snapshot;
-        {
-            auto guard = lock();
-            if (std::find(targets_->begin(), targets_->end(), &in) != targets_->end()) {
-                throw std::runtime_error("input '" + in.name() + "' is already connected to output '" + name() + "'");
-            }
-            auto next = std::make_shared<std::vector<input_base*>>(*targets_);
-            next->push_back(&in);
-            targets_ = std::move(next);
-            if (deliver_cached && value_) {
-                // NOLINTNEXTLINE(bugprone-optional-value-conversion)
-                snapshot = *value_;
-            }
+    /// A value the writer owns is handed over to the **last** subscriber rather than copied into it.
+    /// The delivery order does not change: the move goes to whoever would have been served last
+    /// anyway, and everyone before it still sees the value intact.
+    template <typename TValue>
+    void dispatch(const std::vector<input_base*>& targets, TValue&& value) {
+        if (targets.empty()) {
+            return;
         }
-        if (snapshot) {
-            in.deliver(&*snapshot, input_base::erased_of<T>());
+        const input_base::erased_type& meta = input_base::erased_of<T>();
+        for (std::size_t i = 0; i + 1 < targets.size(); ++i) {
+            targets[i]->deliver(&value, meta);
+        }
+        if constexpr (std::is_lvalue_reference_v<TValue>) {
+            targets.back()->deliver(&value, meta);
+        } else {
+            targets.back()->deliver_move(&value, meta);
         }
     }
 
-    void do_connect(input_base& in, bool deliver_cached) override {
+    void attach(input_base& in) {
+        auto guard = lock();
+        if (std::find(targets_->begin(), targets_->end(), &in) != targets_->end()) {
+            throw std::runtime_error("input '" + in.name() + "' is already connected to output '" + name() + "'");
+        }
+        auto next = std::make_shared<std::vector<input_base*>>(*targets_);
+        next->push_back(&in);
+        targets_ = std::move(next);
+    }
+
+    void do_connect(input_base& in) override {
         if (!in.accepts(typeid(T))) {
             throw std::runtime_error("input '" + in.name() + "' is not compatible with output '" + name() + "'");
         }
-        attach(in, deliver_cached);
+        attach(in);
     }
 
     /// Copy-on-write subscriber list. The write path must iterate the subscribers outside the
@@ -193,7 +170,6 @@ class output : public output_base {
     using subscriber_list = std::shared_ptr<const std::vector<input_base*>>;
 
     subscriber_list targets_ = std::make_shared<const std::vector<input_base*>>();
-    std::optional<T> value_;
     std::uint64_t writes_ = 0;
 };
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_MCP_OPTIONS_HPP
 #define ATP_MCP_OPTIONS_HPP
 
@@ -5,6 +6,8 @@
 #include <optional>
 #include <string_view>
 #include <vector>
+
+#include <atp/log_pump.hpp>
 
 namespace atp::mcp {
 
@@ -15,11 +18,14 @@ struct options {
     std::filesystem::path root = std::filesystem::current_path();
     std::vector<std::filesystem::path> plugin_dirs;
     std::vector<std::filesystem::path> scan_dirs;
+    /// Module lines at this level and above go to stderr. Never to stdout: that one carries the
+    /// protocol, and a log line in it would end the session.
+    log_level log_threshold = log_level::info;
 };
 
 /// One line describing the accepted command line.
 inline constexpr std::string_view usage =
-    "usage: atp_mcp [--root <dir>] [--plugin-dir <dir>]... [--scan-dir <dir>]...\n";
+    "usage: atp_mcp [--root <dir>] [--plugin-dir <dir>]... [--scan-dir <dir>]... [--log <level>]\n";
 
 /// Parses the process arguments.
 /// @param argc argument count as main received it
@@ -35,6 +41,12 @@ inline constexpr std::string_view usage =
             parsed.plugin_dirs.emplace_back(argv[++i]);
         } else if (arg == "--scan-dir" && i + 1 < argc) {
             parsed.scan_dirs.emplace_back(argv[++i]);
+        } else if (arg == "--log" && i + 1 < argc) {
+            const std::optional<log_level> level = level_from_name(argv[++i]);
+            if (!level) {
+                return std::nullopt;
+            }
+            parsed.log_threshold = *level;
         } else {
             return std::nullopt;
         }

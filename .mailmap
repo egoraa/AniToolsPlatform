@@ -1,0 +1,5 @@
+# One author, four spellings in the history: three names against the same address, plus the GitHub
+# noreply address of commits made through the web interface. Without this, `git shortlog -sn` and every
+# tool that counts contributors report four people.
+Egor Anisimov <egoraa@gmail.com>
+Egor Anisimov <egoraa@gmail.com> <109133000+egoraa@users.noreply.github.com>

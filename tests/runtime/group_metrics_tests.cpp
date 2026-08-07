@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <stop_token>
 #include <string>
@@ -30,9 +31,35 @@ class idle_module : public atp::module<> {
     std::string name_;
 };
 
+struct sink_inputs : atp::io::inputs {
+    atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
+};
+using sink_ports = atp::io::ports<sink_inputs, atp::io::outputs, atp::io::properties>;
+
+class sink_module : public atp::module<sink_ports> {
+   public:
+    explicit sink_module(std::string name) : name_(std::move(name)) {}
+
+    [[nodiscard]] std::string_view get_name() const noexcept override {
+        return name_;
+    }
+
+    atp::work_status iterate(std::stop_token) override {
+        return atp::work_status::idle;
+    }
+
+   private:
+    std::string name_;
+};
+
 const atp::group::module_stats* find(const std::vector<atp::group::module_stats>& stats, const std::string& path) {
     const auto it = std::ranges::find_if(stats, [&](const atp::group::module_stats& s) { return s.path == path; });
     return it == stats.end() ? nullptr : &*it;
+}
+
+const atp::group::port_stats* find_port(const std::vector<atp::group::port_stats>& ports, const std::string& path) {
+    const auto it = std::ranges::find_if(ports, [&](const atp::group::port_stats& p) { return p.path == path; });
+    return it == ports.end() ? nullptr : &*it;
 }
 
 TEST(GroupMetrics, AreOffByDefaultAndCountNothing) {
@@ -133,6 +160,57 @@ TEST(GroupMetrics, EnablingCascadesIntoSubgroups) {
     root.set_metrics_enabled(false, false);
     EXPECT_FALSE(root.metrics_enabled());
     EXPECT_TRUE(stage.metrics_enabled());
+}
+
+TEST(GroupInputMetrics, ReportsEveryPortWithItsDottedPath) {
+    atp::group root("root");
+    sink_module& sink = root.make<sink_module>("dst", "dst");
+    sink.inputs().get<atp::io::queued_input<int>>("value")(7);
+
+    const std::vector<atp::group::port_stats> ports = root.input_metrics();
+    const atp::group::port_stats* value = find_port(ports, "dst.value");
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->stats.received, 1U);
+    EXPECT_EQ(value->stats.pending, 1U);
+    EXPECT_EQ(value->stats.capacity, 32U);
+}
+
+TEST(GroupInputMetrics, WalksIntoSubgroups) {
+    atp::group root("root");
+    atp::group& stage = root.add_group("stage");
+    (void)stage.make<sink_module>("dst", "dst");
+
+    const std::vector<atp::group::port_stats> ports = root.input_metrics();
+    EXPECT_NE(find_port(ports, "stage.dst.value"), nullptr);
+}
+
+TEST(GroupInputMetrics, CountsWhatAPortLostToItsCapacity) {
+    atp::group root("root");
+    sink_module& sink = root.make<sink_module>("dst", "dst");
+    auto& value = sink.inputs().get<atp::io::queued_input<int>>("value");
+    for (int i = 0; i < 40; ++i) {
+        value(i);
+    }
+
+    const std::vector<atp::group::port_stats> ports = root.input_metrics();
+    const atp::group::port_stats* stats = find_port(ports, "dst.value");
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->stats.received, 40U);
+    EXPECT_EQ(stats->stats.discarded, 8U);
+    EXPECT_EQ(stats->stats.peak_pending, 32U);
+}
+
+TEST(GroupMetrics, CascadeReachesASubgroupAddedThroughTheErasedPath) {
+    atp::group root("root");
+    auto* stage = new atp::group("stage");
+    (void)root.add("stage", atp::module_ptr{stage});
+    (void)stage->make<idle_module>("inner", "inner");
+
+    root.set_metrics_enabled(true);
+
+    EXPECT_TRUE(stage->metrics_enabled());
+    const std::vector<atp::group::module_stats> stats = root.metrics();
+    EXPECT_NE(find(stats, "stage.inner"), nullptr);
 }
 
 }  // namespace

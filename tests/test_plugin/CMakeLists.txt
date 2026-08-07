@@ -9,3 +9,12 @@ target_link_libraries(test_plugin_bad_abi PRIVATE atp_warnings)
 
 atp_add_plugin(test_plugin_empty SOURCES plugin_empty.cpp)
 target_link_libraries(test_plugin_empty PRIVATE atp_warnings)
+
+atp_add_plugin(test_plugin_c C_ABI SOURCES plugin_c.c)
+target_link_libraries(test_plugin_c PRIVATE atp_warnings)
+
+atp_add_plugin(test_plugin_c_bad_abi C_ABI SOURCES plugin_c_bad_abi.c)
+target_link_libraries(test_plugin_c_bad_abi PRIVATE atp_warnings)
+
+atp_add_plugin(test_plugin_c_bad_desc C_ABI SOURCES plugin_c_bad_desc.c)
+target_link_libraries(test_plugin_c_bad_desc PRIVATE atp_warnings)

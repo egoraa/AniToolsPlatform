@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_EXAMPLES_PLUGIN_DEMO_COUNTER_MODULE_HPP
 #define ATP_EXAMPLES_PLUGIN_DEMO_COUNTER_MODULE_HPP
 
@@ -29,6 +30,11 @@ using counter_ports = atp::io::ports<atp::io::inputs, counter_outputs, counter_p
 /// Counts upwards from start_at, emitting one value per pass.
 class counter_module : public atp::module<counter_ports, "counter", atp::ver<"1.0">> {
    public:
+    /// Says one line, which is what makes the host's log channel visible end to end in the demo.
+    void initialize(atp::module_context& context) override {
+        context.host.info("counter ready");
+    }
+
     void start() override {
         next_ = properties().start_at.get();
     }

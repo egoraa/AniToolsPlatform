@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_IO_HPP
 #define ANITOOLSPLATFORM_IO_HPP
 
 /// @file
 /// Umbrella header of the io subsystem.
 
+#include <atp/io/blob.hpp>
 #include <atp/io/enum_names.hpp>
 #include <atp/io/input.hpp>
 #include <atp/io/input_base.hpp>

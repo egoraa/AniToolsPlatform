@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <chrono>
 #include <csignal>
@@ -14,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include <atp/group.hpp>
+#include <atp/log_pump.hpp>
 #include <atp/mcp/application_control.hpp>
 #include <atp/mcp/control_tools.hpp>
 #include <atp/mcp/resource_registry.hpp>
@@ -48,8 +50,22 @@ void print_metrics(const atp::group& root) {
     }
 }
 
+void print_input_metrics(const atp::group& root) {
+    std::vector<atp::group::port_stats> ports = root.input_metrics();
+    std::ranges::sort(ports, [](const atp::group::port_stats& a, const atp::group::port_stats& b) {
+        return a.stats.discarded > b.stats.discarded;
+    });
+    std::cout << "\nport                              received    discarded     pending        peak    capacity\n";
+    for (const atp::group::port_stats& p : ports) {
+        std::cout << std::left << std::setw(32) << p.path << std::right << std::setw(10) << p.stats.received
+                  << std::setw(13) << p.stats.discarded << std::setw(12) << p.stats.pending << std::setw(12)
+                  << p.stats.peak_pending << std::setw(12) << p.stats.capacity << '\n';
+    }
+}
+
 constexpr const char* usage =
-    "usage: atp_app <config.json> [-p path.prop=value]... [--metrics] [--run-for <ms>] [--control <port>]\n";
+    "usage: atp_app <config.json> [-p path.prop=value]... [--metrics] [--run-for <ms>] [--control <port>] "
+    "[--log <level>]\n";
 
 }  // namespace
 
@@ -59,6 +75,7 @@ int main(int argc, char** argv) {
     bool metrics = false;
     std::chrono::milliseconds run_for{0};
     std::optional<std::uint16_t> control_port;
+    atp::log_level log_threshold = atp::log_level::info;
     try {
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg = argv[i];
@@ -76,6 +93,17 @@ int main(int argc, char** argv) {
                     return 2;
                 }
                 control_port = static_cast<std::uint16_t>(std::stoi(argv[++i]));
+            } else if (arg == "--log") {
+                if (i + 1 == argc) {
+                    std::cerr << usage;
+                    return 2;
+                }
+                const std::optional<atp::log_level> level = atp::level_from_name(argv[++i]);
+                if (!level) {
+                    std::cerr << usage;
+                    return 2;
+                }
+                log_threshold = *level;
             } else if (arg == "-p") {
                 if (i + 1 == argc) {
                     std::cerr << usage;
@@ -123,6 +151,11 @@ int main(int argc, char** argv) {
 
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);
+        atp::log_pump logs(app.pipe, [log_threshold](const atp::log_line& line) {
+            if (line.level <= log_threshold) {
+                std::cerr << atp::format_log_line(line) << '\n';
+            }
+        });
         app.runner.start(app.pipe);
         if (metrics) {
             app.pipe.root().set_metrics_enabled(true);
@@ -158,6 +191,7 @@ int main(int argc, char** argv) {
         app.runner.stop();
         if (metrics) {
             print_metrics(app.pipe.root());
+            print_input_metrics(app.pipe.root());
         }
         if (std::exception_ptr e = app.runner.error()) {
             std::rethrow_exception(e);

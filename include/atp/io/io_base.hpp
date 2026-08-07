@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_IO_IO_BASE_HPP
 #define ANITOOLSPLATFORM_IO_IO_BASE_HPP
 
+#include <cstddef>
 #include <mutex>
 #include <string>
 #include <typeindex>
@@ -9,6 +11,14 @@
 #include <atp/io/threading.hpp>
 
 namespace atp::io {
+
+/// Size above which the io layer materialises a value on the heap instead of the stack.
+///
+/// A port may carry a value of any size: no path of a write puts more than this on the stack, so a
+/// megabyte frame is a legal port type rather than a stack overflow inside the writer's thread.
+/// Above a page the allocation is under a percent of the copy it accompanies; below it, a noticeable
+/// share of it — which is why the boundary sits at a page rather than at zero.
+inline constexpr std::size_t heap_copy_threshold = 4096;
 
 /// Common type-erased base of every declared io element: name, value type and synchronisation.
 ///

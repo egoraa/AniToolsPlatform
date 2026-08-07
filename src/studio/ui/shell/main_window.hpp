@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_UI_MAIN_WINDOW_HPP
 #define ATP_STUDIO_UI_MAIN_WINDOW_HPP
 
@@ -38,6 +39,12 @@ class main_window final : public QMainWindow {
 
     /// Appends an exception to the Errors dock, prefixed with the context it happened in.
     void report(const std::string& context, const std::exception& e);
+
+    /// Moves whatever the running modules have said into the Errors dock.
+    ///
+    /// Called from poll(), and public because a test that had to wait for a timer tick instead
+    /// would be a test that fails on a busy machine.
+    void drain_logs();
 
     /// Opens a project by path — the shared entry point for the dialog, the Recent menu and the
     /// auto-open at startup. Any error goes to the log and leaves the current project untouched.

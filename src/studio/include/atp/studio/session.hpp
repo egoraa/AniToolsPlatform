@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_SESSION_HPP
 #define ATP_STUDIO_SESSION_HPP
 
@@ -112,6 +113,13 @@ class session {
         return root ? root->metrics() : std::vector<group::module_stats>{};
     }
 
+    /// What every input of the running pipeline received and lost; empty if nothing runs. Needs
+    /// nothing switched on, unlike the module timing.
+    [[nodiscard]] std::vector<group::port_stats> input_metrics() const {
+        const group* root = live_root();
+        return root ? root->input_metrics() : std::vector<group::port_stats>{};
+    }
+
     /// Monitoring sample of one connection. The type lives in the runtime, since the headless host
     /// samples the same way and only one of the two owns a session.
     using connection_sample = runtime::connection_sample;
@@ -119,6 +127,16 @@ class session {
     /// Samples every connection of the pipeline for monitoring; empty if nothing has been started.
     [[nodiscard]] std::vector<runtime::connection_sample> sample_connections() const {
         return pipe_ ? runtime::sample_connections(pipe_->root()) : std::vector<runtime::connection_sample>{};
+    }
+
+    /// Drains what the modules have said since the previous call.
+    ///
+    /// It empties what it reads, so exactly one caller may do this — a second one would see a part
+    /// of the log and neither would see it whole. Empty before the first run, and after a stop the
+    /// buffers of the pipeline that is still alive are drained as usual.
+    /// @return the lines, oldest first within one module
+    [[nodiscard]] std::vector<log_line> collect_logs() {
+        return pipe_ ? pipe_->collect_logs() : std::vector<log_line>{};
     }
 
    private:

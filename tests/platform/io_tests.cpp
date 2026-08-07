@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <any>
+#include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -23,6 +27,54 @@ struct test_inputs : atp::io::inputs {
 struct test_outputs : atp::io::outputs {
     atp::io::output<int>& out1 = make<atp::io::output<int>>("out1");
     atp::io::output<std::string>& out2 = make<atp::io::output<std::string>>("out2");
+};
+
+template <std::size_t N>
+struct big_payload {
+    std::array<std::uint8_t, N> bytes{};
+};
+
+template <std::size_t N>
+class first_byte_input : public atp::io::input<big_payload<N>> {
+   public:
+    using atp::io::input<big_payload<N>>::input;
+
+    std::uint8_t first = 0;
+
+   protected:
+    void store(big_payload<N>&& value) override {
+        first = value.bytes[0];
+    }
+
+    void store(const big_payload<N>& value) override {
+        first = value.bytes[0];
+    }
+};
+
+struct copy_counter {
+    static inline int copies = 0;
+    static inline int moves = 0;
+
+    std::array<std::uint8_t, 64> bytes{};
+
+    copy_counter() = default;
+    copy_counter(const copy_counter& other) : bytes(other.bytes) {
+        ++copies;
+    }
+    copy_counter(copy_counter&& other) noexcept : bytes(other.bytes) {
+        ++moves;
+    }
+    copy_counter& operator=(const copy_counter& other) {
+        bytes = other.bytes;
+        ++copies;
+        return *this;
+    }
+    copy_counter& operator=(copy_counter&& other) noexcept {
+        bytes = other.bytes;
+        ++moves;
+        return *this;
+    }
+    ~copy_counter() = default;
 };
 
 }  // namespace
@@ -150,19 +202,6 @@ TEST(InputNotifier, DeliveryNotifies) {
     EXPECT_EQ(n.count, 1);
 }
 
-TEST(InputNotifier, ReplayDeliveryNotifiesLateSubscriber) {
-    atp::io::output<int> out("out");
-    out(5);
-
-    atp::io::input<int> in("in");
-    counting_notifier n;
-    in.set_notifier(&n);
-    out.connect(in, atp::io::replay);
-
-    EXPECT_EQ(n.count, 1);
-    EXPECT_EQ(in.get(), 5);
-}
-
 TEST(InputNotifier, DirectWriteDoesNotNotify) {
     atp::io::input<int> in("in");
     counting_notifier n;
@@ -171,32 +210,20 @@ TEST(InputNotifier, DirectWriteDoesNotNotify) {
     EXPECT_EQ(n.count, 0);
 }
 
-TEST(OutputPeek, SafeOutputExposesCacheAndGeneration) {
+TEST(OutputObservation, SafeOutputCountsWrites) {
     atp::io::output<int> out("out");
     atp::io::output_base& base = out;
-    EXPECT_EQ(base.peek(), std::nullopt);
     EXPECT_EQ(base.write_count(), 0u);
 
     out(41);
     out(42);
-    const std::optional<std::any> snapshot = base.peek();
-    ASSERT_TRUE(snapshot.has_value());
-    EXPECT_EQ(std::any_cast<int>(*snapshot), 42);
+
     EXPECT_EQ(base.write_count(), 2u);
 }
 
-TEST(OutputPeek, ResetClearsCacheButKeepsGeneration) {
-    atp::io::output<int> out("out");
-    out(7);
-    out.reset();
-    EXPECT_EQ(out.peek(), std::nullopt);
-    EXPECT_EQ(out.write_count(), 1u);
-}
-
-TEST(OutputPeek, UnsafeOutputIsNotObservable) {
+TEST(OutputObservation, UnsafeOutputIsNotObservable) {
     atp::io::output<int> out("out", atp::io::unsafe);
     out(7);
-    EXPECT_EQ(out.peek(), std::nullopt);
     EXPECT_EQ(out.write_count(), 0u);
 }
 
@@ -212,7 +239,7 @@ TEST(UnsafeInput, BehavesLikeInput) {
 }
 
 TEST(UnsafeQueuedInput, BehavesLikeQueuedInput) {
-    atp::io::queued_input<int> in{"q_int", atp::io::unsafe};
+    atp::io::queued_input<int> in{"q_int", atp::io::drop_oldest(32), atp::io::unsafe};
     in(1);
     in(2);
     EXPECT_EQ(in.pop(), 1);
@@ -352,9 +379,9 @@ TEST(Watcher, HandlerRunsOnPollingThread) {
 }
 
 TEST(QueuedInput, ConcurrentProducersLoseNothing) {
-    atp::io::queued_input<int> in{"q_int"};
     constexpr int thread_count = 4;
     constexpr int per_thread = 1000;
+    atp::io::queued_input<int> in{"q_int", atp::io::drop_oldest(thread_count * per_thread)};
     {
         std::vector<std::jthread> producers;
         producers.reserve(thread_count);
@@ -370,8 +397,8 @@ TEST(QueuedInput, ConcurrentProducersLoseNothing) {
 }
 
 TEST(QueuedInput, ProducerAndConsumerRunConcurrently) {
-    atp::io::queued_input<int> in{"q_int"};
     constexpr int count = 5000;
+    atp::io::queued_input<int> in{"q_int", atp::io::drop_oldest(count)};
     long long sum = 0;
     int received = 0;
     {
@@ -426,7 +453,8 @@ TEST(InputsRegistry, QueuedInputThroughRegistry) {
 TEST(InputsRegistry, UnsafeInputsThroughRegistry) {
     atp::io::inputs ins;
     atp::io::input<int>& fast = ins.make<atp::io::input<int>>("fast", atp::io::unsafe);
-    atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q", atp::io::unsafe);
+    atp::io::queued_input<int>& q =
+        ins.make<atp::io::queued_input<int>>("q", atp::io::drop_oldest(32), atp::io::unsafe);
     fast(1);
     q(2);
     EXPECT_EQ(ins.get<atp::io::input<int>>("fast").get(), 1);
@@ -507,25 +535,20 @@ TEST(Output, MetadataCarriesNameAndType) {
     EXPECT_EQ(out.type(), std::type_index(typeid(int)));
 }
 
-TEST(Output, EmptyStateThrowsOnGet) {
-    atp::io::output<int> out{"out_int"};
-    EXPECT_TRUE(out.empty());
-    EXPECT_THROW((void)out.get(), std::runtime_error);
-}
-
-TEST(Output, WriteWithoutTargetsOnlyCaches) {
+TEST(Output, WriteWithoutTargetsOnlyCounts) {
     atp::io::output<int> out{"out_int"};
     out(42);
-    ASSERT_FALSE(out.empty());
-    EXPECT_EQ(out.get(), 42);
+    EXPECT_EQ(out.write_count(), 1u);
     EXPECT_EQ(out.connections(), 0u);
 }
 
 TEST(Output, AcceptsLvalueWithoutMoving) {
     atp::io::output<std::string> out{"out_str"};
+    atp::io::input<std::string> in{"in_str"};
+    out.connect(in);
     std::string hello = "Hello";
     out(hello);
-    EXPECT_EQ(out.get(), "Hello");
+    EXPECT_EQ(in.get(), "Hello");
     EXPECT_EQ(hello, "Hello");
 }
 
@@ -539,7 +562,6 @@ TEST(Output, DeliversToAllConnectedInputs) {
     out(7);
     EXPECT_EQ(a.get(), 7);
     EXPECT_EQ(b.get(), 7);
-    EXPECT_EQ(out.get(), 7);
 }
 
 TEST(Output, DeliversToQueuedInput) {
@@ -550,19 +572,22 @@ TEST(Output, DeliversToQueuedInput) {
     out(2);
     EXPECT_EQ(q.pop(), 1);
     EXPECT_EQ(q.pop(), 2);
-    EXPECT_EQ(out.get(), 2);
 }
 
-TEST(Output, ResetClearsCacheButKeepsConnections) {
+TEST(Output, ResetZeroesTheWriteCounter) {
     atp::io::output<int> out{"out_int"};
     atp::io::input<int> in{"in"};
     out.connect(in);
-    out(1);
+    out(7);
+    EXPECT_EQ(out.write_count(), 1u);
+
     out.reset();
-    EXPECT_TRUE(out.empty());
+
+    EXPECT_EQ(out.write_count(), 0u);
     EXPECT_EQ(out.connections(), 1u);
-    out(2);
-    EXPECT_EQ(in.get(), 2);
+    out(9);
+    EXPECT_EQ(in.get(), 9);
+    EXPECT_EQ(out.write_count(), 1u);
 }
 
 TEST(Output, DuplicateConnectThrows) {
@@ -582,7 +607,6 @@ TEST(Output, DisconnectStopsDelivery) {
     EXPECT_FALSE(out.disconnect(in));
     out(2);
     EXPECT_EQ(in.get(), 1);
-    EXPECT_EQ(out.get(), 2);
 }
 
 TEST(Output, DisconnectAllDropsEveryConnection) {
@@ -598,27 +622,16 @@ TEST(Output, DisconnectAllDropsEveryConnection) {
     EXPECT_TRUE(b.empty());
 }
 
-TEST(Output, ReplayDeliversCacheOnConnect) {
+TEST(Output, ALateSubscriberGetsNothingUntilTheNextWrite) {
     atp::io::output<int> out{"out_int"};
     atp::io::input<int> in{"in"};
     out(42);
-    out.connect(in, atp::io::replay);
-    EXPECT_EQ(in.get(), 42);
-}
 
-TEST(Output, ConnectWithoutReplayDoesNotDeliverCache) {
-    atp::io::output<int> out{"out_int"};
-    atp::io::input<int> in{"in"};
-    out(42);
     out.connect(in);
-    EXPECT_TRUE(in.empty());
-}
 
-TEST(Output, ReplayWithEmptyCacheDeliversNothing) {
-    atp::io::output<int> out{"out_int"};
-    atp::io::input<int> in{"in"};
-    out.connect(in, atp::io::replay);
     EXPECT_TRUE(in.empty());
+    out(43);
+    EXPECT_EQ(in.get(), 43);
 }
 
 TEST(Output, TypeErasedConnectChecksCompatibility) {
@@ -635,7 +648,7 @@ TEST(Output, TypeErasedConnectAcceptsQueuedInput) {
     atp::io::inputs ins;
     atp::io::queued_input<int>& q = ins.make<atp::io::queued_input<int>>("q");
     atp::io::output<int> out{"out_int"};
-    static_cast<atp::io::output_base&>(out).connect(ins.at("q"), atp::io::replay);
+    static_cast<atp::io::output_base&>(out).connect(ins.at("q"));
     out(1);
     EXPECT_EQ(q.pop(), 1);
 }
@@ -654,14 +667,6 @@ TEST(Output, TypedConnectAcceptsAnyInput) {
     out.connect(any_in);
     out(std::string("hello"));
     EXPECT_EQ(std::any_cast<std::string>(any_in.get()), "hello");
-}
-
-TEST(Output, ReplayBoxesCacheForAnyInput) {
-    atp::io::output<int> out{"out_int"};
-    atp::io::input<std::any> any_in{"any_in"};
-    out(42);
-    out.connect(any_in, atp::io::replay);
-    EXPECT_EQ(std::any_cast<int>(any_in.get()), 42);
 }
 
 TEST(Output, QueuedAnyInputAccumulatesFromTypedOutput) {
@@ -687,7 +692,7 @@ TEST(Output, AnyOutputToAnyInputNoDoubleBoxing) {
 TEST(Output, AnyOutputTypedConnectHasNoAmbiguity) {
     atp::io::output<std::any> out{"out_any"};
     atp::io::input<std::any> in{"in_any"};
-    out.connect(in, atp::io::replay);
+    out.connect(in);
     out(std::string("x"));
     EXPECT_EQ(std::any_cast<std::string>(in.get()), "x");
 }
@@ -719,11 +724,11 @@ TEST(Output, DisconnectAnyInputStopsDelivery) {
 }
 
 TEST(Output, ConcurrentWritersLoseNothingInQueuedTarget) {
-    atp::io::output<int> out{"out_int"};
-    atp::io::queued_input<int> q{"q"};
-    out.connect(q);
     constexpr int thread_count = 4;
     constexpr int per_thread = 1000;
+    atp::io::output<int> out{"out_int"};
+    atp::io::queued_input<int> q{"q", atp::io::drop_oldest(thread_count * per_thread)};
+    out.connect(q);
     {
         std::vector<std::jthread> writers;
         writers.reserve(thread_count);
@@ -736,7 +741,107 @@ TEST(Output, ConcurrentWritersLoseNothingInQueuedTarget) {
         }
     }
     EXPECT_EQ(q.size(), static_cast<std::size_t>(thread_count) * per_thread);
-    EXPECT_FALSE(out.empty());
+    EXPECT_EQ(out.write_count(), static_cast<std::uint64_t>(thread_count) * per_thread);
+}
+
+TEST(OutputWritePath, WritingCostsOneCopyPerSubscriber) {
+    atp::io::output<copy_counter> out("out");
+    atp::io::input<copy_counter> in("in");
+    out.connect(in);
+
+    const copy_counter value;
+    copy_counter::copies = 0;
+    copy_counter::moves = 0;
+    out(value);
+
+    EXPECT_EQ(copy_counter::copies, 1);
+    EXPECT_EQ(copy_counter::moves, 1);
+}
+
+TEST(OutputWritePath, HalfAMegabyteTravelsWithoutOverflowingTheStack) {
+    using payload = big_payload<512UL * 1024UL>;
+    auto out = std::make_unique<atp::io::output<payload>>("out");
+    auto in = std::make_unique<first_byte_input<512UL * 1024UL>>("in");
+    auto value = std::make_unique<payload>();
+    value->bytes[0] = 5;
+    out->connect(*in);
+
+    (*out)(*value);
+
+    EXPECT_EQ(in->first, 5);
+}
+
+TEST(OutputWritePath, RvalueWriteMovesIntoTheOnlySubscriber) {
+    atp::io::output<copy_counter> out("out");
+    atp::io::input<copy_counter> in("in");
+    out.connect(in);
+
+    copy_counter value;
+    copy_counter::copies = 0;
+    copy_counter::moves = 0;
+    out(std::move(value));
+
+    EXPECT_EQ(copy_counter::copies, 0);
+    EXPECT_EQ(copy_counter::moves, 1);
+}
+
+TEST(OutputWritePath, RvalueWriteCopiesToEveryoneButTheLast) {
+    atp::io::output<copy_counter> out("out");
+    std::vector<std::unique_ptr<atp::io::input<copy_counter>>> inputs;
+    for (int i = 0; i < 4; ++i) {
+        inputs.push_back(std::make_unique<atp::io::input<copy_counter>>("in" + std::to_string(i)));
+        out.connect(*inputs.back());
+    }
+
+    copy_counter value;
+    copy_counter::copies = 0;
+    copy_counter::moves = 0;
+    out(std::move(value));
+
+    EXPECT_EQ(copy_counter::copies, 3);
+    EXPECT_EQ(copy_counter::moves, 4);
+    for (auto& in : inputs) {
+        (void)out.disconnect(*in);
+    }
+}
+
+TEST(OutputWritePath, AnyInputStillReceivesAMovedWrite) {
+    atp::io::output<int> out("out");
+    atp::io::input<std::any> any_in("any");
+    out.connect(any_in);
+
+    out(42);
+
+    EXPECT_EQ(std::any_cast<int>(any_in.get()), 42);
+}
+
+TEST(InputStorePath, QueuedInputKeepsBothHalvesOfTheExtensionPoint) {
+    atp::io::output<int> out("out");
+    atp::io::queued_input<int> queued("q");
+    out.connect(queued);
+
+    out(1);
+    const int lvalue = 2;
+    out(lvalue);
+    queued(3);
+
+    ASSERT_EQ(queued.size(), 3u);
+    EXPECT_EQ(queued.pop(), 1);
+    EXPECT_EQ(queued.pop(), 2);
+    EXPECT_EQ(queued.pop(), 3);
+}
+
+TEST(InputStorePath, FourMegabytesTravelWithoutOverflowingTheStack) {
+    using payload = big_payload<4UL * 1024UL * 1024UL>;
+    auto out = std::make_unique<atp::io::output<payload>>("out");
+    auto in = std::make_unique<first_byte_input<4UL * 1024UL * 1024UL>>("in");
+    auto value = std::make_unique<payload>();
+    value->bytes[0] = 9;
+    out->connect(*in);
+
+    (*out)(*value);
+
+    EXPECT_EQ(in->first, 9);
 }
 
 TEST(UnsafeOutput, BehavesLikeOutput) {
@@ -745,16 +850,20 @@ TEST(UnsafeOutput, BehavesLikeOutput) {
     out.connect(in);
     out(7);
     EXPECT_EQ(in.get(), 7);
-    EXPECT_EQ(out.get(), 7);
     out.reset();
-    EXPECT_TRUE(out.empty());
+    EXPECT_EQ(out.connections(), 1u);
+    out(8);
+    EXPECT_EQ(in.get(), 8);
 }
 
 TEST(OutputsRegistry, TypedFieldAccess) {
     test_outputs outs;
+    atp::io::input<int> in{"in"};
+    outs.out1.connect(in);
     outs.out1(42);
-    EXPECT_EQ(outs.out1.get(), 42);
-    EXPECT_EQ(outs.get<atp::io::output<int>>("out1").get(), 42);
+    EXPECT_EQ(in.get(), 42);
+    EXPECT_EQ(&outs.get<atp::io::output<int>>("out1"), &outs.out1);
+    EXPECT_EQ(outs.get<atp::io::output<int>>("out1").write_count(), 1u);
 }
 
 TEST(OutputsRegistry, AtByNameReturnsMetadata) {
@@ -801,7 +910,7 @@ TEST(OutputsRegistry, DynamicOutputCanBeRemoved) {
     atp::io::output<int>& extra = outs.make<atp::io::output<int>>("extra");
     extra(5);
     EXPECT_EQ(outs.list().size(), 3u);
-    EXPECT_EQ(outs.get<atp::io::output<int>>("extra").get(), 5);
+    EXPECT_EQ(outs.get<atp::io::output<int>>("extra").write_count(), 1u);
 
     EXPECT_TRUE(outs.remove("extra"));
     EXPECT_EQ(outs.list().size(), 2u);
@@ -853,4 +962,138 @@ TEST(IoRegistry, DestructionLeavesAliasedPortAlive) {
     }
     foreign(5);
     EXPECT_EQ(foreign.get(), 5);
+}
+
+TEST(InputStats, CountsReceivedAndOverwrites) {
+    atp::io::input<int> in{"state"};
+    in(1);
+    in(2);
+    in(3);
+    const atp::io::input_stats s = in.stats();
+    EXPECT_EQ(s.received, 3u);
+    EXPECT_EQ(s.discarded, 2u);
+    EXPECT_EQ(s.pending, 1u);
+    EXPECT_EQ(s.peak_pending, 1u);
+    EXPECT_EQ(s.capacity, 1u);
+}
+
+TEST(InputStats, TakingBetweenWritesLosesNothing) {
+    atp::io::input<int> in{"state"};
+    in(1);
+    EXPECT_EQ(in.take().value(), 1);
+    in(2);
+    EXPECT_EQ(in.take().value(), 2);
+    const atp::io::input_stats s = in.stats();
+    EXPECT_EQ(s.received, 2u);
+    EXPECT_EQ(s.discarded, 0u);
+    EXPECT_EQ(s.pending, 0u);
+}
+
+TEST(InputStats, UnsafeInstanceIsUnobservable) {
+    atp::io::input<int> in{"state", atp::io::unsafe};
+    in(1);
+    in(2);
+    const atp::io::input_stats s = in.stats();
+    EXPECT_EQ(s.received, 0u);
+    EXPECT_EQ(s.discarded, 0u);
+    EXPECT_EQ(s.pending, 0u);
+    EXPECT_EQ(s.peak_pending, 0u);
+    EXPECT_EQ(s.capacity, 0u);
+}
+
+TEST(InputStats, ResetClearsCounters) {
+    atp::io::input<int> in{"state"};
+    in(1);
+    in(2);
+    in.reset();
+    const atp::io::input_stats s = in.stats();
+    EXPECT_EQ(s.received, 0u);
+    EXPECT_EQ(s.discarded, 0u);
+    EXPECT_EQ(s.pending, 0u);
+}
+
+TEST(QueuedInputCapacity, DefaultsToThirtyTwoDroppingOldest) {
+    atp::io::queued_input<int> in{"q"};
+    EXPECT_EQ(in.capacity(), 32u);
+    EXPECT_EQ(in.policy(), atp::io::overflow_policy::drop_oldest);
+}
+
+TEST(QueuedInputCapacity, ZeroCapacityIsRejected) {
+    EXPECT_THROW((atp::io::queued_input<int>{"q", atp::io::drop_oldest(0)}), std::invalid_argument);
+    EXPECT_THROW((atp::io::queued_input<int>{"q", atp::io::drop_incoming(0)}), std::invalid_argument);
+}
+
+TEST(QueuedInputCapacity, DropOldestKeepsTheLastValues) {
+    atp::io::queued_input<int> in{"q", atp::io::drop_oldest(3)};
+    for (int i = 1; i <= 5; ++i) {
+        in(i);
+    }
+    EXPECT_EQ(in.size(), 3u);
+    EXPECT_EQ(in.pop(), 3);
+    EXPECT_EQ(in.pop(), 4);
+    EXPECT_EQ(in.pop(), 5);
+}
+
+TEST(QueuedInputCapacity, DropIncomingKeepsTheFirstValues) {
+    atp::io::queued_input<int> in{"q", atp::io::drop_incoming(3)};
+    for (int i = 1; i <= 5; ++i) {
+        in(i);
+    }
+    EXPECT_EQ(in.size(), 3u);
+    EXPECT_EQ(in.pop(), 1);
+    EXPECT_EQ(in.pop(), 2);
+    EXPECT_EQ(in.pop(), 3);
+}
+
+TEST(QueuedInputCapacity, BothPoliciesCountTheirLosses) {
+    atp::io::queued_input<int> oldest{"o", atp::io::drop_oldest(2)};
+    atp::io::queued_input<int> incoming{"i", atp::io::drop_incoming(2)};
+    for (int i = 1; i <= 5; ++i) {
+        oldest(i);
+        incoming(i);
+    }
+    EXPECT_EQ(oldest.stats().discarded, 3u);
+    EXPECT_EQ(incoming.stats().discarded, 3u);
+    EXPECT_EQ(oldest.stats().received, 5u);
+    EXPECT_EQ(incoming.stats().received, 5u);
+}
+
+TEST(QueuedInputCapacity, StatsReportDepthAndDeclaredCapacity) {
+    atp::io::queued_input<int> in{"q", atp::io::drop_oldest(4)};
+    in(1);
+    in(2);
+    const atp::io::input_stats s = in.stats();
+    EXPECT_EQ(s.pending, 2u);
+    EXPECT_EQ(s.capacity, 4u);
+}
+
+TEST(QueuedInputCapacity, PeakSurvivesTheQueueEmptying) {
+    atp::io::queued_input<int> in{"q", atp::io::drop_oldest(8)};
+    in(1);
+    in(2);
+    in(3);
+    EXPECT_EQ(in.drain().size(), 3u);
+    const atp::io::input_stats s = in.stats();
+    EXPECT_EQ(s.pending, 0u);
+    EXPECT_EQ(s.peak_pending, 3u);
+}
+
+TEST(QueuedInputCapacity, MovedInValueIsDiscardedWhenIncomingLoses) {
+    atp::io::queued_input<std::string> in{"q", atp::io::drop_incoming(1)};
+    in(std::string("first"));
+    in(std::string("second"));
+    EXPECT_EQ(in.size(), 1u);
+    EXPECT_EQ(in.pop(), "first");
+    EXPECT_EQ(in.stats().discarded, 1u);
+}
+
+TEST(InputStats, CountsThroughAnHeirThatKeepsNoStorage) {
+    first_byte_input<8> in{"first"};
+    big_payload<8> payload;
+    payload.bytes[0] = 7;
+    in(payload);
+    in(payload);
+    const atp::io::input_stats s = in.stats();
+    EXPECT_EQ(s.received, 2u);
+    EXPECT_EQ(in.first, 7);
 }

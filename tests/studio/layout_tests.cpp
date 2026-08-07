@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
@@ -15,7 +16,7 @@ atp::runtime::group_node make_group(const char* text) {
 
 TEST(StudioLayout, ChainsFormColumnsByConnectionDirection) {
     const atp::runtime::group_node g = make_group(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {
             "modules": [{"module": "a"}, {"module": "b"}, {"module": "c"}],
             "connections": [{"from": "a.out", "to": "b.in"}, {"from": "b.out", "to": "c.in"}]
@@ -29,7 +30,7 @@ TEST(StudioLayout, ChainsFormColumnsByConnectionDirection) {
 
 TEST(StudioLayout, IndependentNodesStackInFirstColumn) {
     const atp::runtime::group_node g = make_group(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "a"}, {"module": "b"}]}
     })");
     const auto p = atp::studio::auto_layout(g);
@@ -39,7 +40,7 @@ TEST(StudioLayout, IndependentNodesStackInFirstColumn) {
 
 TEST(StudioLayout, ConnectionCycleDoesNotHang) {
     const atp::runtime::group_node g = make_group(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {
             "modules": [{"module": "a"}, {"module": "b"}],
             "connections": [{"from": "a.out", "to": "b.in"}, {"from": "b.out", "to": "a.in"}]

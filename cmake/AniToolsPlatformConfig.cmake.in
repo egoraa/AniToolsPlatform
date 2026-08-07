@@ -18,7 +18,7 @@ set(AniToolsPlatform_PLUGIN_ABI @ATP_PLUGIN_ABI@)
 # a deployment — which is exactly the feedback a versioned ABI exists to avoid.
 #
 #     find_package(AniToolsPlatform REQUIRED)
-#     atp_require_plugin_abi(9)
+#     atp_require_plugin_abi(10)
 function(atp_require_plugin_abi abi)
     if (NOT abi MATCHES "^[0-9]+$")
         message(FATAL_ERROR "atp_require_plugin_abi: expected an ABI number, got '${abi}'")

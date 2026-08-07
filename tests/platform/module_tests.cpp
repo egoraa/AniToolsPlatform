@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <stop_token>
 #include <string>
 #include <string_view>

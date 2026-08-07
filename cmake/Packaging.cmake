@@ -18,6 +18,12 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Modular pipeline platform: the studio, th
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "AniToolsPlatform")
 set(CPACK_PACKAGE_FILE_NAME "AniToolsPlatform-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 
+# The archive generators ignore this and take the file from the install rules in cmake/Install.cmake,
+# which place it at the root of the tree; DragNDrop is the one that reads it, and shows it as the
+# agreement the user accepts before the disk image opens. Set here so the two generators cannot
+# disagree about which text is the license.
+set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE)
+
 # Quoting is left to CPack rather than done by hand — a vendor or a path with a space in it otherwise
 # reaches the generated config unquoted and breaks it there, where the error makes no sense.
 set(CPACK_VERBATIM_VARIABLES ON)

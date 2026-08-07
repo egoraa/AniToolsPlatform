@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_RUNTIME_CONFIG_VALIDATOR_HPP
 #define ATP_RUNTIME_CONFIG_VALIDATOR_HPP
 
@@ -123,9 +124,9 @@ class validator {
                 for (const nlohmann::json& c : node.at("connections")) {
                     const std::string cpath = path + ".connections[" + std::to_string(index) + "]";
                     if (!c.is_object()) {
-                        error(cpath, "must be an object {from, to[, replay]}");
+                        error(cpath, "must be an object {from, to}");
                     } else {
-                        check_keys(c, cpath, {"from", "to", "replay"});
+                        check_keys(c, cpath, {"from", "to"});
                         if (c.contains("from")) {
                             check_port_path(c.at("from"), cpath + ".from");
                         } else {
@@ -135,9 +136,6 @@ class validator {
                             check_port_path(c.at("to"), cpath + ".to");
                         } else {
                             error(cpath, "'to' is required");
-                        }
-                        if (c.contains("replay") && !c.at("replay").is_boolean()) {
-                            error(cpath + ".replay", "must be a boolean");
                         }
                     }
                     ++index;

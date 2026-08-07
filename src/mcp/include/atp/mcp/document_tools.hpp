@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_MCP_DOCUMENT_TOOLS_HPP
 #define ATP_MCP_DOCUMENT_TOOLS_HPP
 
@@ -155,12 +156,10 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                "edit is recorded.",
                object_schema({{"group_path", "string", "Group holding both children; \"\" is the root"},
                               {"from", "string", "Source port, as 'child.port'"},
-                              {"to", "string", "Destination port, as 'child.port'"},
-                              {"replay", "boolean", "Replay the cached value to the new subscriber", false}}),
+                              {"to", "string", "Destination port, as 'child.port'"}}),
                [&ws](const nlohmann::json& args) {
                    studio::connect_ports(ws.project(), arg_string(args, "group_path"), arg_string(args, "from"),
-                                         arg_string(args, "to"), detail::make_describe(ws),
-                                         arg_bool_or(args, "replay", false));
+                                         arg_string(args, "to"), detail::make_describe(ws));
                    return nlohmann::json{{"connected", true}};
                }});
 

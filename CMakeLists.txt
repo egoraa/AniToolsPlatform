@@ -16,12 +16,23 @@ option(ATP_BUILD_STUDIO "Build the studio GUI; the headless studio core and atp_
 # because they answer the same kind of question about the same code, and are added from there.
 option(ATP_BUILD_BENCHMARKS "Build the google/benchmark micro-benchmarks" OFF)
 
+# On by default and still costless without CPython: the bridge subdirectory returns early when the
+# development files are missing, so a machine with no Python configures exactly as before.
+option(ATP_BUILD_PYTHON_BRIDGE "Build the bridge that loads modules written in Python" ON)
+
 # Off when this project is embedded in another one: install rules of a subproject land in the parent's
 # package, which is never what the parent asked for.
 option(ATP_INSTALL "Generate the install and export rules for the SDK" ${PROJECT_IS_TOP_LEVEL})
 
 # Before atp_platform, whose INSTALL_INTERFACE spells CMAKE_INSTALL_INCLUDEDIR.
 include(GNUInstallDirs)
+
+# Loadable code — the demo plugins, the Python bridge, the scripts it reads — lands in a directory of
+# its own, next to atp_app in the build tree and under bin/ in an installation, while config/ holds
+# configs alone. One variable rather than a literal in each of the four places that name it, because a
+# sample config reaches a plugin as ../plugins/<name> relative to itself, and that resolves only while
+# both trees spell the directory the same way.
+set(ATP_PLUGIN_DIRNAME plugins)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Warnings.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Sanitizers.cmake)
@@ -47,8 +58,12 @@ target_compile_features(atp_platform INTERFACE cxx_std_23)
 add_library(atp::platform ALIAS atp_platform)
 set_target_properties(atp_platform PROPERTIES EXPORT_NAME platform)
 
+# The .h pattern is not redundant: plugin_c.h is a C header by necessity (it is included by plugins that
+# have no C++ compiler), and without it the one file a foreign-language author reads is the one missing
+# from the IDE's tree.
 file(GLOB_RECURSE ATP_PLATFORM_HEADERS CONFIGURE_DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/atp/*.hpp)
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/atp/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/atp/*.h)
 
 # The same file the installed package ships and includes, so the plugins in this tree are declared by
 # the function an out-of-tree author calls rather than by a copy of what it does.
@@ -65,6 +80,11 @@ file(GLOB_RECURSE ATP_RUNTIME_HEADERS CONFIGURE_DEPENDS
 
 add_subdirectory(examples/demo)
 add_subdirectory(examples/plugin_demo)
+add_subdirectory(examples/plugin_c_demo)
+# Before src/app, which asks whether the bridge target exists in order to copy it next to atp_app.
+if (ATP_BUILD_PYTHON_BRIDGE)
+    add_subdirectory(src/bridges/python)
+endif ()
 add_subdirectory(src/app)
 # Both are added unconditionally, and the GUI option is honoured inside src/studio. The studio core
 # and the MCP server are headless INTERFACE targets that never mention Qt, and atp_tests covers both,

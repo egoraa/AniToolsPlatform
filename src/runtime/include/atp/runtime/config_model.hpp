@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_RUNTIME_CONFIG_MODEL_HPP
 #define ATP_RUNTIME_CONFIG_MODEL_HPP
 
@@ -19,7 +20,7 @@ namespace atp::runtime {
 /// Config schema version the application understands: the config's major has to match and its minor
 /// must not exceed ours, so that fields "from the future" are rejected rather than silently
 /// ignored. The "version" field is the first thing checked.
-inline constexpr version config_schema_version{2, 0};
+inline constexpr version config_schema_version{3, 0};
 
 /// Application-level error: reading, includes, building from a config.
 class config_error : public std::runtime_error {
@@ -50,7 +51,6 @@ struct child_node {
 struct connection_node {
     std::string from;
     std::string to;
-    bool replay = false;
 };
 
 /// A group with its modules (subgroups among them), exported ports and connections.
@@ -130,8 +130,7 @@ inline group_node decode_group(std::string name, const nlohmann::json& j) {
         }
     }
     for (const nlohmann::json& c : j.value("connections", nlohmann::json::array())) {
-        g.connections.push_back(
-            {c.at("from").get<std::string>(), c.at("to").get<std::string>(), c.value("replay", false)});
+        g.connections.push_back({c.at("from").get<std::string>(), c.at("to").get<std::string>()});
     }
     return g;
 }
@@ -191,11 +190,7 @@ inline nlohmann::json encode_group_body(const group_node& g) {
     if (!g.connections.empty()) {
         nlohmann::json connections = nlohmann::json::array();
         for (const connection_node& c : g.connections) {
-            nlohmann::json cj{{"from", c.from}, {"to", c.to}};
-            if (c.replay) {
-                cj["replay"] = true;
-            }
-            connections.push_back(std::move(cj));
+            connections.push_back(nlohmann::json{{"from", c.from}, {"to", c.to}});
         }
         j["connections"] = std::move(connections);
     }

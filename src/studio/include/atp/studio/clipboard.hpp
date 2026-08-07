@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_CLIPBOARD_HPP
 #define ATP_STUDIO_CLIPBOARD_HPP
 

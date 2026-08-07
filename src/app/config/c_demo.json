@@ -1,0 +1,30 @@
+{
+    "version": "3.0",
+    "plugins": ["../plugins/atp_demo_plugin", "../plugins/atp_c_demo_plugin"],
+    "pipeline": {
+        "modules": [
+            {
+                "module": "counter",
+                "name": "ticks",
+                "properties": { "start_at": 1, "step": 2 }
+            },
+            {
+                "module": "c_scaler",
+                "name": "scale",
+                "properties": { "factor": 3, "mode": "verbose" }
+            },
+            {
+                "module": "printer",
+                "name": "print",
+                "properties": { "tag": "c-abi", "format": "bracketed" }
+            }
+        ],
+        "connections": [
+            { "from": "ticks.count", "to": "scale.value" },
+            { "from": "scale.report", "to": "print.label" }
+        ]
+    },
+    "threads": [
+        { "name": "main", "mode": "throttled", "period_ms": 200 }
+    ]
+}

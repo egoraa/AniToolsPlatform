@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_UI_TESTS_QT_APP_HPP
 #define ATP_UI_TESTS_QT_APP_HPP
 

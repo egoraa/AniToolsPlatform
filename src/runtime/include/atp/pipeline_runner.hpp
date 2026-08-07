@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_PIPELINE_RUNNER_HPP
 #define ANITOOLSPLATFORM_PIPELINE_RUNNER_HPP
 
@@ -230,8 +231,8 @@ class pipeline_runner {
     void collect_groups(group& g, group* parent) {
         groups_.push_back({parent, &g});
         for (const group::child& c : g.children()) {
-            if (auto* sub = dynamic_cast<group*>(c.module.get())) {
-                collect_groups(*sub, &g);
+            if (c.subgroup != nullptr) {
+                collect_groups(*c.subgroup, &g);
             }
         }
     }
@@ -338,6 +339,31 @@ class pipeline_runner {
                 notified_inputs_.push_back(c.in);
             }
         }
+        install_wake_handles();
+    }
+
+    /// Points every module's wake handle at the thread that runs it. This is the only place where
+    /// that is known: the module gets its host in initialize, while the layout exists only from
+    /// start() to stop().
+    ///
+    /// Only an on_demand thread is wired. A throttled one waits on the same condition variable by
+    /// wait_until, so waking it early would break the very period the mode exists for, and a
+    /// spinning one never sleeps; on both, wake() stays the documented no-op. A child that is
+    /// itself a group gets the notifier of its own thread rather than its parent's, which is what
+    /// makes the handle correct for a subgroup the runner detached.
+    void install_wake_handles() {
+        for (const group_node& n : groups_) {
+            const std::size_t group_thread = thread_of_.at(n.node);
+            for (const group::child& c : n.node->children()) {
+                const group* sub = c.subgroup;
+                const std::size_t thread = sub != nullptr ? thread_of_.at(sub) : group_thread;
+                if (threads_config_[thread].options.mode != thread_mode::on_demand) {
+                    continue;
+                }
+                c.host->attach(signals_[thread].get());
+                attached_hosts_.push_back(c.host.get());
+            }
+        }
     }
 
     void uninstall_notifiers() {
@@ -345,6 +371,10 @@ class pipeline_runner {
             in->set_notifier(nullptr);
         }
         notified_inputs_.clear();
+        for (host_node* host : attached_hosts_) {
+            host->attach(nullptr);
+        }
+        attached_hosts_.clear();
         signals_.clear();
     }
 
@@ -491,6 +521,7 @@ class pipeline_runner {
     std::vector<std::jthread> threads_;
     std::vector<std::unique_ptr<thread_signal>> signals_;
     std::vector<io::input_base*> notified_inputs_;
+    std::vector<host_node*> attached_hosts_;
     std::vector<std::unique_ptr<pass_counters>> counters_;
     std::stop_source stop_source_;
     pipeline* pipeline_ = nullptr;

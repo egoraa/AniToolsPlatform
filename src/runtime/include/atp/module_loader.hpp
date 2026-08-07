@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_MODULE_LOADER_HPP
 #define ANITOOLSPLATFORM_MODULE_LOADER_HPP
 
+#include <cstring>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -8,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <atp/c_module.hpp>
 #include <atp/module_registry.hpp>
 #include <atp/plugin.hpp>
 
@@ -111,6 +114,11 @@ class plugin_library {
 /// given registry. The registry has to outlive the loader, while the modules created by the
 /// plugin's factories MAY outlive it — each pins its library through the module_ptr deleter, and
 /// the physical unload happens when the last of them dies.
+///
+/// Two registration paths are recognised, and which one a plugin took is decided by the symbols it
+/// exports rather than by anything in the config: the C++ pair of plugin.hpp, and the pure C triple of
+/// plugin_c.h for a plugin that is not C++. A plugin exporting both is legal and both are run — a
+/// bridge may well offer modules of its own next to the foreign ones it wraps.
 class module_loader {
    public:
     /// Loads a plugin and registers its modules.
@@ -123,13 +131,18 @@ class module_loader {
         library_ = std::make_shared<detail::plugin_library>(path_);
         module_registrar registrar{registry, library_};
         try {
-            const auto abi = load_symbol<abi_version_fn>(abi_version_symbol);
-            if (const unsigned plugin_version = abi(); plugin_version != plugin_abi) {
-                throw std::runtime_error("plugin '" + path_.string() + "' has ABI " + std::to_string(plugin_version) +
-                                         ", host expects " + std::to_string(plugin_abi));
+            const bool speaks_c = library_->find(c_abi_version_symbol) != nullptr;
+            const bool speaks_cxx = library_->find(abi_version_symbol) != nullptr;
+            if (!speaks_c && !speaks_cxx) {
+                throw std::runtime_error("plugin '" + path_.string() + "' exports neither '" + abi_version_symbol +
+                                         "' nor '" + c_abi_version_symbol + "'");
             }
-            const auto register_modules = load_symbol<register_modules_fn>(register_modules_symbol);
-            register_modules(registrar);
+            if (speaks_c) {
+                register_c_path(registrar);
+            }
+            if (speaks_cxx) {
+                register_cxx_path(registrar);
+            }
             modules_ = registrar.registered();
         } catch (const std::exception& e) {
             for (const auto& [name, ver] : registrar.registered()) {
@@ -179,6 +192,49 @@ class module_loader {
     }
 
    private:
+    /// Registers the modules of a plugin that is not C++. Adds the plugin's path to whatever went
+    /// wrong: the C side of the boundary knows the descriptor it choked on but not which file it came
+    /// from.
+    void register_c_path(module_registrar& registrar) const {
+        try {
+            register_c_modules(registrar, load_symbol<c_abi_version_fn>(c_abi_version_symbol),
+                               load_symbol<c_module_count_fn>(c_module_count_symbol),
+                               load_symbol<c_module_desc_at_fn>(c_module_desc_at_symbol));
+        } catch (const std::exception& e) {
+            throw std::runtime_error("plugin '" + path_.string() + "': " + e.what());
+        }
+    }
+
+    void register_cxx_path(module_registrar& registrar) const {
+        const auto abi = load_symbol<abi_version_fn>(abi_version_symbol);
+        if (const unsigned plugin_version = abi(); plugin_version != plugin_abi) {
+            throw std::runtime_error("plugin '" + path_.string() + "' has ABI " + std::to_string(plugin_version) +
+                                     ", host expects " + std::to_string(plugin_abi));
+        }
+        check_build_id();
+        load_symbol<register_modules_fn>(register_modules_symbol)(registrar);
+    }
+
+    /// Refuses a plugin built by another toolchain or against another standard library configuration.
+    ///
+    /// Silent when the symbol is absent, which is what keeps every plugin built before it existed
+    /// loading unchanged — the loader has no host to warn through, and turning a missing optional
+    /// symbol into a failure would be an ABI break dressed up as a diagnostic. What it does catch is
+    /// the case the ABI number cannot: same version, incompatible memory layout.
+    void check_build_id() const {
+        void* symbol = library_->find(build_id_symbol);
+        if (symbol == nullptr) {
+            return;
+        }
+        const char* id = reinterpret_cast<build_id_fn*>(symbol)();
+        if (id != nullptr && std::strcmp(id, plugin_build_id) == 0) {
+            return;
+        }
+        throw std::runtime_error("plugin '" + path_.string() + "' was built as '" + (id == nullptr ? "<none>" : id) +
+                                 "', host as '" + plugin_build_id +
+                                 "'; host and plugin must share one toolchain and one C++ runtime");
+    }
+
     template <typename TFn>
     TFn* load_symbol(const char* name) const {
         void* symbol = library_->find(name);

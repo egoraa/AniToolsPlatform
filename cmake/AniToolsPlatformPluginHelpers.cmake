@@ -2,13 +2,20 @@
 # repository's own build, so the in-tree plugins exercise the very function an out-of-tree author
 # calls and it cannot quietly rot.
 #
-#     atp_add_plugin(my_plugin SOURCES plugin.cpp [OUTPUT_NAME my_plugin])
+#     atp_add_plugin(my_plugin SOURCES plugin.cpp [OUTPUT_NAME my_plugin] [C_ABI])
 #
 # Every property it sets is load-bearing, which is the reason for having the function at all: written
 # out by hand they look like boilerplate, and an author who drops one gets a plugin that either fails
 # to load or — worse — loads and then silently refuses connections.
+#
+# C_ABI declares a plugin of the pure C path (include/atp/plugin_c.h) rather than the C++ one. Such a
+# plugin gets the SDK's include directory and nothing else: linking atp::platform would impose
+# cxx_std_23 on a target that may have no C++ compiler behind it at all, which is the very
+# independence that path exists to provide. It is a keyword here rather than the author's own
+# add_library because everything else the function sets — the file naming, the MODULE type, the hidden
+# visibility — is needed just as much by a plugin written in C.
 function(atp_add_plugin name)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "OUTPUT_NAME" "SOURCES")
+    cmake_parse_arguments(PARSE_ARGV 1 arg "C_ABI" "OUTPUT_NAME" "SOURCES")
 
     if (arg_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "atp_add_plugin(${name}): unexpected arguments '${arg_UNPARSED_ARGUMENTS}'")
@@ -28,13 +35,21 @@ function(atp_add_plugin name)
 
     # atp::platform alone. Linking the host runtime would put a second copy of the registries and the
     # loader into the process, and the two copies would disagree about which modules exist.
-    target_link_libraries(${name} PRIVATE atp::platform)
+    if (arg_C_ABI)
+        target_include_directories(${name} PRIVATE
+                $<TARGET_PROPERTY:atp::platform,INTERFACE_INCLUDE_DIRECTORIES>)
+    else ()
+        target_link_libraries(${name} PRIVATE atp::platform)
+    endif ()
 
     set_target_properties(${name} PROPERTIES
             # Hidden visibility is what forces type identity across the plugin boundary to be decided
             # by name (include/atp/type_compare.hpp) rather than by the address of a per-library
-            # static — the discipline the io layer is built on.
+            # static — the discipline the io layer is built on. The C setting matters only for a
+            # C_ABI plugin, where the handshake symbols carry the export attribute themselves and
+            # everything else has no business leaving the file.
             CXX_VISIBILITY_PRESET hidden
+            C_VISIBILITY_PRESET hidden
             VISIBILITY_INLINES_HIDDEN ON
             # One file name on every toolchain: no "lib" prefix, an explicit output name. A config may
             # write a plugin path without an extension, and atp::module_loader appends the platform

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <memory>
 #include <stdexcept>
 #include <stop_token>
@@ -74,6 +75,22 @@ TEST(Group, AddAcceptsPrebuiltModule) {
     atp::module_base& m = g.add("ready", atp::module_ptr{new plain_module});
     EXPECT_EQ(g.find_module("ready"), &m);
     EXPECT_EQ(g.find_module("missing"), nullptr);
+}
+
+TEST(Group, RecordsASubgroupWhicheverWayItArrives) {
+    atp::group g("root");
+    atp::group& made = g.add_group("made");
+    auto* prebuilt = new atp::group("prebuilt");
+    (void)g.add("prebuilt", atp::module_ptr{prebuilt});
+    g.make<plain_module>("leaf");
+
+    ASSERT_EQ(g.children().size(), 3U);
+    EXPECT_EQ(g.children()[0].subgroup, &made);
+    EXPECT_EQ(g.children()[1].subgroup, prebuilt);
+    EXPECT_EQ(g.children()[2].subgroup, nullptr);
+    EXPECT_EQ(g.find_group("prebuilt"), prebuilt);
+    EXPECT_EQ(g.find_group("leaf"), nullptr);
+    EXPECT_EQ(g.find_group("missing"), nullptr);
 }
 
 TEST(Group, RejectsDuplicateAndEmptyNames) {
@@ -190,15 +207,6 @@ TEST(Group, ConnectsByPathsAcrossSubgroupBoundary) {
 
     src.outputs().number(7);
     EXPECT_EQ(sink.inputs().number.get(), 7);
-}
-
-TEST(Group, ConnectReplayDeliversCache) {
-    atp::group g("root");
-    source_module& src = g.make<source_module>("src");
-    sink_module& sink = g.make<sink_module>("sink");
-    src.outputs().number(42);
-    g.connect("src.number", "sink.number", atp::io::replay);
-    EXPECT_EQ(sink.inputs().number.get(), 42);
 }
 
 TEST(Group, ConnectErrors) {

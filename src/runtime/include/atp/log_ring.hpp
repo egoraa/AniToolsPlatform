@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_LOG_RING_HPP
 #define ANITOOLSPLATFORM_LOG_RING_HPP
 
@@ -77,10 +78,13 @@ class log_ring {
     }
 
     /// Hands every published line to the sink, oldest first, and frees the slots.
+    ///
+    /// The sink is taken by const reference rather than by a forwarding one on purpose: it is
+    /// called once per line, so a signature promising that it might be consumed would be a lie.
     /// @param sink invoked as sink(log_level, std::string_view, bool truncated); the view is valid
     ///        only for the duration of the call
     template <typename TSink>
-    void drain(TSink&& sink) {
+    void drain(const TSink& sink) {
         while (true) {
             slot& s = slots_[head_ % capacity];
             const std::uint64_t seq = s.seq.load(std::memory_order_acquire);

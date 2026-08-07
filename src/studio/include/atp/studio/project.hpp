@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_PROJECT_HPP
 #define ATP_STUDIO_PROJECT_HPP
 
@@ -497,7 +498,7 @@ class project {
     /// @throws runtime::config_error if the group or a referenced child is missing, a path is
     ///         malformed, an end names a subgroup port that is not exported, or the same connection
     ///         already exists
-    void connect(const std::string& group_path, const std::string& from, const std::string& to, bool replay = false) {
+    void connect(const std::string& group_path, const std::string& from, const std::string& to) {
         runtime::group_node& g = require_group(group_path);
         require_port(g, group_path, from, false);
         require_port(g, group_path, to, true);
@@ -507,7 +508,7 @@ class project {
             }
         }
         snapshot();
-        g.connections.push_back({from, to, replay});
+        g.connections.push_back({from, to});
     }
 
     /// Removes the connection at @p index in a group's connection list.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -27,7 +28,7 @@ class LoaderFiles : public ::testing::Test {
 TEST_F(LoaderFiles, ExpandsNestedIncludesRelativeToIncludingFile) {
     write("sub/leaf.json", R"({"leaf": true})");
     write("sub/mid.json", R"({"mid": {"$include": "leaf.json"}})");
-    const auto root = write("root.json", R"({"version": "2.0", "part": {"$include": "sub/mid.json"}})");
+    const auto root = write("root.json", R"({"version": "3.0", "part": {"$include": "sub/mid.json"}})");
 
     const nlohmann::json doc = atp::runtime::load_config(root);
     EXPECT_TRUE(doc.at("part").at("mid").at("leaf").get<bool>());
@@ -35,7 +36,7 @@ TEST_F(LoaderFiles, ExpandsNestedIncludesRelativeToIncludingFile) {
 
 TEST_F(LoaderFiles, IncludeInsideArrayElement) {
     write("child.json", R"({"group": "g", "modules": []})");
-    const auto root = write("root.json", R"({"version": "2.0", "modules": [{"$include": "child.json"}]})");
+    const auto root = write("root.json", R"({"version": "3.0", "modules": [{"$include": "child.json"}]})");
 
     const nlohmann::json doc = atp::runtime::load_config(root);
     EXPECT_EQ(doc.at("modules").at(0).at("group"), "g");
@@ -44,27 +45,27 @@ TEST_F(LoaderFiles, IncludeInsideArrayElement) {
 TEST_F(LoaderFiles, RejectsIncludeCycle) {
     write("a.json", R"({"next": {"$include": "b.json"}})");
     write("b.json", R"({"next": {"$include": "a.json"}})");
-    const auto root = write("root.json", R"({"version": "2.0", "x": {"$include": "a.json"}})");
+    const auto root = write("root.json", R"({"version": "3.0", "x": {"$include": "a.json"}})");
 
     EXPECT_THROW((void)atp::runtime::load_config(root), atp::runtime::config_error);
 }
 
 TEST_F(LoaderFiles, RejectsIncludeWithExtraKeys) {
     write("frag.json", R"({})");
-    const auto root = write("root.json", R"({"version": "2.0", "x": {"$include": "frag.json", "extra": 1}})");
+    const auto root = write("root.json", R"({"version": "3.0", "x": {"$include": "frag.json", "extra": 1}})");
 
     EXPECT_THROW((void)atp::runtime::load_config(root), atp::runtime::config_error);
 }
 
 TEST_F(LoaderFiles, RejectsVersionInsideFragment) {
-    write("frag.json", R"({"version": "2.0"})");
-    const auto root = write("root.json", R"({"version": "2.0", "x": {"$include": "frag.json"}})");
+    write("frag.json", R"({"version": "3.0"})");
+    const auto root = write("root.json", R"({"version": "3.0", "x": {"$include": "frag.json"}})");
 
     EXPECT_THROW((void)atp::runtime::load_config(root), atp::runtime::config_error);
 }
 
 TEST_F(LoaderFiles, MissingFileAndBadJsonAreConfigErrors) {
-    const auto root = write("root.json", R"({"version": "2.0", "x": {"$include": "nowhere.json"}})");
+    const auto root = write("root.json", R"({"version": "3.0", "x": {"$include": "nowhere.json"}})");
     EXPECT_THROW((void)atp::runtime::load_config(root), atp::runtime::config_error);
 
     const auto broken = write("broken.json", R"({"version": )");

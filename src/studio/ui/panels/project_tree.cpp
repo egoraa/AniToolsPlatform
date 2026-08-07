@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "panels/project_tree.hpp"
 
 #include "model/clipboard_actions.hpp"

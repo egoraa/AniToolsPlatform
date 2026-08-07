@@ -1,6 +1,6 @@
 {
-    "version": "2.0",
-    "plugins": ["atp_demo_plugin"],
+    "version": "3.0",
+    "plugins": ["../plugins/atp_demo_plugin"],
     "pipeline": {
         "modules": [
             {

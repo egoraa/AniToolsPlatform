@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_PROJECT_FROM_DESCRIPTION_HPP
 #define ATP_STUDIO_PROJECT_FROM_DESCRIPTION_HPP
 
@@ -93,8 +94,7 @@ inline void layout_group(project& p, const runtime::group_node& g, const std::st
 /// message, rather than by drawing half a graph.
 ///
 /// What the mirror cannot carry, because the runtime keeps none of it in a readable form: the
-/// plugins the modules came from, the thread layout, and the replay flag of a connection — a
-/// recorded connection is a pair of ports and nothing else. A mirror saved to disk is therefore a
+/// plugins the modules came from and the thread layout. A mirror saved to disk is therefore a
 /// description of the graph, not the config the host was started from.
 /// @param described the structuredContent of describe_pipeline
 /// @throws runtime::config_error if the description does not produce a valid config

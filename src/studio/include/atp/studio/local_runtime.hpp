@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_LOCAL_RUNTIME_HPP
 #define ATP_STUDIO_LOCAL_RUNTIME_HPP
 
@@ -73,6 +74,10 @@ class local_runtime final : public runtime_view_base {
 
     [[nodiscard]] std::vector<group::module_stats> module_metrics() const override {
         return run_->module_metrics();
+    }
+
+    [[nodiscard]] std::vector<group::port_stats> input_metrics() const override {
+        return run_->input_metrics();
     }
 
     [[nodiscard]] bool metrics_enabled() const override {

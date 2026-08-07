@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "canvas/canvas_scene.hpp"
 
 #include "model/clipboard_actions.hpp"
@@ -28,7 +29,6 @@
 
 #include <atp/studio/add_module.hpp>
 #include <atp/studio/node_ref.hpp>
-#include <atp/studio/value_format.hpp>
 
 namespace atp::studio::ui {
 namespace {
@@ -142,10 +142,6 @@ void canvas_scene::update_samples() {
         link_item* link = links_[sample.index];
         link->set_hot(sample.writes != prev_writes_[sample.index]);
         prev_writes_[sample.index] = sample.writes;
-        if (sample.value) {
-            const auto text = format_value(*sample.value);
-            link->set_label(text ? QString::fromStdString(*text) : QString::fromStdString(sample.value->type().name()));
-        }
     }
 }
 

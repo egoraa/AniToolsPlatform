@@ -1,4 +1,4 @@
-#include <any>
+// SPDX-License-Identifier: Apache-2.0
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -6,8 +6,6 @@
 #include <atp/group.hpp>
 #include <atp/module.hpp>
 #include <atp/runtime/connection_sample.hpp>
-
-#include "support/required.hpp"
 
 namespace {
 
@@ -46,8 +44,6 @@ TEST(ConnectionSample, NumbersConnectionsPerGroupAndNamesNestedGroupsByPath) {
     EXPECT_EQ(samples[0].group_path, "");
     EXPECT_EQ(samples[0].index, 0u);
     EXPECT_EQ(samples[0].writes, 1u);
-    ASSERT_TRUE(samples[0].value.has_value());
-    EXPECT_EQ(std::any_cast<int>(atp_tests::required(samples[0].value)), 7);
     EXPECT_EQ(samples[1].group_path, "stage");
     EXPECT_EQ(samples[1].index, 0u);
     EXPECT_EQ(samples[1].writes, 0u);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_MCP_JSON_RPC_HPP
 #define ATP_MCP_JSON_RPC_HPP
 

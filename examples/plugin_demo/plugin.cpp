@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <atp/plugin.hpp>
 
 #include "demo_modules.hpp"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_PORT_TYPES_HPP
 #define ATP_STUDIO_PORT_TYPES_HPP
 
@@ -85,8 +86,7 @@ inline void connect_ports(project& proj,
                           const std::string& group_path,
                           const std::string& from,
                           const std::string& to,
-                          const describe_fn& describe,
-                          bool replay = false) {
+                          const describe_fn& describe) {
     const runtime::group_node* g = proj.group_at(group_path);
     if (g == nullptr) {
         throw runtime::config_error("no group '" + group_path + "'");
@@ -97,7 +97,7 @@ inline void connect_ports(project& proj,
         throw runtime::config_error("incompatible types: output '" + from + "' is " + produced->name() + ", input '" +
                                     to + "' accepts " + accepted->name());
     }
-    proj.connect(group_path, from, to, replay);
+    proj.connect(group_path, from, to);
 }
 
 /// Ports of the group's modules that can be exported in the given direction, as "child.port"

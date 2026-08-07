@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -35,7 +36,8 @@ class source_module : public atp::module<source_ports, "bench_source", atp::ver<
 };
 
 struct sink_inputs : atp::io::inputs {
-    atp::io::queued_input<std::int64_t>& tick = make<atp::io::queued_input<std::int64_t>>("tick");
+    atp::io::queued_input<std::int64_t>& tick =
+        make<atp::io::queued_input<std::int64_t>>("tick", atp::io::drop_oldest(1 << 20));
 };
 using sink_ports = atp::io::ports<sink_inputs, atp::io::outputs, atp::io::properties>;
 

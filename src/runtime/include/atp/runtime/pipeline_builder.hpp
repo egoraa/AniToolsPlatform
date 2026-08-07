@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_RUNTIME_PIPELINE_BUILDER_HPP
 #define ATP_RUNTIME_PIPELINE_BUILDER_HPP
 
@@ -95,11 +96,7 @@ inline void build_group(group& g, const group_node& node, module_registry& regis
     }
     for (const connection_node& c : node.connections) {
         try {
-            if (c.replay) {
-                g.connect(c.from, c.to, io::replay);
-            } else {
-                g.connect(c.from, c.to);
-            }
+            g.connect(c.from, c.to);
         } catch (const std::exception& e) {
             throw config_error("connection '" + c.from + "' -> '" + c.to + "' in group '" + std::string(g.get_name()) +
                                "': " + e.what());

@@ -1,0 +1,18 @@
+[package]
+name = "atp_rust_plugin"
+version = "0.1.0"
+edition = "2021"
+# OnceLock, which is what builds the descriptor tables.
+rust-version = "1.70"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+# cdylib and not dylib: the host opens this file by path with LoadLibrary/dlopen, and dylib would emit
+# a library carrying Rust's own metadata and ABI, which nothing here wants.
+crate-type = ["cdylib"]
+
+# There are deliberately no dependencies. The whole contract with the platform is three exported C
+# functions and the plain-data descriptors in src/abi.rs, so a plugin needs cargo and nothing else — no
+# bindgen, no build script, no C toolchain, no C++ compiler.
+[dependencies]

@@ -1,0 +1,31 @@
+{
+    "version": "3.0",
+    "plugins": ["../plugins/atp_demo_plugin", "../plugins/atp_python_bridge"],
+    "pipeline": {
+        "modules": [
+            {
+                "module": "counter",
+                "name": "ticks",
+                "properties": { "start_at": 1, "step": 2 }
+            },
+            {
+                "module": "py_averager",
+                "name": "mean",
+                "properties": { "window": 4, "mode": "verbose" }
+            },
+            {
+                "module": "printer",
+                "name": "sink",
+                "properties": { "tag": "sink" }
+            }
+        ],
+        "connections": [
+            { "from": "ticks.count", "to": "mean.value" },
+            { "from": "mean.report", "to": "sink.label" },
+            { "from": "mean.mean", "to": "sink.measure" }
+        ]
+    },
+    "threads": [
+        { "name": "main", "mode": "throttled", "period_ms": 100 }
+    ]
+}

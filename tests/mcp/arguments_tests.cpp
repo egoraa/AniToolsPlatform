@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <string>
 #include <typeindex>
 
@@ -14,10 +15,10 @@
 namespace {
 
 TEST(McpArguments, ReadsRequiredAndOptionalFields) {
-    const nlohmann::json args = nlohmann::json::parse(R"({"path":"a.json","replay":true,"index":2})");
+    const nlohmann::json args = nlohmann::json::parse(R"({"path":"a.json","flag":true,"index":2})");
     EXPECT_EQ(atp::mcp::arg_string(args, "path"), "a.json");
     EXPECT_EQ(atp::mcp::arg_string_or(args, "name", "fallback"), "fallback");
-    EXPECT_TRUE(atp::mcp::arg_bool_or(args, "replay", false));
+    EXPECT_TRUE(atp::mcp::arg_bool_or(args, "flag", false));
     EXPECT_FALSE(atp::mcp::arg_bool_or(args, "missing", false));
     EXPECT_EQ(atp::mcp::arg_index(args, "index"), 2u);
 }

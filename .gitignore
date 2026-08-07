@@ -5,7 +5,10 @@ build/
 external/
 .claude/*
 !.claude/CLAUDE.md
+!.claude/skills/
+!.claude/skills/**
 CLAUDE.local.md
 .mcp.json
 *.layout.json
 aqtinstall.log
+__pycache__/

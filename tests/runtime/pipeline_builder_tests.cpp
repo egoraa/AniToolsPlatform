@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <array>
 #include <latch>
 #include <stop_token>
@@ -58,15 +59,15 @@ class recording_sink : public atp::module<sink_ports, "recorder"> {
     }
 };
 
-enum class overflow_policy { drop, block };
+enum class sink_overflow { drop, block };
 
 }  // namespace
 
 template <>
-struct atp::io::enum_names<overflow_policy> {
+struct atp::io::enum_names<sink_overflow> {
     static constexpr std::array entries{
-        atp::io::enum_entry{overflow_policy::drop, "drop"},
-        atp::io::enum_entry{overflow_policy::block, "block"},
+        atp::io::enum_entry{sink_overflow::drop, "drop"},
+        atp::io::enum_entry{sink_overflow::block, "block"},
     };
 };
 
@@ -74,8 +75,8 @@ namespace {
 
 struct limiter_props : atp::io::properties {
     atp::io::property<int>& limit = make<atp::io::property<int>>("limit");
-    atp::io::property<overflow_policy>& on_overflow =
-        make<atp::io::property<overflow_policy>>("on_overflow", overflow_policy::drop);
+    atp::io::property<sink_overflow>& on_overflow =
+        make<atp::io::property<sink_overflow>>("on_overflow", sink_overflow::drop);
     atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
 };
 class limit_sink : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, limiter_props>, "limiter"> {};
@@ -89,7 +90,7 @@ atp::runtime::config make_config(const char* text) {
 
 TEST(PipelineBuilder, BuildsTreePropertiesAndRuns) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {
             "modules": [
                 {"group": "left", "modules": [{"module": "one_shot", "name": "src"}],
@@ -126,7 +127,7 @@ TEST(PipelineBuilder, BuildsTreePropertiesAndRuns) {
 
 TEST(PipelineBuilder, UnknownPropertyIsConfigError) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "recorder", "properties": {"ghost": 1}}]}
     })");
     atp::runtime::application app;
@@ -142,7 +143,7 @@ TEST(PipelineBuilder, UnknownPropertyIsConfigError) {
 
 TEST(PipelineBuilder, UnparsableValueIsConfigError) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"limit": "abc"}}]}
     })");
     atp::runtime::application app;
@@ -158,7 +159,7 @@ TEST(PipelineBuilder, UnparsableValueIsConfigError) {
 
 TEST(PipelineBuilder, EnumPropertyComesFromConfigAsName) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"on_overflow": "block"}}]}
     })");
     atp::runtime::application app;
@@ -171,7 +172,7 @@ TEST(PipelineBuilder, EnumPropertyComesFromConfigAsName) {
 
 TEST(PipelineBuilder, UnknownEnumNameListsOptions) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"on_overflow": "explode"}}]}
     })");
     atp::runtime::application app;
@@ -189,7 +190,7 @@ TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
     atp::runtime::application app;
     app.registry.add<limit_sink>();
     const atp::runtime::config ok = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"channels": 6}}]}
     })");
     atp::runtime::build(app, ok, ".");
@@ -198,7 +199,7 @@ TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
     atp::runtime::application other;
     other.registry.add<limit_sink>();
     const atp::runtime::config bad = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"channels": 3}}]}
     })");
     try {
@@ -211,7 +212,7 @@ TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
 
 TEST(PipelineBuilder, WrapsPlatformErrorsWithConfigContext) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "no_such_module"}]}
     })");
 
@@ -227,7 +228,7 @@ TEST(PipelineBuilder, WrapsPlatformErrorsWithConfigContext) {
 
 TEST(PipelineBuilder, UnknownAssignPathIsConfigError) {
     atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"group": "g", "modules": []}]},
         "threads": [{"name": "t"}]
     })");
@@ -239,7 +240,7 @@ TEST(PipelineBuilder, UnknownAssignPathIsConfigError) {
 
 TEST(PipelineBuilder, BuildsIntoPrefilledRegistry) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "2.0",
+        "version": "3.0",
         "pipeline": {"modules": [{"module": "one_shot"}]},
         "threads": [{"name": "t"}]
     })");

@@ -16,6 +16,11 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(test_plugin)
 
 set(ATP_TESTS_DIRS platform runtime mcp studio support)
+# The bridge suite exists only where the bridge does: it drives a real library through module_loader,
+# and there is nothing to drive when CPython was not found.
+if (TARGET atp_python_bridge)
+    list(APPEND ATP_TESTS_DIRS bridges)
+endif ()
 foreach (dir IN LISTS ATP_TESTS_DIRS)
     file(GLOB_RECURSE dir_sources CONFIGURE_DEPENDS
             ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/*.cpp
@@ -27,12 +32,24 @@ add_executable(atp_tests ${ATP_TESTS_SOURCES})
 target_include_directories(atp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(atp_tests PRIVATE atp_runtime atp_studio_lib atp_mcp_lib atp_warnings GTest::gtest_main ${CMAKE_DL_LIBS})
 
-add_dependencies(atp_tests test_plugin test_plugin_ports test_plugin_bad_abi test_plugin_empty)
+add_dependencies(atp_tests test_plugin test_plugin_ports test_plugin_bad_abi test_plugin_empty
+        test_plugin_c test_plugin_c_bad_abi test_plugin_c_bad_desc)
 target_compile_definitions(atp_tests PRIVATE
         ATP_TEST_PLUGIN="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin>>"
         ATP_TEST_PLUGIN_PORTS="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_ports>>"
         ATP_TEST_PLUGIN_BAD_ABI="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_bad_abi>>"
-        ATP_TEST_PLUGIN_EMPTY="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_empty>>")
+        ATP_TEST_PLUGIN_EMPTY="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_empty>>"
+        ATP_TEST_PLUGIN_C="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_c>>"
+        ATP_TEST_PLUGIN_C_BAD_ABI="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_c_bad_abi>>"
+        ATP_TEST_PLUGIN_C_BAD_DESC="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_c_bad_desc>>")
+
+if (TARGET atp_python_bridge)
+    add_dependencies(atp_tests atp_python_bridge)
+    target_compile_definitions(atp_tests PRIVATE
+            ATP_PYTHON_BRIDGE="$<PATH:CMAKE_PATH,$<TARGET_FILE:atp_python_bridge>>"
+            ATP_PYTHON_BRIDGE_SCRIPTS="$<PATH:CMAKE_PATH,${CMAKE_CURRENT_SOURCE_DIR}/bridges/scripts>"
+            ATP_PYTHON_BRIDGE_SCRIPTS_BROKEN="$<PATH:CMAKE_PATH,${CMAKE_CURRENT_SOURCE_DIR}/bridges/scripts_broken>")
+endif ()
 
 if (ATP_ASAN_RUNTIME)
     add_custom_command(TARGET atp_tests POST_BUILD

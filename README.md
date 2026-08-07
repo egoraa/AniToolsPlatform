@@ -6,18 +6,20 @@ core sit a Qt visual editor and an MCP server, so a pipeline can be built by han
 agent — and it is the same pipeline in all three cases.
 
 The platform is designed around third-party modules: plugins are built separately, against an
-installed SDK, and loaded through a versioned ABI.
+installed SDK, and loaded through a versioned ABI — in C++, or in any language that can export three
+C functions.
 
 ## Targets
 
 | Target | What it is |
 |---|---|
-| `atp_platform` | **The module author SDK** (`include/`, INTERFACE): the io layer, `module`/`module_base`, factories, the registry, `plugin.hpp`. A plugin links this and nothing else. |
+| `atp_platform` | **The module author SDK** (`include/`, INTERFACE): the io layer, `module`/`module_base`, factories, the registry, `plugin.hpp`, and `plugin_c.h` for a plugin that is not C++. A plugin links this and nothing else. |
 | `atp_runtime` | **Host machinery** on top of it (`src/runtime/include/`): `group`, `pipeline`, `pipeline_runner`, `module_loader`, and the JSON config subsystem. Hosts link this; plugins must not. |
 | `atp_app` | A config-driven host: `atp_app config/demo.json`. See [Driving a running host](#driving-a-running-host). |
 | `atp_studio` | The Qt 6 visual editor. |
 | `atp_mcp` | An MCP server over stdio exposing the catalog, editing and execution as tools. |
 | `atp_demo`, `atp_host_static`, `atp_host_dynamic` | The examples in `examples/`. |
+| `atp_demo_plugin`, `atp_c_demo_plugin` | Loadable example plugins: one in C++, one in pure C. |
 
 ## Build
 
@@ -71,8 +73,8 @@ you did not build — but properties can still be edited on the fly, which is th
 deployed pipeline gets tuned. `Host > Detach` brings your own project back exactly as you left it.
 
 The mirror is a real config, so `Save As...` exports it. It carries the graph and nothing else: the
-plugins the modules came from, the thread layout and the `replay` flag of a connection are not part
-of a running pipeline in any readable form, so they cannot be recovered from one.
+plugins the modules came from and the thread layout are not part of a running pipeline in any
+readable form, so they cannot be recovered from one.
 
 ## Writing a module
 
@@ -120,7 +122,7 @@ cmake --build <plugin-build>
 
 ```cmake
 find_package(AniToolsPlatform REQUIRED)
-atp_require_plugin_abi(8)
+atp_require_plugin_abi(10)
 atp_add_plugin(my_plugin SOURCES plugin.cpp)
 ```
 
@@ -130,8 +132,49 @@ written for, instead of leaving it to be refused at the `atp_abi_version()` hand
 visibility, the toolchain-agnostic file name, linking `atp::platform` alone. `templates/plugin/` is a
 working starting point; copy it anywhere.
 
-Host and plugins must share one toolchain and one C++ runtime. That is the one incompatibility the ABI
-handshake cannot detect.
+Host and plugins must share one toolchain and one C++ runtime. The `atp_abi_version()` handshake cannot
+detect a violation, so `ATP_PLUGIN_HANDSHAKE()` also exports `atp_build_id()` — a string describing the
+toolchain and standard library, which the host compares and refuses on a mismatch. Without it a Debug
+host loading a Release plugin corrupts memory instead of failing to load.
+
+## Writing a plugin in another language
+
+The requirement above is a property of the C++ contract: a plugin compiles its own copies of the
+registries, instantiates its own ports and reports errors by throwing. For a plugin that is not C++
+there is a second, purely C path — [`include/atp/plugin_c.h`](include/atp/plugin_c.h), three exported
+symbols and no other header:
+
+```c
+#include <atp/plugin_c.h>
+
+ATP_C_EXPORT unsigned atp_c_abi_version(void)                   { return ATP_C_ABI; }
+ATP_C_EXPORT unsigned atp_module_count(void)                    { return 1; }
+ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned i) { return i == 0 ? my_desc() : NULL; }
+```
+
+A descriptor declares the module's ports and properties as plain data and hands over function pointers
+for `create`/`iterate`/`destroy`; the host builds real platform ports from it, so such a module connects
+to a C++ one with nothing in between. Every C++ template, allocation and exception stays on the host's
+side of the boundary — the plugin contains no `std` type and frees nothing the host allocated — which is
+why it can be a Rust `cdylib` or a bridge embedding an interpreter, and why `atp_build_id` is not checked
+there. The price is a closed set of port payload types (integers, `double`, `bool`, text, and a byte blob
+as the escape hatch for everything else).
+
+Declare the target with the `C_ABI` keyword, which gives it the SDK's headers without imposing C++ on it:
+
+```cmake
+atp_add_plugin(my_c_plugin C_ABI SOURCES plugin.c)
+```
+
+`examples/plugin_c_demo/` is a working plugin in pure C, and `atp_app config/c_demo.json` runs it wired
+between two C++ modules. `templates/plugin_rust/` is the same idea in Rust — a `cdylib` built by `cargo
+build` alone, with a hand-written mirror of the header in `src/abi.rs` and no dependencies at all. Copy
+either one to start.
+
+One thing to get right in a language with its own unwinding: a panic crossing into a C++ frame is
+undefined behaviour, so guard every entry point (the Rust template wraps them in `catch_unwind` and
+reports the panic through `set_error`, which stops the pipeline with the panic's text instead of the
+process).
 
 ## Reading further
 
@@ -143,3 +186,20 @@ handshake cannot detect.
   reproduce it, and what the numbers say about `unsafe`, `drain()` and on-demand wake-up latency
   (build with `-DATP_BUILD_BENCHMARKS=ON`).
 - `cmake --build <build-dir> --target docs` — the Doxygen API reference, if doxygen is installed.
+
+## License
+
+Apache License 2.0 — [`LICENSE`](LICENSE), [`NOTICE`](NOTICE). Copyright 2026 The AniToolsPlatform Authors,
+listed in [`AUTHORS`](AUTHORS).
+
+One license for the whole repository, the SDK included, so a plugin built against `atp::platform` can
+be licensed however its author wants — closed included. What Apache-2.0 adds over MIT is the patent
+grant of section 3, which is what this platform actually needs: a plugin compiles these headers into
+itself across a versioned ABI, and the grant makes that unambiguous rather than implied. Section 5
+makes a contribution arrive under the same terms, so there is no CLA to sign.
+
+Third-party components that reach a user are listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). One of them is not permissive: `atp_studio` uses Qt
+6 under the LGPLv3 — dynamically linked, with the Qt libraries shipped beside the executable and
+replaceable by whoever received them, which is what that license asks for. A build configured with
+`-DATP_BUILD_STUDIO=OFF`, and any package without `atp_studio` in it, carries no Qt code at all.

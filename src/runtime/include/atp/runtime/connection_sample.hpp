@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_RUNTIME_CONNECTION_SAMPLE_HPP
 #define ATP_RUNTIME_CONNECTION_SAMPLE_HPP
 
-#include <any>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,10 +14,12 @@ namespace atp::runtime {
 /// Monitoring sample of one connection. The (group path, index) pair matches the config's, since
 /// build_group preserves declaration order — that is what lets a reader address a connection it saw
 /// in the document.
+///
+/// The sample reports activity, not content: an output keeps no copy of what it wrote, so there is
+/// nothing to read a value from without making every write pay for the reading.
 struct connection_sample {
     std::string group_path;
     std::size_t index = 0;
-    std::optional<std::any> value;
     std::uint64_t writes = 0;
 };
 
@@ -27,11 +28,11 @@ namespace detail {
 inline void collect_connections(const group& g, const std::string& path, std::vector<connection_sample>& out) {
     std::size_t index = 0;
     for (const group::connection& c : g.connections()) {
-        out.push_back({path, index, c.out->peek(), c.out->write_count()});
+        out.push_back({path, index, c.out->write_count()});
         ++index;
     }
     for (const group::child& child : g.children()) {
-        if (const auto* sub = dynamic_cast<const group*>(child.module.get())) {
+        if (const group* sub = child.subgroup) {
             collect_connections(*sub, path.empty() ? child.name : path + "." + child.name, out);
         }
     }

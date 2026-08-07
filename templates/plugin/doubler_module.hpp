@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_TEMPLATE_PLUGIN_DOUBLER_MODULE_HPP
 #define ATP_TEMPLATE_PLUGIN_DOUBLER_MODULE_HPP
 
@@ -45,7 +46,7 @@ class doubler_module : public atp::module<doubler_ports, "doubler", atp::ver<"1.
         atp::work_status status = atp::work_status::idle;
         while (const std::optional<int> in = inputs().value.try_pop()) {
             const int out = *in * properties().factor.get();
-            std::cout << "template-plugin: " << *in << " -> " << out << '\n' << std::flush;
+            std::cout << "doubler: " << *in << " -> " << out << '\n' << std::flush;
             outputs().report(std::to_string(*in) + " x " + std::to_string(properties().factor.get()) + " = " +
                              std::to_string(out));
             status = atp::work_status::busy;

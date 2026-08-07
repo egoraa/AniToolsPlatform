@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "shell/main_window.hpp"
 
 #include "kit/icons.hpp"
@@ -12,7 +13,6 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QByteArray>
-#include <QDesktopServices>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QGuiApplication>
@@ -23,9 +23,10 @@
 #include <QStyleFactory>
 #include <QStyleHints>
 #include <QTimer>
-#include <QUrl>
 #include <QVBoxLayout>
+#include <QtVersion>
 
+#include <atp/log_pump.hpp>
 #include <atp/plugin.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/studio/property_sync.hpp>
@@ -218,6 +219,12 @@ void main_window::report(const std::string& context, const std::exception& e) {
     report(QString::fromStdString(context + ": " + e.what()));
 }
 
+void main_window::drain_logs() {
+    for (const atp::log_line& line : state_.run.collect_logs()) {
+        report(QString::fromStdString(atp::format_log_line(line)));
+    }
+}
+
 void main_window::open_path(const std::filesystem::path& path) {
     try {
         state_.doc = project::open(path);
@@ -363,8 +370,6 @@ void main_window::build_style_menu(QMenu* view) {
 
 void main_window::build_help_menu(QMenu* help) {
     help->addAction("&About ATP Studio", [this] { show_about(); });
-    help->addSeparator();
-    help->addAction("anitools.&studio", [] { (void)QDesktopServices::openUrl(QUrl(QString::fromLatin1(site_url))); });
 }
 
 void main_window::show_about() {
@@ -372,13 +377,17 @@ void main_window::show_about() {
     box.setWindowTitle("About ATP Studio");
     box.setIconPixmap(icons::brand().pixmap(64, 64));
     box.setTextFormat(Qt::RichText);
-    box.setText(
-        QStringLiteral("<b>ATP Studio</b> %1"
-                       "<p>Plugin ABI %2<br>Config schema %3</p>"
-                       "<p><a href=\"%4\">%4</a></p>")
-            .arg(QString::fromLatin1(ATP_STUDIO_VERSION))
-            .arg(atp::plugin_abi)
-            .arg(QString::fromStdString(runtime::config_schema_version.to_string()), QString::fromLatin1(site_url)));
+    box.setText(QStringLiteral("<div align=\"center\"><b>ATP Studio</b> %1"
+                               "<p align=\"center\">Plugin ABI %2<br>Config schema %3</p>"
+                               "<p align=\"center\"><a href=\"%4\">%4</a></p>"
+                               "<p align=\"center\">Copyright 2026 The AniToolsPlatform Authors<br>"
+                               "Licensed under the Apache License 2.0.<br>"
+                               "Built with Qt %5, used under the GNU Lesser General Public License v3.<br>"
+                               "See LICENSE and THIRD-PARTY-NOTICES.md beside the program.</p></div>")
+                    .arg(QString::fromLatin1(ATP_STUDIO_VERSION))
+                    .arg(atp::plugin_abi)
+                    .arg(QString::fromStdString(runtime::config_schema_version.to_string()),
+                         QString::fromLatin1(site_url), QString::fromLatin1(qVersion())));
     box.exec();
 }
 
@@ -441,6 +450,7 @@ QDockWidget* main_window::build_errors_dock() {
     layout->addWidget(style::section_header("log", body));
 
     errors_ = new log_widget(body);
+    errors_->setObjectName("log.errors");
     layout->addWidget(errors_, 1);
 
     const style::button_bar bar = style::make_button_bar(body);
@@ -481,8 +491,8 @@ void main_window::save(bool ask_path) {
         }
         state_.doc.save(target);
         if (state_.attached()) {
-            report(QString("saved a mirror of %1: it carries the graph, not the plugins, threads, "
-                           "assignments or replay flags the host was started with")
+            report(QString("saved a mirror of %1: it carries the graph, not the plugins, threads "
+                           "or assignments the host was started with")
                        .arg(QString::fromStdString(state_.endpoint())));
             refresh_all();
             return;
@@ -507,6 +517,7 @@ void main_window::poll() {
         canvas_->scene().update_samples();
         return;
     }
+    drain_logs();
     if (const std::string error = state_.view->error_text(); !error.empty()) {
         report(QString::fromStdString("pipeline: " + error));
         state_.run.stop();

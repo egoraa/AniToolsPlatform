@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_IO_PROPERTY_HPP
 #define ANITOOLSPLATFORM_IO_PROPERTY_HPP
 

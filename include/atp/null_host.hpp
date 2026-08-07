@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ANITOOLSPLATFORM_NULL_HOST_HPP
 #define ANITOOLSPLATFORM_NULL_HOST_HPP
 

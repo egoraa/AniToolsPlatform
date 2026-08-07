@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <chrono>
 #include <memory>
 #include <stop_token>
@@ -49,7 +50,7 @@ class view_sink : public atp::module<atp::io::ports<number_inputs>, "view_sink">
 };
 
 constexpr const char* view_config = R"({
-    "version": "2.0",
+    "version": "3.0",
     "pipeline": {
         "modules": [
             {"module": "view_source", "name": "src", "properties": {"step": 2}},

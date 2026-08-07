@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <cstddef>
 #include <memory>
 #include <stop_token>
@@ -53,7 +54,7 @@ class attach_sink : public atp::module<atp::io::ports<number_inputs>, "attach_si
 };
 
 constexpr const char* attach_config = R"({
-    "version": "2.0",
+    "version": "3.0",
     "pipeline": {
         "modules": [
             {"module": "attach_source", "name": "src", "properties": {"step": 4}},

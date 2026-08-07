@@ -16,3 +16,17 @@ target_include_directories(atp_runtime INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/inc
 # MCP library instead would leave the studio — which must not depend on the MCP layer — without it.
 target_link_libraries(atp_runtime INTERFACE atp_platform nlohmann_json::nlohmann_json
         $<$<PLATFORM_ID:Windows>:ws2_32>)
+
+# /bigobj is a technical consequence of a header that lives here, not a policy, which is why it rides on
+# the runtime target rather than on atp_warnings: module_loader.hpp includes c_module.hpp, that builds a
+# port from a runtime atp_kind and therefore instantiates input<T>, queued_input<T>, output<T> and
+# property<T> for every kind, and each output instantiation drags in the std::any boxing of
+# io::input_base::erased_of<T>(). MSVC emits those COMDATs into every unit that includes the loader
+# whether it calls anything or not — measured, an object file goes from 25 sections to 488 — and both
+# atp_tests and src/mcp/main.cpp crossed the 65,279-section limit of the default object format. The flag
+# only raises that limit: no code changes, nothing costs more at run time, the linker folds the duplicates
+# anyway. It reaches exactly the targets that include the loader, and no further — atp_runtime is
+# deliberately not exported, so no plugin author's build inherits it. gcc and clang have no such limit.
+if (MSVC)
+    target_compile_options(atp_runtime INTERFACE $<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
+endif ()

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <atp/plugin.hpp>
 
 ATP_PLUGIN_EXPORT unsigned atp_abi_version() {

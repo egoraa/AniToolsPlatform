@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef ATP_STUDIO_REMOTE_RUNTIME_HPP
 #define ATP_STUDIO_REMOTE_RUNTIME_HPP
 
@@ -74,7 +75,6 @@ class remote_runtime final : public runtime_view_base {
             sample.group_path = c.value("group_path", std::string());
             sample.index = c.value("index", std::size_t{0});
             sample.writes = c.value("writes", std::uint64_t{0});
-            sample.value = value_of(c.value("value", nlohmann::json()));
             out.push_back(std::move(sample));
         }
         return out;
@@ -87,6 +87,17 @@ class remote_runtime final : public runtime_view_base {
                            m.value("busy_calls", std::uint64_t{0}),
                            std::chrono::nanoseconds(m.value("total_ns", std::int64_t{0})),
                            std::chrono::nanoseconds(m.value("max_ns", std::int64_t{0}))});
+        }
+        return out;
+    }
+
+    [[nodiscard]] std::vector<group::port_stats> input_metrics() const override {
+        std::vector<group::port_stats> out;
+        for (const nlohmann::json& p : call("read_input_metrics").value("ports", nlohmann::json::array())) {
+            out.push_back({p.value("path", std::string()),
+                           {p.value("received", std::uint64_t{0}), p.value("discarded", std::uint64_t{0}),
+                            p.value("pending", std::size_t{0}), p.value("peak_pending", std::size_t{0}),
+                            p.value("capacity", std::size_t{0})}});
         }
         return out;
     }
@@ -138,30 +149,6 @@ class remote_runtime final : public runtime_view_base {
             return io::property_kind::boolean;
         }
         return io::property_kind::text;
-    }
-
-    /// The monitored value rebuilt from JSON. The JSON type decides, not the reported C++ type name:
-    /// that name is whatever the remote compiler spells it, and matching on it across two toolchains
-    /// would be a guess. A value this layer cannot express stays empty — the same answer the local
-    /// formatter gives for a type it does not know.
-    [[nodiscard]] std::optional<std::any> value_of(const nlohmann::json& reported) const {
-        if (!reported.is_object() || !reported.contains("value")) {
-            return std::nullopt;
-        }
-        const nlohmann::json& value = reported.at("value");
-        if (value.is_boolean()) {
-            return std::any(value.get<bool>());
-        }
-        if (value.is_number_integer()) {
-            return std::any(value.get<int>());
-        }
-        if (value.is_number_float()) {
-            return std::any(value.get<double>());
-        }
-        if (value.is_string()) {
-            return std::any(value.get<std::string>());
-        }
-        return std::nullopt;
     }
 
     [[nodiscard]] const nlohmann::json& status() const {

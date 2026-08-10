@@ -14,24 +14,18 @@ namespace {
 PyObject* g_package = nullptr;
 bool g_tried = false;
 
-constexpr char path_separator() {
-#if defined(_WIN32)
-    return ';';
-#else
-    return ':';
-#endif
-}
-
-void split_into(const char* value, std::vector<std::string>& paths) {
-    const std::string text(value);
+template <typename TChar>
+void split_into(const TChar* value, TChar separator, std::vector<std::filesystem::path>& paths) {
+    const std::basic_string<TChar> text(value);
     std::size_t start = 0;
     while (start <= text.size()) {
-        const std::size_t end = text.find(path_separator(), start);
-        const std::string piece = text.substr(start, end == std::string::npos ? end : end - start);
+        const std::size_t end = text.find(separator, start);
+        const std::basic_string<TChar> piece =
+            text.substr(start, end == std::basic_string<TChar>::npos ? end : end - start);
         if (!piece.empty()) {
-            paths.push_back(piece);
+            paths.emplace_back(piece);
         }
-        if (end == std::string::npos) {
+        if (end == std::basic_string<TChar>::npos) {
             break;
         }
         start = end + 1;
@@ -43,7 +37,7 @@ void put_package_on_path() {
     if (sys_path == nullptr) {
         return;
     }
-    const std::string directory = (self_directory() / "python").string();
+    const std::string directory = to_utf8(self_directory() / "python");
     PyObject* entry = PyUnicode_FromStringAndSize(directory.c_str(), static_cast<Py_ssize_t>(directory.size()));
     if (entry != nullptr) {
         PyList_Insert(sys_path, 0, entry);
@@ -53,22 +47,22 @@ void put_package_on_path() {
 
 }  // namespace
 
-std::vector<std::string> scan_paths() {
-    std::vector<std::string> paths;
-#if defined(_MSC_VER)
-    char* env = nullptr;
+std::vector<std::filesystem::path> scan_paths() {
+    std::vector<std::filesystem::path> paths;
+#if defined(_WIN32)
+    wchar_t* env = nullptr;
     std::size_t length = 0;
-    if (_dupenv_s(&env, &length, "ATP_PYTHON_PATH") == 0 && env != nullptr) {
-        split_into(env, paths);
+    if (_wdupenv_s(&env, &length, L"ATP_PYTHON_PATH") == 0 && env != nullptr) {
+        split_into(env, L';', paths);
         std::free(env);
     }
 #else
     if (const char* env = std::getenv("ATP_PYTHON_PATH"); env != nullptr) {
-        split_into(env, paths);
+        split_into(env, ':', paths);
     }
 #endif
     if (const std::filesystem::path own = self_directory(); !own.empty()) {
-        paths.push_back((own / "python").string());
+        paths.push_back(own / "python");
     }
     return paths;
 }
@@ -110,7 +104,7 @@ bool interpreter_ready() {
         PyErr_Print();
         const std::filesystem::path expected = self_directory() / "python" / "atp";
         std::fprintf(stderr, "atp_python_bridge: the atp package was not importable, expected it at %s\n",
-                     expected.string().c_str());
+                     to_utf8(expected).c_str());
         return false;
     }
     return true;

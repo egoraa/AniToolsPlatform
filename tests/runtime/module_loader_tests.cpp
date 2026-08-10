@@ -21,8 +21,8 @@ class host_module : public atp::module<atp::io::ports<>, "", atp::version{1, 0}>
 TEST(ModuleLoader, LoadsAndRegisters) {
     atp::module_registry registry;
     atp::module_loader loader{ATP_TEST_PLUGIN, registry};
-    EXPECT_EQ(loader.modules(), (std::vector<std::pair<std::string, atp::version>>{
-                                    {"plugin_module", atp::version(2, 0)}, {"plugin_alias", atp::version(2, 0)}}));
+    EXPECT_EQ(loader.modules(), (std::vector<atp::registered_module>{{"plugin_module", atp::version(2, 0), ""},
+                                                                     {"plugin_alias", atp::version(2, 0), ""}}));
 
     auto module = registry.create("plugin_module");
     ASSERT_NE(module, nullptr);
@@ -116,6 +116,22 @@ TEST(ModuleLoader, AbiMismatchReportsVersions) {
         EXPECT_NE(std::string(error.what()).find("ABI"), std::string::npos);
     }
     EXPECT_TRUE(registry.list().empty());
+}
+
+TEST(ModuleLoader, ForeignLibraryIsItsOwnFailure) {
+    atp::module_registry registry;
+    EXPECT_THROW(atp::module_loader(ATP_TEST_PLUGIN_EMPTY, registry), atp::not_a_plugin);
+}
+
+TEST(ModuleLoader, AbiMismatchIsNotAForeignLibrary) {
+    atp::module_registry registry;
+    try {
+        atp::module_loader loader{ATP_TEST_PLUGIN_BAD_ABI, registry};
+        FAIL() << "expected a failure";
+    } catch (const atp::not_a_plugin&) {
+        FAIL() << "a wrong ABI is a broken plugin, not a foreign library";
+    } catch (const std::runtime_error&) {
+    }
 }
 
 TEST(ModuleLoader, MoveConstructorTransfersOwnership) {

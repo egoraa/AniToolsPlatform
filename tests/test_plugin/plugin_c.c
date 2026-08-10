@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <atp/plugin_c.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -161,6 +162,7 @@ static const atp_module_desc probe_module = {
     probe_start,
     probe_iterate,
     probe_stop,
+    "c_probe_declared_here.txt",
 };
 
 static const atp_module_desc bare_module = {
@@ -181,6 +183,113 @@ static const atp_module_desc bare_module = {
     NULL,
     probe_iterate,
     NULL,
+};
+
+typedef struct config_state {
+    const atp_api* api;
+    atp_ctx* ctx;
+    char report[256];
+    int sent;
+} config_state;
+
+static void config_append(config_state* state, const char* text) {
+    const size_t used = strlen(state->report);
+    const size_t room = sizeof(state->report) - used - 1;
+    const size_t len = strlen(text);
+    const size_t take = len < room ? len : room;
+    memcpy(state->report + used, text, take);
+    state->report[used + take] = '\0';
+}
+
+static void config_destroy(void* self) {
+    free(self);
+}
+
+static void* config_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
+    config_state* state = (config_state*)calloc(1, sizeof(config_state));
+    uint32_t root;
+    uint32_t channels;
+    uint32_t third;
+    atp_value value;
+    const char* key = NULL;
+    size_t key_len = 0;
+    char number[32];
+
+    (void)user_data;
+    if (state == NULL) {
+        return NULL;
+    }
+    state->api = api;
+    state->ctx = ctx;
+    if (api->struct_size < sizeof(atp_api)) {
+        config_append(state, "api-too-old");
+        return state;
+    }
+
+    root = api->config_root(ctx);
+    config_append(state, root == ATP_CONFIG_NONE ? "root=none " : "root=ok ");
+    config_append(state, api->config_kind(ctx, root) == ATP_CONFIG_OBJECT ? "kind=object " : "kind=other ");
+    snprintf(number, sizeof(number), "size=%u ", api->config_size(ctx, root));
+    config_append(state, number);
+
+    if (api->config_key_at(ctx, root, 0, &key, &key_len) && key_len == 8 && memcmp(key, "channels", 8) == 0) {
+        config_append(state, "key0=channels ");
+    } else {
+        config_append(state, "key0=? ");
+    }
+
+    channels = api->config_find(ctx, root, "channels", 8);
+    config_append(state, channels == ATP_CONFIG_NONE ? "find=none " : "find=ok ");
+    config_append(state, channels == root ? "find-is-root " : "find-not-root ");
+    config_append(state, api->config_kind(ctx, channels) == ATP_CONFIG_ARRAY ? "channels=array " : "channels=other ");
+
+    third = api->config_child_at(ctx, channels, 2);
+    if (api->config_value_of(ctx, third, &value) && value.kind == ATP_KIND_I64) {
+        snprintf(number, sizeof(number), "third=%d ", (int)value.as.i64);
+        config_append(state, number);
+    } else {
+        config_append(state, "third=? ");
+    }
+
+    if (api->config_value_of(ctx, root, &value)) {
+        config_append(state, "object-read=yes ");
+    } else {
+        config_append(state, "object-read=no ");
+    }
+
+    config_append(state, api->config_find(ctx, root, "absent", 6) == ATP_CONFIG_NONE ? "absent=none " : "absent=? ");
+    config_append(state, api->config_child_at(ctx, channels, 9) == ATP_CONFIG_NONE ? "oob=none " : "oob=? ");
+
+    if (api->config_value_of(ctx, api->config_find(ctx, root, "name", 4), &value) && value.kind == ATP_KIND_TEXT &&
+        value.as.bytes.size == 3 && memcmp(value.as.bytes.data, "rig", 3) == 0) {
+        config_append(state, "name=rig");
+    } else {
+        config_append(state, "name=?");
+    }
+    return state;
+}
+
+static atp_work config_iterate(void* self) {
+    config_state* state = (config_state*)self;
+    atp_value out;
+    if (state->sent) {
+        return ATP_WORK_IDLE;
+    }
+    out.kind = ATP_KIND_TEXT;
+    out.as.bytes.data = state->report;
+    out.as.bytes.size = strlen(state->report);
+    if (!state->api->write_output(state->ctx, 0, &out)) {
+        return ATP_WORK_ERROR;
+    }
+    state->sent = 1;
+    return ATP_WORK_BUSY;
+}
+
+static const atp_output_desc config_outputs[] = {{"report", ATP_KIND_TEXT}};
+
+static const atp_module_desc config_module = {
+    sizeof(atp_module_desc), "c_config",     {1, 0, 0, 0}, 1,    NULL,           0,    config_outputs, 1, NULL, 0, NULL,
+    config_create,           config_destroy, NULL,         NULL, config_iterate, NULL,
 };
 
 typedef struct grown_desc {
@@ -216,7 +325,7 @@ ATP_C_EXPORT unsigned atp_c_abi_version(void) {
 }
 
 ATP_C_EXPORT unsigned atp_module_count(void) {
-    return 3;
+    return 4;
 }
 
 ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index) {
@@ -228,6 +337,9 @@ ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index) {
     }
     if (index == 2) {
         return &grown_module.base;
+    }
+    if (index == 3) {
+        return &config_module;
     }
     return NULL;
 }

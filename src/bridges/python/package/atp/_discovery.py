@@ -51,12 +51,26 @@ def _discover(paths):
     A batch and not the whole registry: the host asks once per load and addresses the answer by
     position, so a second load must not see the first one's modules shifted under it. The registry
     keeps growing, and each row carries the index its class ended up at.
+
+    A directory named twice is walked once. The two spellings arrive by different routes — one from
+    ATP_PYTHON_PATH, one appended by the bridge as python/ beside itself — and they can be the same
+    place, which happens whenever a module folder carries its own bridge. Walking it twice imports
+    every script twice and the host then rejects the whole plugin as a duplicate registration, so the
+    only symptom is a bridge that does not load at all.
     """
     table = []
+    seen = set()
     for directory in paths:
+        root = pathlib.Path(directory)
+        try:
+            key = root.resolve()
+        except OSError:
+            key = root
+        if key in seen:
+            continue
+        seen.add(key)
         if directory not in sys.path:
             sys.path.insert(0, directory)
-        root = pathlib.Path(directory)
         if not root.is_dir():
             continue
         for script in sorted(root.glob("*.py")):
@@ -74,18 +88,23 @@ def _discover(paths):
                     continue
                 _REGISTRY.append(cls)
                 row["index"] = len(_REGISTRY) - 1
+                row["source"] = str(script)
                 table.append(row)
     return table
 
 
-def _create(index, ctx):
+def _create(index, ctx, config=None):
     """Instantiate the class the descriptor at `index` came from and bind its ports.
 
     The ports are bound after __init__ has run, so a constructor cannot reach them; that is what
-    initialize is for, and the class docstring says so.
+    initialize is for, and the class docstring says so. `config` is bound before __init__ for the
+    opposite reason: it is the setting a module is allowed to know while deciding what it is, so the
+    constructor has to be able to read self.config.
     """
     cls = _REGISTRY[index]
-    instance = cls()
+    instance = cls.__new__(cls)
+    instance.config = config
+    instance.__init__()
     instance._ctx = ctx
     for position, declaration in enumerate(cls._inputs):
         setattr(instance, declaration.attribute, BoundInput(ctx, position))

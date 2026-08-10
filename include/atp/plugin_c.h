@@ -26,6 +26,15 @@
 /// more: a port declared here is an ordinary port of the platform, so a module written in another
 /// language connects to a C++ one directly, with no adapter module in the config.
 ///
+/// **Every string crossing this boundary is UTF-8**, in both directions: module and port names, the
+/// canonical text of a property value, the bytes of an ATP_KIND_TEXT payload, and the `source` path of
+/// a descriptor. The rule is stated because there is no type to carry it — a `const char*` looks the
+/// same whatever it holds — and because the one plausible alternative is actively harmful on Windows,
+/// where the process code page cannot represent most of Unicode: a host or bridge that reaches for
+/// `std::filesystem::path::string()` there gets a `filesystem_error` thrown for a folder named in
+/// Cyrillic, and a throw out of one of the entry points below is exactly what this boundary forbids.
+/// `u8string()` is the conversion that holds.
+///
 /// This header must keep compiling as C99. It is included by plugins that have no C++ compiler.
 
 #if defined(_WIN32)
@@ -58,6 +67,26 @@ typedef enum atp_kind {
     ATP_KIND_TEXT = 5, /**< std::string */
     ATP_KIND_BLOB = 6  /**< atp::io::blob, that is std::vector<std::byte> */
 } atp_kind;
+
+/// Handle that names no config node.
+///
+/// Zero is reserved for it, and the root's handle is never zero, so the one comparison covers a failed
+/// lookup, an index out of range and "there is nothing here" alike.
+#define ATP_CONFIG_NONE 0u
+
+/// Form of a config node — the seven forms of atp::config_value, in the same order.
+///
+/// Only the four scalar ones can be read into an atp_value: there is no atp_kind for null, an array or
+/// an object, and config_value_of refuses those rather than inventing one.
+typedef enum atp_config_kind {
+    ATP_CONFIG_NULL = 0,
+    ATP_CONFIG_BOOL = 1,
+    ATP_CONFIG_INT = 2,
+    ATP_CONFIG_REAL = 3,
+    ATP_CONFIG_TEXT = 4,
+    ATP_CONFIG_ARRAY = 5,
+    ATP_CONFIG_OBJECT = 6
+} atp_config_kind;
 
 /// Whether an input keeps the last value or queues them.
 typedef enum atp_flavor {
@@ -191,6 +220,54 @@ typedef struct atp_api {
     /// without repeating the module's name — the host adds that.
     /// @param text need not be NUL-terminated
     void (*set_error)(atp_ctx* ctx, const char* text, size_t len);
+
+    /// Handle of the config's root node, always non-zero. A module whose node named no config gets a
+    /// root of kind ATP_CONFIG_NULL rather than nothing, so this call never has to be checked for
+    /// absence — only its kind asked.
+    ///
+    /// The callbacks from here on were appended after ATP_C_ABI 1 and `struct_size` says whether they
+    /// are there; a module built against a newer header than the host it runs in checks the size
+    /// before reading the pointer. Appending is why ATP_C_ABI itself did not move.
+    ///
+    /// The config is readable from inside the create function: it is the C path's analogue of a
+    /// constructor, and this channel exists for what has to be known before a port is connected.
+    uint32_t (*config_root)(atp_ctx* ctx);
+
+    /// Form of a node.
+    /// @return an atp_config_kind, ATP_CONFIG_NULL for a handle that names nothing
+    int (*config_kind)(atp_ctx* ctx, uint32_t node);
+
+    /// Number of elements of an array or entries of an object; zero for every scalar form, which is
+    /// what lets a traversal walk a node without asking its kind first.
+    uint32_t (*config_size)(atp_ctx* ctx, uint32_t node);
+
+    /// Key of an object's i-th entry.
+    /// @param out receives a pointer into the host's own copy of the config, valid for as long as the
+    ///        module lives — see config_value_of for why that is stronger than a port's text
+    /// @return 1 on success, 0 for a non-object or an `i` out of range
+    int (*config_key_at)(atp_ctx* ctx, uint32_t node, uint32_t i, const char** out, size_t* len);
+
+    /// Element of an array, or the value of an object's i-th entry.
+    /// @return the child's handle, or ATP_CONFIG_NONE for a scalar or an `i` out of range
+    uint32_t (*config_child_at)(atp_ctx* ctx, uint32_t node, uint32_t i);
+
+    /// Looks a key up in an object.
+    /// @param key need not be NUL-terminated
+    /// @return the value's handle, or ATP_CONFIG_NONE for a non-object or a key that is not there —
+    ///         the same answer config_child_at gives, so a caller checks both the same way
+    uint32_t (*config_find)(atp_ctx* ctx, uint32_t node, const char* key, size_t len);
+
+    /// Reads a scalar node into an atp_value.
+    ///
+    /// Text handed out here points into the host's copy of the config and stays valid for as long as
+    /// the module lives — deliberately stronger than the guarantee on a port's ATP_KIND_TEXT, which
+    /// is a copy taken into a shared buffer and lasts only until the next read. A config string is
+    /// already sitting in a tree the host holds from creation to destruction, so nothing is copied and
+    /// nothing expires; reading a port in between cannot disturb it.
+    /// @param out filled in only when the answer is 1
+    /// @return 1 for the four scalar forms; 0 for ATP_CONFIG_NULL, an array, an object or a handle
+    ///         that names nothing — there is no atp_kind for those, and `*out` is left untouched
+    int (*config_value_of)(atp_ctx* ctx, uint32_t node, atp_value* out);
 } atp_api;
 
 /// Creates the module's own state.
@@ -297,7 +374,23 @@ typedef struct atp_module_desc {
     atp_lifecycle_fn start;
     atp_iterate_fn iterate;
     atp_lifecycle_fn stop;
+
+    /// Where this module is declared, NUL-terminated **UTF-8**, or NULL when it is declared nowhere a
+    /// person could open — which is every plugin whose modules are compiled into it.
+    ///
+    /// For a plugin that turns files into modules the file is the thing its author edits, and the
+    /// host has no way to guess it: a name is not a file name, and the interpreter that read the
+    /// file is the only side that knows. A host may offer to open it; nothing depends on it, and a
+    /// plugin built before this field existed is accepted unchanged because struct_size says so.
+    const char* source;
 } atp_module_desc;
+
+/// Size of atp_module_desc as ATP_C_ABI 1 defined it, and the least a host accepts in `struct_size`.
+///
+/// Frozen on purpose: the descriptor grows by appending, so comparing against the current sizeof
+/// would reject every plugin built before the newest field — exactly the plugins struct_size exists
+/// to keep working. It stays anchored to the first field added after 1.
+#define ATP_MODULE_DESC_SIZE_V1 (offsetof(atp_module_desc, source))
 
 /// The three symbols a plugin of this path exports. They are pulled, not pushed: the host asks for
 /// the descriptors instead of handing over a registration callback, so loading needs no function

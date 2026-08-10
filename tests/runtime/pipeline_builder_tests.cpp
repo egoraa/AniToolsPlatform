@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <array>
+#include <filesystem>
+#include <initializer_list>
 #include <latch>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -80,6 +84,30 @@ struct limiter_props : atp::io::properties {
     atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
 };
 class limit_sink : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, limiter_props>, "limiter"> {};
+
+class config_reading_module : public atp::module<atp::io::ports<>, "config_reader"> {
+   public:
+    explicit config_reading_module(const atp::config_value& cfg) : channels_(cfg.int_at("channels", 0)) {}
+
+    [[nodiscard]] std::int64_t channels() const {
+        return channels_;
+    }
+
+   private:
+    std::int64_t channels_;
+};
+
+class config_probing_module : public atp::module<atp::io::ports<>, "config_probe"> {
+   public:
+    explicit config_probing_module(const atp::config_value& cfg) : saw_null_(cfg.is_null()) {}
+
+    [[nodiscard]] bool saw_null() const {
+        return saw_null_;
+    }
+
+   private:
+    bool saw_null_;
+};
 
 atp::runtime::config make_config(const char* text) {
     const nlohmann::json doc = nlohmann::json::parse(text);
@@ -238,6 +266,83 @@ TEST(PipelineBuilder, UnknownAssignPathIsConfigError) {
     EXPECT_THROW(atp::runtime::build(app, cfg, "."), atp::runtime::config_error);
 }
 
+std::filesystem::path make_plugin_dir(const std::string& name, std::initializer_list<const char*> files) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / name;
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    for (const char* file : files) {
+        std::filesystem::copy_file(file, dir / std::filesystem::path(file).filename());
+    }
+    return dir;
+}
+
+atp::runtime::config config_with_plugins(std::vector<std::string> plugins) {
+    atp::runtime::config cfg = make_config(R"({
+        "version": "3.0",
+        "pipeline": {"modules": []},
+        "threads": [{"name": "t"}]
+    })");
+    cfg.plugins = std::move(plugins);
+    return cfg;
+}
+
+TEST(PipelineBuilder, DirectoryLoadsEveryPluginInIt) {
+    const std::filesystem::path dir = make_plugin_dir("atp_dir_all", {ATP_TEST_PLUGIN, ATP_TEST_PLUGIN_PORTS});
+
+    atp::runtime::application app;
+    atp::runtime::build(app, config_with_plugins({dir.string()}), ".");
+
+    EXPECT_EQ(app.plugins.size(), 2u);
+    EXPECT_FALSE(app.registry.versions("plugin_module").empty());
+    EXPECT_FALSE(app.registry.versions("plugin_echo").empty());
+}
+
+TEST(PipelineBuilder, DirectorySkipsAForeignLibrary) {
+    const std::filesystem::path dir = make_plugin_dir("atp_dir_foreign", {ATP_TEST_PLUGIN, ATP_TEST_PLUGIN_EMPTY});
+
+    atp::runtime::application app;
+    EXPECT_NO_THROW(atp::runtime::build(app, config_with_plugins({dir.string()}), "."));
+
+    EXPECT_EQ(app.plugins.size(), 1u);
+    EXPECT_FALSE(app.registry.versions("plugin_module").empty());
+}
+
+TEST(PipelineBuilder, DirectoryStopsOnABrokenPlugin) {
+    const std::filesystem::path dir = make_plugin_dir("atp_dir_broken", {ATP_TEST_PLUGIN, ATP_TEST_PLUGIN_BAD_ABI});
+
+    atp::runtime::application app;
+    try {
+        atp::runtime::build(app, config_with_plugins({dir.string()}), ".");
+        FAIL() << "a plugin with a wrong ABI must stop the build";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("ABI"), std::string::npos);
+    }
+}
+
+TEST(PipelineBuilder, DirectoryAndAFileInsideItLoadOnce) {
+    const std::filesystem::path dir = make_plugin_dir("atp_dir_dedup", {ATP_TEST_PLUGIN});
+    const std::filesystem::path inside = dir / std::filesystem::path(ATP_TEST_PLUGIN).filename();
+
+    atp::runtime::application app;
+    atp::runtime::build(app, config_with_plugins({dir.string(), inside.string()}), ".");
+
+    EXPECT_EQ(app.plugins.size(), 1u);
+    EXPECT_EQ(app.registry.versions("plugin_module").size(), 1u);
+}
+
+TEST(PipelineBuilder, DirectoryDoesNotDescendIntoSubdirectories) {
+    const std::filesystem::path dir = make_plugin_dir("atp_dir_flat", {ATP_TEST_PLUGIN});
+    const std::filesystem::path nested = dir / "nested";
+    std::filesystem::create_directories(nested);
+    std::filesystem::copy_file(ATP_TEST_PLUGIN_PORTS, nested / std::filesystem::path(ATP_TEST_PLUGIN_PORTS).filename());
+
+    atp::runtime::application app;
+    atp::runtime::build(app, config_with_plugins({dir.string()}), ".");
+
+    EXPECT_EQ(app.plugins.size(), 1u);
+    EXPECT_TRUE(app.registry.versions("plugin_echo").empty());
+}
+
 TEST(PipelineBuilder, BuildsIntoPrefilledRegistry) {
     const atp::runtime::config cfg = make_config(R"({
         "version": "3.0",
@@ -254,6 +359,67 @@ TEST(PipelineBuilder, BuildsIntoPrefilledRegistry) {
     EXPECT_NE(pipe.root().find_module("one_shot"), nullptr);
     runner.start(pipe);
     runner.stop();
+}
+
+TEST(PipelineBuilder, InlineConfigReachesTheModule) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.2",
+        "pipeline": {"modules": [{"module": "config_reader", "config": {"channels": 6}}]}
+    })");
+
+    atp::module_registry registry;
+    registry.add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
+    atp::pipeline pipe;
+    atp::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, cfg, registry);
+
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
+}
+
+TEST(PipelineBuilder, ReferencedConfigReachesTheModule) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.2",
+        "configs": {"rig": {"channels": 6}},
+        "pipeline": {"modules": [{"module": "config_reader", "config": "rig"}]}
+    })");
+
+    atp::module_registry registry;
+    registry.add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
+    atp::pipeline pipe;
+    atp::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, cfg, registry);
+
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
+}
+
+TEST(PipelineBuilder, AbsentConfigIsNullNotAnEmptyObject) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.2",
+        "pipeline": {"modules": [{"module": "config_probe"}]}
+    })");
+
+    atp::module_registry registry;
+    registry.add(std::make_unique<atp::module_factory<config_probing_module>>("config_probe"));
+    atp::pipeline pipe;
+    atp::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, cfg, registry);
+
+    EXPECT_TRUE(dynamic_cast<config_probing_module*>(pipe.root().find_module("config_probe"))->saw_null());
+}
+
+TEST(PipelineBuilder, DanglingConfigReferenceIsConfigError) {
+    atp::runtime::config cfg = make_config(R"({
+        "version": "3.2",
+        "configs": {"rig": {"channels": 6}},
+        "pipeline": {"modules": [{"module": "config_reader", "config": "rig"}]}
+    })");
+    cfg.configs.clear();
+
+    atp::module_registry registry;
+    registry.add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
+    atp::pipeline pipe;
+    atp::pipeline_runner runner;
+    EXPECT_THROW(atp::runtime::build_pipeline(pipe, runner, cfg, registry), atp::runtime::config_error);
 }
 
 }  // namespace

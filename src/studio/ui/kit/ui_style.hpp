@@ -57,6 +57,16 @@ inline constexpr char16_t rescan = 0x21bb;
 inline constexpr char16_t clear = 0x2715;
 }  // namespace glyph
 
+/// Paints a label in the palette's disabled text colour: for text that is there to be found when
+/// looked for rather than read on the way past — a section title, a timestamp beside a control.
+/// The colour comes from the palette rather than a literal, so it follows the chosen style.
+/// @param label the label to mute
+inline void muted(QLabel* label) {
+    QPalette p = label->palette();
+    p.setColor(QPalette::WindowText, p.color(QPalette::Disabled, QPalette::WindowText));
+    label->setPalette(p);
+}
+
 /// A section title: small capitals in the muted text colour, followed by a hairline running to the
 /// edge of the panel. It replaces a group box frame — in a narrow dock nested frames cost more
 /// width than they buy separation.
@@ -74,9 +84,7 @@ inline constexpr char16_t clear = 0x2715;
     f.setBold(true);
     f.setLetterSpacing(QFont::PercentageSpacing, 105);
     label->setFont(f);
-    QPalette p = label->palette();
-    p.setColor(QPalette::WindowText, p.color(QPalette::Disabled, QPalette::WindowText));
-    label->setPalette(p);
+    muted(label);
     layout->addWidget(label);
 
     auto* line = new QFrame(head);

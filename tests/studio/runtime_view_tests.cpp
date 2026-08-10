@@ -3,6 +3,7 @@
 #include <memory>
 #include <stop_token>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -140,7 +141,16 @@ TEST_F(StudioRuntimeView, ADisconnectedRemoteStopsClaimingToRun) {
 
     server_.reset();
 
-    EXPECT_FALSE(view.running());
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (view.running() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(5ms);
+    }
+
+    EXPECT_FALSE(view.running())
+        << "the view answers from a snapshot cached for status_lifetime and learns the host is gone "
+           "only when a call fails, so the change is waited for rather than assumed to have happened "
+           "already: asserting it outright passed only because destroying the server usually takes "
+           "longer than the cache lives, and failed whenever it did not";
     EXPECT_FALSE(view.error_text().empty());
 }
 

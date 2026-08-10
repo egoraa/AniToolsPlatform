@@ -12,6 +12,8 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include <atp/log_pump.hpp>
+
 namespace atp::studio::ui {
 
 namespace {
@@ -44,6 +46,11 @@ runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidge
     controls_layout->addWidget(stop_);
     controls_layout->addWidget(status_);
     controls_layout->addStretch(1);
+    updated_ = new QLabel(controls);
+    updated_->setObjectName("runtime.updated");
+    updated_->setToolTip("When the tables below were last read from the running pipeline");
+    style::muted(updated_);
+    controls_layout->addWidget(updated_);
     layout->addWidget(controls);
 
     layout->addWidget(style::section_header("threads", this));
@@ -101,6 +108,7 @@ void runtime_widget::refresh() {
     }
     refresh_modules();
     refresh_ports();
+    updated_->setText(QString::fromStdString("updated " + atp::format_log_time(std::chrono::system_clock::now())));
 }
 
 void runtime_widget::refresh_ports() {

@@ -47,6 +47,18 @@ pub const ATP_WORK_BUSY: c_int = 0;
 pub const ATP_WORK_IDLE: c_int = 1;
 pub const ATP_WORK_ERROR: c_int = -1;
 
+/// Handle naming no config node. The root's handle is never zero, so one comparison covers a failed
+/// lookup, an index out of range and "there is nothing here" alike.
+pub const ATP_CONFIG_NONE: u32 = 0;
+
+pub const ATP_CONFIG_NULL: c_int = 0;
+pub const ATP_CONFIG_BOOL: c_int = 1;
+pub const ATP_CONFIG_INT: c_int = 2;
+pub const ATP_CONFIG_REAL: c_int = 3;
+pub const ATP_CONFIG_TEXT: c_int = 4;
+pub const ATP_CONFIG_ARRAY: c_int = 5;
+pub const ATP_CONFIG_OBJECT: c_int = 6;
+
 /// The host's per-instance context: opaque, and only ever passed back where it came from.
 #[repr(C)]
 pub struct AtpCtx {
@@ -147,6 +159,13 @@ pub struct AtpApi {
     pub log: unsafe extern "C" fn(*mut AtpCtx, c_int, *const c_char, usize),
     pub wake: unsafe extern "C" fn(*mut AtpCtx),
     pub set_error: unsafe extern "C" fn(*mut AtpCtx, *const c_char, usize),
+    pub config_root: unsafe extern "C" fn(*mut AtpCtx) -> u32,
+    pub config_kind: unsafe extern "C" fn(*mut AtpCtx, u32) -> c_int,
+    pub config_size: unsafe extern "C" fn(*mut AtpCtx, u32) -> u32,
+    pub config_key_at: unsafe extern "C" fn(*mut AtpCtx, u32, u32, *mut *const c_char, *mut usize) -> c_int,
+    pub config_child_at: unsafe extern "C" fn(*mut AtpCtx, u32, u32) -> u32,
+    pub config_find: unsafe extern "C" fn(*mut AtpCtx, u32, *const c_char, usize) -> u32,
+    pub config_value_of: unsafe extern "C" fn(*mut AtpCtx, u32, *mut AtpValue) -> c_int,
 }
 
 #[repr(C)]
@@ -204,6 +223,9 @@ pub struct AtpModuleDesc {
     pub start: Option<AtpLifecycleFn>,
     pub iterate: Option<AtpIterateFn>,
     pub stop: Option<AtpLifecycleFn>,
+    /// Where the module is declared, or null when it is declared nowhere a person could open —
+    /// which is the case for a compiled plugin like this one.
+    pub source: *const c_char,
 }
 
 /// A NUL-terminated name for a descriptor field, out of a byte literal that already ends in one.

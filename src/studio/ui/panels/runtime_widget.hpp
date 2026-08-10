@@ -30,7 +30,11 @@ class runtime_widget final : public QWidget {
     runtime_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent = nullptr);
 
     /// Refreshes the controls, the thread table, the module table and the port table from the
-    /// project and session.
+    /// project and session, and stamps the moment it did.
+    ///
+    /// The stamp matters because the timer behind this panel only ticks while something runs: once
+    /// a pipeline stops, the tables go on showing their last numbers with nothing to say how old
+    /// they are. A frozen stamp names the moment they stopped being true.
     void refresh();
 
    private:
@@ -43,6 +47,7 @@ class runtime_widget final : public QWidget {
     QPushButton* run_ = nullptr;
     QPushButton* stop_ = nullptr;
     QLabel* status_ = nullptr;
+    QLabel* updated_ = nullptr;
     thread_table* threads_ = nullptr;
     QCheckBox* measure_ = nullptr;
     QTableWidget* modules_ = nullptr;

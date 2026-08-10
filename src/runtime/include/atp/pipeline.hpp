@@ -2,6 +2,7 @@
 #ifndef ANITOOLSPLATFORM_PIPELINE_HPP
 #define ANITOOLSPLATFORM_PIPELINE_HPP
 
+#include <chrono>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,9 +54,10 @@ class pipeline {
     /// @return the lines, with paths relative to the root
     [[nodiscard]] std::vector<log_line> collect_logs() {
         std::vector<log_line> out;
-        host_.ring().drain([&out](log_level level, std::string_view text, bool truncated) {
-            out.push_back({"root", level, std::string(text), truncated});
-        });
+        host_.ring().drain(
+            [&out](log_level level, std::string_view text, bool truncated, std::chrono::system_clock::time_point at) {
+                out.push_back({"root", level, std::string(text), truncated, at});
+            });
         root_.collect_logs(std::string(), out);
         return out;
     }

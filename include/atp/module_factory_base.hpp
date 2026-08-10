@@ -5,6 +5,7 @@
 #include <memory>
 #include <string_view>
 
+#include <atp/config_value.hpp>
 #include <atp/module_base.hpp>
 #include <atp/version.hpp>
 
@@ -26,13 +27,25 @@ class module_factory_base {
     /// Version of the modules it creates.
     [[nodiscard]] virtual version get_version() const noexcept = 0;
 
-    /// Creates a module instance. Takes no parameters: per-instance settings are module properties,
-    /// applied on top of the finished object (see runtime::apply_properties).
+    /// Creates a module instance from a structured config.
+    ///
+    /// The config arrives here, and not in initialize, because the constructor is the only point
+    /// earlier than both connect and initialize, and it is where the make<>() calls that declare the
+    /// ports happen — so a module could one day derive its ports from the config with no further
+    /// change to the platform. Scalar per-instance settings do not belong here: those are module
+    /// properties, applied on top of the finished object (see runtime::apply_properties). What this
+    /// channel is for is a setting a property cannot express — a list, a table, a nested object —
+    /// needed before initialize and not edited live.
+    ///
+    /// No default argument is given, deliberately: on a virtual function a default is taken from the
+    /// static type of the call, which is a classic trap. The convenient overload without a config
+    /// lives on module_registry instead.
     ///
     /// module_ptr is safe across a plugin boundary — the module's destructor is code of the library
     /// that created it, and the pin in the deleter keeps that library loaded while the module
     /// lives.
-    [[nodiscard]] virtual module_ptr create() const = 0;
+    /// @param cfg config for this instance; the null form when the config named none
+    [[nodiscard]] virtual module_ptr create(const config_value& cfg) const = 0;
 
    protected:
     module_factory_base() = default;

@@ -16,11 +16,11 @@ FetchContent_MakeAvailable(googletest)
 add_subdirectory(test_plugin)
 
 set(ATP_TESTS_DIRS platform runtime mcp studio support)
-# The bridge suite exists only where the bridge does: it drives a real library through module_loader,
-# and there is nothing to drive when CPython was not found.
-if (TARGET atp_python_bridge)
-    list(APPEND ATP_TESTS_DIRS bridges)
-endif ()
+# tests/bridges is deliberately not in that list, and that is the one directory here whose files are
+# named rather than globbed: each of its suites drives one real library through module_loader and
+# names it through a definition only that bridge's target provides, so a build with one bridge and not
+# the other would compile a file whose ATP_*_BRIDGE is undeclared. Each is added below, beside the
+# definition it needs.
 foreach (dir IN LISTS ATP_TESTS_DIRS)
     file(GLOB_RECURSE dir_sources CONFIGURE_DEPENDS
             ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/*.cpp
@@ -45,10 +45,20 @@ target_compile_definitions(atp_tests PRIVATE
 
 if (TARGET atp_python_bridge)
     add_dependencies(atp_tests atp_python_bridge)
+    target_sources(atp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/bridges/python_bridge_tests.cpp)
     target_compile_definitions(atp_tests PRIVATE
             ATP_PYTHON_BRIDGE="$<PATH:CMAKE_PATH,$<TARGET_FILE:atp_python_bridge>>"
             ATP_PYTHON_BRIDGE_SCRIPTS="$<PATH:CMAKE_PATH,${CMAKE_CURRENT_SOURCE_DIR}/bridges/scripts>"
             ATP_PYTHON_BRIDGE_SCRIPTS_BROKEN="$<PATH:CMAKE_PATH,${CMAKE_CURRENT_SOURCE_DIR}/bridges/scripts_broken>")
+endif ()
+
+if (TARGET atp_lua_bridge)
+    add_dependencies(atp_tests atp_lua_bridge)
+    target_sources(atp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/bridges/lua_bridge_tests.cpp)
+    target_compile_definitions(atp_tests PRIVATE
+            ATP_LUA_BRIDGE="$<PATH:CMAKE_PATH,$<TARGET_FILE:atp_lua_bridge>>"
+            ATP_LUA_BRIDGE_SCRIPTS="$<PATH:CMAKE_PATH,${CMAKE_CURRENT_SOURCE_DIR}/bridges/lua_scripts>"
+            ATP_LUA_BRIDGE_SCRIPTS_BROKEN="$<PATH:CMAKE_PATH,${CMAKE_CURRENT_SOURCE_DIR}/bridges/lua_scripts_broken>")
 endif ()
 
 if (ATP_ASAN_RUNTIME)
@@ -68,6 +78,12 @@ if (TARGET atp_studio_ui)
 
     add_executable(atp_ui_tests ${ATP_UI_TESTS_SOURCES})
     target_include_directories(atp_ui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # The C fixture plugin, so a widget test can ask a real manager what a real load produced —
+    # its two modules differ in exactly what the plugins dock branches on, a declared source file
+    # and none.
+    add_dependencies(atp_ui_tests test_plugin_c)
+    target_compile_definitions(atp_ui_tests PRIVATE
+            ATP_TEST_PLUGIN_C="$<PATH:CMAKE_PATH,$<TARGET_FILE:test_plugin_c>>")
     # atp_mcp_lib is here for the attach tests alone: they raise a real control channel in the test
     # process, because attaching to a mock would prove nothing about the protocol.
     target_link_libraries(atp_ui_tests PRIVATE atp_studio_ui atp_mcp_lib atp_warnings GTest::gtest_main)

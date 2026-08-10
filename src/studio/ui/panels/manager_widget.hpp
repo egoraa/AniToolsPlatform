@@ -14,8 +14,27 @@
 
 namespace atp::studio::ui {
 
-/// Modules panel: the plugin search directories and the plugins found in them, with their load
+/// Plugins panel: the module search directories and the plugins found in them, with their load
 /// errors.
+///
+/// One list and not two. A module folder is a plugin folder — that is what carrying its own bridge
+/// means — so what each bridge is told to scan is **derived** from these directories
+/// (`derive_script_dirs`, once per language) rather than kept beside them, where the same folder would
+/// appear twice and
+/// the two lists would drift apart the moment either was edited.
+///
+/// The context menu follows what a row actually has a path to. A plugin row has its file, and offers
+/// to copy it; a module row has one only when the plugin said where the module is declared, which in
+/// practice means a script module and the file it was read from — those rows also offer to open it. A module
+/// compiled into its plugin is declared in no file a person could open, so its row has no menu at
+/// all rather than a menu that would have to lie about what it points at.
+///
+/// The rescan button re-reads the plugins already loaded before it looks for new files. A person
+/// pressing it has just edited a script or rebuilt a library and means the modules, not the directory
+/// listing — and a plain scan is defined to leave a loaded plugin alone, which for a script bridge
+/// means no edit could ever arrive. While the pipeline runs the re-reading is skipped and said so in
+/// the log: it would unregister factories the live tree is holding, whereas loading a file that is
+/// new to the session only adds.
 class manager_widget final : public QWidget {
    public:
     manager_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent = nullptr);
@@ -25,6 +44,8 @@ class manager_widget final : public QWidget {
 
    private:
     void sync_settings();
+
+    void scan();
 
     void show_plugin_menu(const QPoint& pos, const QPoint& global);
 

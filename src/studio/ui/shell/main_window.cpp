@@ -3,8 +3,12 @@
 
 #include "kit/icons.hpp"
 #include "model/create_group.hpp"
+#include "model/editor.hpp"
+#include "model/new_script_module.hpp"
 #include "shell/attach_dialog.hpp"
+#include "shell/new_script_module_dialog.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -13,6 +17,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QByteArray>
+#include <QDir>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QGuiApplication>
@@ -54,14 +59,15 @@ main_window::main_window(app_state& state) : state_(state), default_style_(QAppl
     apply_theme();
 
     callbacks_.project_changed = [this] { refresh_all(); };
-    callbacks_.error = [this](const QString& text) { report(text); };
+    callbacks_.error = [this](const QString& text) { report(text, atp::log_level::error); };
+    callbacks_.report = [this](const QString& text, atp::log_level level) { report(text, level); };
     callbacks_.selection_changed = [this] {
         if (inspector_ != nullptr) {
             inspector_->refresh();
         }
     };
 
-    errors_dock_ = build_errors_dock();
+    log_dock_ = build_log_dock();
 
     tree_dock_ = new QDockWidget("Project", this);
     tree_dock_->setObjectName("dock.project");
@@ -73,8 +79,8 @@ main_window::main_window(app_state& state) : state_(state), default_style_(QAppl
     palette_ = new palette_widget(state_, callbacks_, palette_dock_);
     palette_dock_->setWidget(palette_);
 
-    manager_dock_ = new QDockWidget("Modules", this);
-    manager_dock_->setObjectName("dock.modules");
+    manager_dock_ = new QDockWidget("Plugins", this);
+    manager_dock_->setObjectName("dock.plugins");
     manager_ = new manager_widget(state_, callbacks_, manager_dock_);
     manager_dock_->setWidget(manager_);
 
@@ -109,21 +115,21 @@ void main_window::apply_default_layout() {
     addDockWidget(Qt::LeftDockWidgetArea, tree_dock_);
     addDockWidget(Qt::LeftDockWidgetArea, palette_dock_);
     addDockWidget(Qt::RightDockWidgetArea, inspector_dock_);
-    addDockWidget(Qt::BottomDockWidgetArea, errors_dock_);
+    addDockWidget(Qt::BottomDockWidgetArea, log_dock_);
     addDockWidget(Qt::BottomDockWidgetArea, manager_dock_);
     addDockWidget(Qt::BottomDockWidgetArea, runtime_dock_);
 
-    tabifyDockWidget(errors_dock_, manager_dock_);
-    errors_dock_->raise();
+    tabifyDockWidget(log_dock_, manager_dock_);
+    log_dock_->raise();
 
-    for (QDockWidget* dock : {tree_dock_, palette_dock_, manager_dock_, inspector_dock_, runtime_dock_, errors_dock_}) {
+    for (QDockWidget* dock : {tree_dock_, palette_dock_, manager_dock_, inspector_dock_, runtime_dock_, log_dock_}) {
         dock->show();
     }
 
     resizeDocks({tree_dock_, inspector_dock_}, {256, 315}, Qt::Horizontal);
     resizeDocks({tree_dock_, palette_dock_}, {1, 1}, Qt::Vertical);
-    resizeDocks({errors_dock_, runtime_dock_}, {1, 1}, Qt::Horizontal);
-    resizeDocks({errors_dock_}, {284}, Qt::Vertical);
+    resizeDocks({log_dock_, runtime_dock_}, {1, 1}, Qt::Horizontal);
+    resizeDocks({log_dock_}, {284}, Qt::Vertical);
 }
 
 void main_window::restore_layout() {
@@ -207,21 +213,24 @@ void main_window::detach(const QString& reason) {
     const QString endpoint = QString::fromStdString(state_.endpoint());
     state_.detach();
     report(reason.isEmpty() ? QString("detached from %1").arg(endpoint)
-                            : QString("detached from %1: %2").arg(endpoint, reason));
+                            : QString("detached from %1: %2").arg(endpoint, reason),
+           reason.isEmpty() ? atp::log_level::info : atp::log_level::warning);
     refresh_all();
 }
 
-void main_window::report(const QString& text) {
-    errors_->insertItem(0, text);
+void main_window::report(const QString& text, atp::log_level level) {
+    const QString stamp = QString::fromStdString(atp::format_log_time(std::chrono::system_clock::now()));
+    const QString name = QString::fromStdString(std::string(atp::level_name(level)));
+    log_->append(stamp + " [" + name + "] " + text, level);
 }
 
 void main_window::report(const std::string& context, const std::exception& e) {
-    report(QString::fromStdString(context + ": " + e.what()));
+    report(QString::fromStdString(context + ": " + e.what()), atp::log_level::error);
 }
 
 void main_window::drain_logs() {
     for (const atp::log_line& line : state_.run.collect_logs()) {
-        report(QString::fromStdString(atp::format_log_line(line)));
+        log_->append(QString::fromStdString(atp::format_log_line(line)), line.level);
     }
 }
 
@@ -231,8 +240,9 @@ void main_window::open_path(const std::filesystem::path& path) {
         state_.doc_path = path;
         state_.reset_view();
         if (state_.doc.had_includes()) {
-            report(QString("warning: %1 uses $include — saving will write a flattened file")
-                       .arg(QString::fromStdWString(path.wstring())));
+            report(QString("%1 uses $include — saving will write a flattened file")
+                       .arg(QString::fromStdWString(path.wstring())),
+                   atp::log_level::warning);
         }
         for (const std::string& p : state_.doc.config().plugins) {
             try {
@@ -264,6 +274,8 @@ void main_window::build_menus() {
     save_action_ = file->addAction(icons::save(), "&Save", QKeySequence::Save, [this] { save(false); });
     save_as_action_ =
         file->addAction(icons::save_as(), "Save &As...", QKeySequence("Ctrl+Shift+S"), [this] { save(true); });
+    file->addSeparator();
+    file->addAction(icons::module(), "&New module...", [this] { new_script_module(); });
 
     QMenu* edit = menuBar()->addMenu("&Edit");
     undo_action_ = edit->addAction(icons::undo(), "&Undo", QKeySequence::Undo, [this] {
@@ -316,7 +328,7 @@ void main_window::build_menus() {
 
 void main_window::build_view_menu(QMenu* view) {
     QMenu* panels = view->addMenu("&Panels");
-    for (QDockWidget* dock : {tree_dock_, palette_dock_, manager_dock_, inspector_dock_, runtime_dock_, errors_dock_}) {
+    for (QDockWidget* dock : {tree_dock_, palette_dock_, manager_dock_, inspector_dock_, runtime_dock_, log_dock_}) {
         panels->addAction(dock->toggleViewAction());
     }
 
@@ -409,7 +421,7 @@ void main_window::apply_theme() {
 void main_window::apply_style() {
     QString wanted = QString::fromStdString(state_.settings.style);
     if (!wanted.isEmpty() && !QStyleFactory::keys().contains(wanted)) {
-        report("style '" + wanted + "' is not available here; using " + default_style_);
+        report("style '" + wanted + "' is not available here; using " + default_style_, atp::log_level::warning);
         state_.settings.style.clear();
         wanted.clear();
     }
@@ -441,21 +453,20 @@ void main_window::rebuild_recent_menu() {
     });
 }
 
-QDockWidget* main_window::build_errors_dock() {
-    auto* dock = new QDockWidget("Errors", this);
-    dock->setObjectName("dock.errors");
+QDockWidget* main_window::build_log_dock() {
+    auto* dock = new QDockWidget("Log", this);
+    dock->setObjectName("dock.log");
     auto* body = new QWidget(dock);
     auto* layout = new QVBoxLayout(body);
     layout->setSpacing(style::row_spacing);
-    layout->addWidget(style::section_header("log", body));
 
-    errors_ = new log_widget(body);
-    errors_->setObjectName("log.errors");
-    layout->addWidget(errors_, 1);
+    log_ = new log_widget(body);
+    log_->setObjectName("log.lines");
+    layout->addWidget(log_, 1);
 
     const style::button_bar bar = style::make_button_bar(body);
     auto* clear = style::tool_button(style::glyph::clear, "clear the log", bar.box);
-    QObject::connect(clear, &QToolButton::clicked, body, [this] { errors_->clear(); });
+    QObject::connect(clear, &QToolButton::clicked, body, [this] { log_->clear(); });
     bar.row->addWidget(clear);
     bar.row->addStretch(1);
     layout->addWidget(bar.box);
@@ -469,6 +480,32 @@ void main_window::open_dialog() {
     const QString file = QFileDialog::getOpenFileName(this, "Open config", QString(), "Pipeline configs (*.json)");
     if (!file.isEmpty()) {
         open_path(std::filesystem::path(file.toStdWString()));
+    }
+}
+
+void main_window::new_script_module() {
+    const studio::script_language* remembered = studio::language_by_id(state_.settings.last_script_language);
+    const studio::script_language& offered_language = remembered == nullptr ? studio::languages().front() : *remembered;
+    const std::optional<std::filesystem::path> last =
+        studio::last_script_folder(state_.manager.search_dirs(), offered_language);
+    const QString offered = last ? QString::fromStdWString(last->wstring()) : QDir::homePath();
+    new_script_module_dialog dialog(offered, state_.manager.registry(), offered_language.id, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const studio::script_language& chosen = dialog.language();
+    state_.settings.last_script_language = std::string(chosen.id);
+    const std::filesystem::path exe_dir(QCoreApplication::applicationDirPath().toStdWString());
+    const std::optional<std::filesystem::path> file = create_script_module_action(
+        state_, callbacks_, chosen, std::filesystem::path(dialog.directory().toStdWString()),
+        dialog.module_name().toStdString(), studio::find_bridge_source(state_.manager, exe_dir, chosen));
+    if (!file) {
+        return;
+    }
+    if (!open_in_editor(QString::fromStdString(state_.settings.editor_command), *file)) {
+        report(
+            QString("could not open an editor for %1; open it by hand").arg(QString::fromStdWString(file->wstring())),
+            atp::log_level::warning);
     }
 }
 
@@ -493,7 +530,8 @@ void main_window::save(bool ask_path) {
         if (state_.attached()) {
             report(QString("saved a mirror of %1: it carries the graph, not the plugins, threads "
                            "or assignments the host was started with")
-                       .arg(QString::fromStdString(state_.endpoint())));
+                       .arg(QString::fromStdString(state_.endpoint())),
+                   atp::log_level::warning);
             refresh_all();
             return;
         }
@@ -519,7 +557,7 @@ void main_window::poll() {
     }
     drain_logs();
     if (const std::string error = state_.view->error_text(); !error.empty()) {
-        report(QString::fromStdString("pipeline: " + error));
+        report(QString::fromStdString("pipeline: " + error), atp::log_level::error);
         state_.run.stop();
         refresh_all();
         return;

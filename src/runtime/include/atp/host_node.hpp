@@ -3,6 +3,7 @@
 #define ANITOOLSPLATFORM_HOST_NODE_HPP
 
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <string_view>
 
@@ -12,12 +13,18 @@
 
 namespace atp {
 
-/// One drained log line, with the module that wrote it.
+/// One drained log line, with the module that wrote it and the moment it did.
+///
+/// The stamp is taken by the writing module's own thread, not by whoever drains: a drain happens
+/// on a timer, so its own clock would collapse a whole burst onto one instant and place it late.
+/// It sits last so that the aggregate initialisation of the four fields that came before it keeps
+/// compiling.
 struct log_line {
     std::string path;
     log_level level = log_level::info;
     std::string text;
     bool truncated = false;
+    std::chrono::system_clock::time_point at{};
 };
 
 /// The runtime's module_host: a log ring plus the notifier of the thread that runs the module.

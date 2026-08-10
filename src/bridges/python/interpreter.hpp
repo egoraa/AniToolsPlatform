@@ -2,6 +2,7 @@
 #ifndef ANITOOLSPLATFORM_BRIDGES_PYTHON_INTERPRETER_HPP
 #define ANITOOLSPLATFORM_BRIDGES_PYTHON_INTERPRETER_HPP
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,11 @@ class gil_lock {
 [[nodiscard]] PyObject* package();
 
 /// Directories to scan for scripts: ATP_PYTHON_PATH first, then python/ next to this library.
-[[nodiscard]] std::vector<std::string> scan_paths();
+///
+/// Paths and not strings, and on Windows the variable is read wide. A narrow read converts through
+/// the process code page, so a directory the page cannot represent comes back with its characters
+/// replaced and is silently not there — no error, no log line, the modules simply absent.
+[[nodiscard]] std::vector<std::filesystem::path> scan_paths();
 
 }  // namespace atp::bridge
 

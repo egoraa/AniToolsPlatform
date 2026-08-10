@@ -75,6 +75,11 @@ class c_module_test : public ::testing::Test {
         ASSERT_NE(module_, nullptr);
     }
 
+    void create(const std::string& name, const atp::config_value& cfg) {
+        module_ = registry_.create(name, cfg);
+        ASSERT_NE(module_, nullptr);
+    }
+
     void feed(atp::io::output_base& source, const std::string& port) {
         source.connect(module_->inputs().at(port));
     }
@@ -107,8 +112,10 @@ class c_module_test : public ::testing::Test {
 TEST_F(c_module_test, RegistersEveryDescribedModule) {
     load(ATP_TEST_PLUGIN_C);
     EXPECT_EQ(loader_->modules(),
-              (std::vector<std::pair<std::string, atp::version>>{
-                  {"c_probe", atp::version(2, 1)}, {"c_bare", atp::version(1)}, {"c_grown", atp::version(3)}}));
+              (std::vector<atp::registered_module>{{"c_probe", atp::version(2, 1), "c_probe_declared_here.txt"},
+                                                   {"c_bare", atp::version(1), ""},
+                                                   {"c_grown", atp::version(3), ""},
+                                                   {"c_config", atp::version(1), ""}}));
     EXPECT_EQ(registry_.at("c_probe").get_version(), atp::version(2, 1));
 }
 
@@ -122,12 +129,13 @@ TEST_F(c_module_test, AcceptsADescriptorLongerThanTheHostKnows) {
     EXPECT_EQ(pass(), atp::work_status::idle);
 }
 
-/// And the backward half: shorter means a field this host would read is not there at all, which is a
-/// refusal rather than a guess. Built here rather than in a fixture plugin because the check runs before
-/// anything else in the descriptor is looked at, so nothing else has to be valid.
+/// And the backward half: the floor is the v1 layout, not the host's current sizeof — a descriptor
+/// shorter than v1 is missing a field every host reads, which is a refusal rather than a guess. Built
+/// here rather than in a fixture plugin because the check runs before anything else in the descriptor
+/// is looked at, so nothing else has to be valid.
 TEST_F(c_module_test, RefusesADescriptorShorterThanTheHostExpects) {
     atp_module_desc desc{};
-    desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc) - 1);
+    desc.struct_size = static_cast<std::uint32_t>(ATP_MODULE_DESC_SIZE_V1 - 1);
     desc.name = "c_short";
     try {
         atp::c_module_factory factory{desc};
@@ -353,4 +361,33 @@ TEST_F(c_module_test, MalformedDescriptorWithdrawsTheSoundOnes) {
     EXPECT_THROW(load(ATP_TEST_PLUGIN_C_BAD_DESC), std::runtime_error);
     EXPECT_EQ(registry_.find("c_sound"), nullptr);
     EXPECT_EQ(registry_.find("c_broken"), nullptr);
+}
+
+TEST_F(c_module_test, ConfigIsReadableThroughTheAccessors) {
+    load(ATP_TEST_PLUGIN_C);
+    create("c_config", atp::config_value::object({
+                           {"channels", atp::config_value::array({1, 2, 6})},
+                           {"name", "rig"},
+                       }));
+    collect("report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(),
+              "root=ok kind=object size=2 key0=channels find=ok find-not-root channels=array third=6 "
+              "object-read=no absent=none oob=none name=rig");
+}
+
+TEST_F(c_module_test, ConfigRootIsNullWhenNoneWasGiven) {
+    load(ATP_TEST_PLUGIN_C);
+    create("c_config");
+    collect("report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    const std::string report = host_.inputs().text.get();
+    EXPECT_NE(report.find("root=ok"), std::string::npos);
+    EXPECT_NE(report.find("kind=other"), std::string::npos);
+    EXPECT_NE(report.find("size=0"), std::string::npos);
+    EXPECT_NE(report.find("object-read=no"), std::string::npos);
 }

@@ -6,8 +6,11 @@
 #include <string>
 
 #include <QComboBox>
+#include <QEvent>
 #include <QLabel>
 #include <QScrollArea>
+
+#include <nlohmann/json.hpp>
 
 #include <atp/studio/node_ref.hpp>
 #include <atp/studio/thread_resolve.hpp>
@@ -174,6 +177,54 @@ void inspector_widget::build_module_section(const runtime::module_node& m) {
     props.form->addRow(properties_);
     props.box->setVisible(!properties_->empty());
     property_rows_.push_back(props.box);
+
+    build_config_section(m);
+}
+
+void inspector_widget::build_config_section(const runtime::module_node& m) {
+    const style::section s = add_section("config");
+    config_edit_ = new QPlainTextEdit(body_);
+    config_edit_->setPlaceholderText("an object, or the name of a shared block");
+    config_edit_->setFixedHeight(config_editor_height);
+    config_edit_->setPlainText(QString::fromStdString(m.config ? m.config->dump(4) : std::string()));
+    s.form->addRow(config_edit_);
+
+    config_module_ = m.name;
+    config_edit_->installEventFilter(this);
+    QObject::connect(config_edit_, &QPlainTextEdit::destroyed, this, [this] { config_edit_ = nullptr; });
+}
+
+bool inspector_widget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == config_edit_ && event->type() == QEvent::FocusOut) {
+        commit_config(config_module_);
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void inspector_widget::commit_config(const std::string& name) {
+    if (config_edit_ == nullptr) {
+        return;
+    }
+    const std::string text = config_edit_->toPlainText().trimmed().toStdString();
+    const nlohmann::json* stored = nullptr;
+    try {
+        stored = state_.doc.config_of(state_.current_group, name);
+    } catch (const std::exception&) {
+        return;
+    }
+    if (text == (stored == nullptr ? std::string() : stored->dump(4))) {
+        return;
+    }
+    if (text.empty()) {
+        guard("config", [this, &name] { state_.doc.clear_config(state_.current_group, name); });
+        return;
+    }
+    const nlohmann::json parsed = nlohmann::json::parse(text, nullptr, false);
+    if (parsed.is_discarded()) {
+        callbacks_.error("config: not valid JSON");
+        return;
+    }
+    guard("config", [this, &name, &parsed] { state_.doc.set_config(state_.current_group, name, parsed); });
 }
 
 void inspector_widget::build_group_section(const std::string& group_path, const std::string& name, bool renameable) {

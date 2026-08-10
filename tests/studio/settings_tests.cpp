@@ -193,6 +193,24 @@ TEST(NoteRecent, CapsAtLimit) {
     EXPECT_EQ(s.recent_projects.back(), std::filesystem::absolute("p2.json").lexically_normal().string());
 }
 
+TEST(StudioSettings, RoundTripsTheEditorCommand) {
+    const auto file = temp_file("settings.json");
+    atp::studio::studio_settings s;
+    s.editor_command = "code \"{file}\"";
+    atp::studio::save_settings(s, file);
+
+    EXPECT_EQ(atp::studio::load_settings(file).editor_command, s.editor_command);
+}
+
+TEST(StudioSettings, AProfileWithoutTheEditorCommandReadsItEmpty) {
+    const auto file = temp_file("settings.json");
+    std::ofstream(file) << R"({"search_dirs": ["x"], "theme": "dark"})";
+
+    const atp::studio::studio_settings loaded = atp::studio::load_settings(file);
+    EXPECT_TRUE(loaded.editor_command.empty());
+    EXPECT_EQ(loaded.search_dirs.size(), 1u);
+}
+
 TEST(NoteRecent, NormalizesRelativePath) {
     atp::studio::studio_settings s;
     atp::studio::note_recent(s, "sub/../x.json");

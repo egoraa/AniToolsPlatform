@@ -27,12 +27,23 @@ concept has_module_version = requires {
 ///
 /// Constructor arguments are bound at registration time: the factory stores them and every
 /// create() builds an instance from the same values, so all instances of one factory are identical
-/// and different configurations are separate registrations (aliases). Per-instance settings do not
-/// belong here but in the module's properties, applied to the created object.
+/// and different configurations are separate registrations (aliases). Per-instance scalar settings do
+/// not belong here but in the module's properties, applied to the created object.
+///
+/// The per-instance config goes **after** the bound arguments, and a module joins that channel only
+/// if it declared a constructor taking one: a module that did not is built exactly as before, so
+/// nothing existing changes by a line.
+///
+/// Hence the constraint is a disjunction rather than the plain "constructible from the bound
+/// arguments" it used to be: a module whose only constructor takes a config is constructible from no
+/// arguments at all, and requiring that form alone would reject exactly the modules this channel is
+/// for. Both alternatives are named, so the class is still rejected when neither spelling fits, which
+/// is the diagnostic worth keeping.
 /// @tparam TModule module type
 /// @tparam TArgs constructor argument types bound at registration
 template <std::derived_from<module_base> TModule, typename... TArgs>
-    requires std::constructible_from<TModule, const TArgs&...>
+    requires(std::constructible_from<TModule, const TArgs&...> ||
+             std::constructible_from<TModule, const TArgs&..., const config_value&>)
 class module_factory final : public module_factory_base {
    public:
     /// @param name name to register the factory under
@@ -53,8 +64,16 @@ class module_factory final : public module_factory_base {
         }
     }
 
-    [[nodiscard]] module_ptr create() const override {
-        return std::apply([](const TArgs&... args) { return module_ptr(new TModule(args...), {}); }, args_);
+    [[nodiscard]] module_ptr create(const config_value& cfg) const override {
+        return std::apply(
+            [&cfg](const TArgs&... args) {
+                if constexpr (std::constructible_from<TModule, const TArgs&..., const config_value&>) {
+                    return module_ptr(new TModule(args..., cfg), {});
+                } else {
+                    return module_ptr(new TModule(args...), {});
+                }
+            },
+            args_);
     }
 
    private:

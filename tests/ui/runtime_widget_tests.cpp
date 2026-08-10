@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 
 #include <QCheckBox>
+#include <QLabel>
+#include <QString>
 #include <QTableWidget>
 
 #include "model/app_state.hpp"
@@ -75,6 +77,26 @@ TEST(UiRuntimeWidget, RefusesToMeasureWhileNothingRuns) {
     EXPECT_FALSE(measure_box(widget)->isEnabled());
     EXPECT_FALSE(measure_box(widget)->isChecked());
     EXPECT_EQ(modules_table(widget)->rowCount(), 0);
+}
+
+TEST(UiRuntimeWidget, StampsTheMomentTheTablesWereRead) {
+    (void)atp_ui_tests::ensure_app();
+    app_state state;
+    ui_callbacks callbacks;
+    runtime_widget widget(state, callbacks);
+
+    auto* updated = widget.findChild<QLabel*>(QStringLiteral("runtime.updated"));
+    ASSERT_NE(updated, nullptr);
+    EXPECT_TRUE(updated->text().isEmpty());
+
+    widget.refresh();
+
+    const QString text = updated->text();
+    ASSERT_TRUE(text.startsWith(QStringLiteral("updated ")));
+    const QString stamp = text.mid(8);
+    EXPECT_EQ(stamp.size(), 12);
+    EXPECT_EQ(stamp[2], QLatin1Char(':'));
+    EXPECT_EQ(stamp[8], QLatin1Char('.'));
 }
 
 TEST(UiRuntimeWidget, TogglingTheSwitchWithNothingRunningIsHarmless) {

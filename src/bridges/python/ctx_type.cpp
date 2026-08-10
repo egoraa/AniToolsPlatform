@@ -182,7 +182,15 @@ PyType_Slot g_slots[] = {
 PyType_Spec g_spec = {"_atp.Ctx", static_cast<int>(sizeof(ctx_object)), 0, Py_TPFLAGS_DEFAULT, g_slots};
 
 PyModuleDef g_module_def = {
-    PyModuleDef_HEAD_INIT, "_atp", "Primitives of the AniToolsPlatform Python bridge.", -1, nullptr,
+    PyModuleDef_HEAD_INIT,
+    "_atp",
+    "Primitives of the AniToolsPlatform Python bridge.",
+    -1,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
 };
 
 }  // namespace

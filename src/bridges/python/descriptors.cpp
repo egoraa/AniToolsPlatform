@@ -8,6 +8,7 @@
 #include "instance.hpp"
 #include "interpreter.hpp"
 #include "module_slot.hpp"
+#include "self_module.hpp"
 
 namespace atp::bridge {
 namespace {
@@ -17,9 +18,16 @@ std::deque<module_slot>& storage() {
     return value;
 }
 
-std::vector<atp_module_desc>& batch() {
-    static std::vector<atp_module_desc> value;
+std::deque<std::vector<atp_module_desc>>& batches() {
+    static std::deque<std::vector<atp_module_desc>> value;
     return value;
+}
+
+std::vector<atp_module_desc>& batch() {
+    if (batches().empty()) {
+        batches().emplace_back();
+    }
+    return batches().back();
 }
 
 long long int_at(PyObject* sequence, Py_ssize_t index) {
@@ -143,11 +151,13 @@ void read_properties(module_slot& slot, PyObject* rows) {
 void build_one(PyObject* row) {
     module_slot& slot = storage().emplace_back();
     slot.name = text_of(PyDict_GetItemString(row, "name"));
+    slot.source = text_of(PyDict_GetItemString(row, "source"));
     slot.python_index = int_of(row, "index");
 
     atp_module_desc desc{};
     desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc));
     desc.name = slot.name.c_str();
+    desc.source = slot.source.empty() ? nullptr : slot.source.c_str();
     if (PyObject* version = PyDict_GetItemString(row, "version"); version != nullptr) {
         const Py_ssize_t parts = PySequence_Size(version);
         const Py_ssize_t used = parts > 4 ? 4 : parts;
@@ -180,8 +190,9 @@ PyObject* path_list() {
     if (list == nullptr) {
         return nullptr;
     }
-    for (const std::string& path : scan_paths()) {
-        PyObject* item = PyUnicode_FromStringAndSize(path.c_str(), static_cast<Py_ssize_t>(path.size()));
+    for (const std::filesystem::path& path : scan_paths()) {
+        const std::string text = to_utf8(path);
+        PyObject* item = PyUnicode_FromStringAndSize(text.c_str(), static_cast<Py_ssize_t>(text.size()));
         if (item != nullptr) {
             PyList_Append(list, item);
             Py_DECREF(item);
@@ -197,7 +208,7 @@ const std::vector<atp_module_desc>& last_batch() {
 }
 
 const std::vector<atp_module_desc>& discover() {
-    batch().clear();
+    batches().emplace_back();
     if (!interpreter_ready()) {
         return batch();
     }

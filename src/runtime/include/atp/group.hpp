@@ -417,8 +417,9 @@ class group : public module_base {
     void collect_logs(const std::string& prefix, std::vector<log_line>& out) {
         for (child& c : children_) {
             const std::string path = prefix.empty() ? c.name : prefix + "." + c.name;
-            c.host->ring().drain([&out, &path](log_level level, std::string_view text, bool truncated) {
-                out.push_back({path, level, std::string(text), truncated});
+            c.host->ring().drain([&out, &path](log_level level, std::string_view text, bool truncated,
+                                               std::chrono::system_clock::time_point at) {
+                out.push_back({path, level, std::string(text), truncated, at});
             });
             if (c.subgroup != nullptr) {
                 c.subgroup->collect_logs(path, out);

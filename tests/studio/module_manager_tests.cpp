@@ -145,6 +145,57 @@ TEST(StudioModuleManager, DescribeListsPropertyOptions) {
     EXPECT_TRUE(by_name("limit")->options.empty());
 }
 
+TEST(ModuleManager, ReloadPluginReadsTheFileAgainAndRegistersItExactlyOnce) {
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_TEST_PLUGIN);
+    ASSERT_NE(manager.registry().find("plugin_module"), nullptr);
+
+    EXPECT_TRUE(manager.reload_plugin(ATP_TEST_PLUGIN));
+
+    const std::string stem = std::filesystem::path(ATP_TEST_PLUGIN).stem().string();
+    const auto* info = find_plugin(manager, stem);
+    ASSERT_NE(info, nullptr);
+    EXPECT_TRUE(info->loaded);
+    EXPECT_EQ(info->modules.size(), 2u);
+    EXPECT_EQ(manager.plugins().size(), 1u);
+    EXPECT_EQ(manager.registry().versions("plugin_module").size(), 1u);
+    EXPECT_NE(manager.registry().find("plugin_module"), nullptr);
+}
+
+TEST(ModuleManager, UnloadPluginWithdrawsItsFactoriesAndItsRow) {
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_TEST_PLUGIN);
+    ASSERT_NE(manager.registry().find("plugin_module"), nullptr);
+
+    EXPECT_TRUE(manager.unload_plugin(ATP_TEST_PLUGIN));
+
+    EXPECT_TRUE(manager.plugins().empty());
+    EXPECT_EQ(manager.registry().find("plugin_module"), nullptr);
+    EXPECT_FALSE(manager.unload_plugin(ATP_TEST_PLUGIN));
+
+    manager.load_plugin(ATP_TEST_PLUGIN);
+    EXPECT_NE(manager.registry().find("plugin_module"), nullptr);
+}
+
+TEST(ModuleManager, ReloadPluginOfAFileNeverLoadedChangesNothing) {
+    atp::studio::module_manager manager;
+    EXPECT_FALSE(manager.reload_plugin(ATP_TEST_PLUGIN));
+    EXPECT_TRUE(manager.plugins().empty());
+    EXPECT_EQ(manager.registry().find("plugin_module"), nullptr);
+}
+
+TEST(ModuleManager, PluginPathCarriesTheExtensionWhicheverWayTheFileWasNamed) {
+    atp::studio::module_manager manager;
+    std::filesystem::path without = ATP_TEST_PLUGIN;
+    without.replace_extension();
+    manager.load_plugin(without);
+    manager.load_plugin(ATP_TEST_PLUGIN);
+
+    ASSERT_EQ(manager.plugins().size(), 1u);
+    EXPECT_EQ(manager.plugins().front().path.extension().string(), std::string(atp::plugin_extension));
+    EXPECT_TRUE(manager.plugins().front().loaded);
+}
+
 TEST(StudioModuleManager, DescribeListsProperties) {
     atp::module_factory<propertied_probe> factory("propertied_probe");
     const atp::studio::module_info info = atp::studio::module_manager::describe(factory);

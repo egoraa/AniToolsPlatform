@@ -57,6 +57,19 @@ enum class app_theme { system, light, dark };
 /// never touch projects.
 struct studio_settings {
     std::vector<std::string> search_dirs;
+
+    /// Command that opens a file for editing, `{file}` standing for the path. Empty means the
+    /// desktop's own association, which is the right default everywhere except that a `.py` is
+    /// commonly associated with the interpreter — so this exists to be set, not to be guessed.
+    std::string editor_command;
+
+    /// Language the new-module dialog offers first: the one used last. A key and not a guess, because
+    /// a person authoring in one language does it many times in a row, and the studio asking again
+    /// every time is the whole difference between a setting and a question. A value naming a language
+    /// this build does not have is left alone here and resolved by the dialog, so a profile written by
+    /// another build still opens.
+    std::string last_script_language = "python";
+
     std::vector<std::string> recent_projects;
     app_theme theme = app_theme::system;
     std::string style;
@@ -130,6 +143,12 @@ inline void note_recent(studio_settings& s, const std::filesystem::path& file) {
                 s.search_dirs.push_back(d.get<std::string>());
             }
         }
+        if (const auto it = doc.find("editor_command"); it != doc.end() && it->is_string()) {
+            s.editor_command = it->get<std::string>();
+        }
+        if (const auto it = doc.find("last_script_language"); it != doc.end() && it->is_string()) {
+            s.last_script_language = it->get<std::string>();
+        }
         for (const nlohmann::json& d : doc.value("recent_projects", nlohmann::json::array())) {
             if (d.is_string()) {
                 s.recent_projects.push_back(d.get<std::string>());
@@ -166,6 +185,8 @@ inline void save_settings(const studio_settings& s, const std::filesystem::path&
     std::filesystem::create_directories(file.parent_path());
     nlohmann::json doc;
     doc["search_dirs"] = s.search_dirs;
+    doc["editor_command"] = s.editor_command;
+    doc["last_script_language"] = s.last_script_language;
     doc["recent_projects"] = s.recent_projects;
     doc["theme"] = std::string(theme_name(s.theme));
     doc["style"] = s.style;

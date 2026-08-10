@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atp/console_encoding.hpp>
 #include <atp/mcp/catalog_tools.hpp>
 #include <atp/mcp/document_tools.hpp>
 #include <atp/mcp/execution_tools.hpp>
@@ -56,6 +57,7 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
+    const atp::console_utf8 console;
     std::optional<atp::mcp::options> args = atp::mcp::parse_options(argc, argv);
     if (!args) {
         std::cerr << atp::mcp::usage;

@@ -23,6 +23,7 @@
 #include <atp/studio/project_from_description.hpp>
 #include <atp/studio/remote_client.hpp>
 #include <atp/studio/remote_runtime.hpp>
+#include <atp/studio/script_environment.hpp>
 #include <atp/studio/session.hpp>
 #include <atp/studio/settings.hpp>
 #include <atp/version.hpp>
@@ -35,6 +36,12 @@ namespace atp::studio::ui {
 struct app_state {
     studio_settings settings;
     std::filesystem::path settings_file = default_settings_path();
+
+    /// Every language's scan-path variable as the studio was started with, read before anything sets
+    /// one. The studio prepends its own script directories to those values rather than replacing
+    /// them: a person working on scripts in their own repository launches the studio with a variable
+    /// already set, and losing it would make their modules vanish with no visible cause.
+    script_environment script_env;
     module_manager manager;
     project doc = project::create();
     std::optional<std::filesystem::path> doc_path;
@@ -185,6 +192,11 @@ struct ui_callbacks {
     std::function<void()> project_changed;
     std::function<void(const QString&)> error;
     std::function<void()> selection_changed;
+
+    /// Says one line in the Log at a chosen level. `error` is the older, level-less channel and stays
+    /// as it is; an action that reports its progress needs the level to be its own choice, because
+    /// "the file is written" and "the file could not be written" are not the same news.
+    std::function<void(const QString&, atp::log_level)> report;
 };
 
 }  // namespace atp::studio::ui

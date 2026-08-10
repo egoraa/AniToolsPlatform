@@ -56,6 +56,21 @@ TEST(ConfigValidator, VersionRules) {
     EXPECT_FALSE(check(doc).empty());
 }
 
+TEST(ConfigValidator, AcceptsEveryMinorUpToTheSupportedOne) {
+    json doc = valid_config();
+    doc["version"] = "3.0";
+    EXPECT_TRUE(check(doc).empty());
+
+    doc["version"] = "3.1";
+    EXPECT_TRUE(check(doc).empty());
+
+    doc["version"] = "3.2";
+    EXPECT_TRUE(check(doc).empty());
+
+    doc["version"] = "3.3";
+    EXPECT_FALSE(check(doc).empty());
+}
+
 TEST(ConfigValidator, RejectsTheRemovedReplayKey) {
     const json doc = json::parse(R"({
         "version": "3.0",
@@ -73,7 +88,7 @@ TEST(ConfigValidator, RejectsTheSupersededSchemaVersion) {
     const json doc = json::parse(R"({"version": "2.0", "pipeline": {"modules": []}})");
     const auto errors = check(doc);
     ASSERT_FALSE(errors.empty());
-    EXPECT_NE(errors[0].find("3.0"), std::string::npos);
+    EXPECT_NE(errors[0].find(atp::runtime::config_schema_version.to_string()), std::string::npos);
 }
 
 TEST(ConfigValidator, UnknownKeysRejectedWithPath) {
@@ -177,6 +192,87 @@ TEST(ConfigValidator, AggregatesAllErrors) {
     doc["threads"][0]["mode"] = "warp";
     doc["assign"]["left"] = "nowhere";
     EXPECT_GE(check(doc).size(), 3u);
+}
+
+TEST(ConfigValidator, ConfigMustBeObjectOrString) {
+    const json doc = json::parse(R"({
+        "version": "3.2",
+        "pipeline": {"modules": [{"module": "m", "config": [1, 2]}]}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("must be an object or a string"), std::string::npos);
+}
+
+TEST(ConfigValidator, ConfigReferenceMustExist) {
+    const json doc = json::parse(R"({
+        "version": "3.2",
+        "configs": {"rig": {}},
+        "pipeline": {"modules": [{"module": "m", "config": "absent"}]}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("absent"), std::string::npos);
+}
+
+TEST(ConfigValidator, UnknownConfigPrefixIsNamed) {
+    const json doc = json::parse(R"({
+        "version": "3.2",
+        "pipeline": {"modules": [{"module": "m", "config": "file:rig.json"}]}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("file"), std::string::npos);
+}
+
+TEST(ConfigValidator, ConfigsKeyMayNotContainAColon) {
+    const json doc = json::parse(R"({
+        "version": "3.2",
+        "configs": {"a:b": {}},
+        "pipeline": {"modules": []}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("a:b"), std::string::npos);
+}
+
+TEST(ConfigValidator, ConfigsContentIsNotSchemaChecked) {
+    const json doc = json::parse(R"({
+        "version": "3.2",
+        "configs": {"rig": {"anything": [1, "two", {"three": null}]}},
+        "pipeline": {"modules": [{"module": "m", "config": "rig"}]}
+    })");
+    EXPECT_TRUE(check(doc).empty());
+}
+
+TEST(ConfigValidator, ConfigsEntryMustBeAnObject) {
+    const json doc = json::parse(R"({
+        "version": "3.2",
+        "configs": {"rig": [1, 2]},
+        "pipeline": {"modules": []}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("rig"), std::string::npos);
+}
+
+TEST(ConfigValidator, BrokenConfigsBlockDoesNotAlsoBlameEveryReference) {
+    const json doc = json::parse(R"({
+        "version": "3.2",
+        "configs": [],
+        "pipeline": {"modules": [{"module": "m", "config": "rig"}]}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("configs"), std::string::npos);
+}
+
+TEST(ConfigValidator, SchemaThreeOneStillLoads) {
+    const json doc = json::parse(R"({
+        "version": "3.1",
+        "pipeline": {"modules": [{"module": "m"}]}
+    })");
+    EXPECT_TRUE(check(doc).empty());
 }
 
 }  // namespace

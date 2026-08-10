@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "self_module.hpp"
 
+#include <string>
+
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -8,6 +10,11 @@
 #endif
 
 namespace atp::bridge {
+
+std::string to_utf8(const std::filesystem::path& path) {
+    const std::u8string text = path.u8string();
+    return std::string(reinterpret_cast<const char*>(text.data()), text.size());
+}
 namespace {
 
 #if defined(_WIN32)

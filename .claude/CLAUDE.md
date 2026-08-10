@@ -89,6 +89,23 @@ its first `iterate` (no single-threaded test can see this), and the library pins
 process because the interpreter is never finalised while `module_loader` would otherwise unload the
 code Python still calls. Rationale in full: `docs/architecture.md`, section «Мост для Python».
 
+`src/bridges/lua/` is the third consumer of the C path, and it **vendors** its interpreter:
+`cmake/BuildLua.cmake` fetches PUC-Lua and links it statically, so unlike the Python bridge it has no
+runtime that can be missing — `ATP_BUILD_LUA_BRIDGE` (ON) only says whether this build wants it, and
+OFF skips the download too. Three things about it are load-bearing. It is **compiled as C++**, because
+Lua built as C raises errors with `longjmp` and every callback here is a frame with C++ destructors in
+it — hence also the rule that **no frame between `lua_pcall` and `luaL_error` may own an object with a
+non-trivial destructor**, and hence `lua_api.hpp` including the headers without `extern "C"`. Each
+module instance owns its **own `lua_State`**, so instances run in parallel and there is no
+`PyEval_SaveThread` trap, no `pin_self`, and no "one bridge per process" — the price is that the
+script's top level runs per instance and its values are not shared. And since the script is therefore
+read twice, `atp._instantiate` is handed the port counts the host was promised and refuses a file
+edited in between. The author package is one file, `lua/atp.lua` next to the library (`ATP_LUA_PATH`
+adds scan directories); a module may not be named `atp`, and the directory walk skips that file. The
+declaration order that the C ABI addresses ports by is kept by an `__newindex` proxy, because `pairs`
+has no order — do not "simplify" it to a plain table. Rationale in full: `docs/architecture.md`,
+section «Мост для Lua».
+
 `templates/plugin_rust/` is the second out-of-tree project and the fixture of the `rust plugin` CI job: a
 `cdylib` built by `cargo build` alone, with no dependencies and no CMake, whose `src/abi.rs` is a
 **hand-written mirror** of `include/atp/plugin_c.h`. Two consequences. Changing the layout of anything in
@@ -122,6 +139,89 @@ config's own directory — and that layout is identical in the build tree and in
 name coming from `ATP_PLUGIN_DIRNAME` in the root `CMakeLists.txt`. `atp_studio_lib` is the headless studio core (`src/studio`, included as `<atp/studio/...>`), also
 linked into `atp_tests`. The GUI is `atp_studio`: Qt 6 Widgets, panels as private hpp/cpp pairs in
 `src/studio/ui/` (namespace `atp::studio::ui`, no Q_OBJECT/moc), custom QGraphicsScene canvas.
+Studio can **author** script modules, not just host them, and it does so for **every language in
+`studio/languages.hpp`** — that list is the one place a language is added. A language is a value,
+`script_language` (`studio/script_language.hpp`): stem of its bridge, scripts subdirectory, package
+entry, file extension, name prefix, scan-path variable, plus three function pointers (name validity,
+skeleton, dialog note). Everything else walks the list rather than naming a language, so "we support
+two" does not mean two sets of rules kept in step by hand.
+
+`File → New module…` asks for the language first, then provisions the chosen folder into the shape an
+installation has — bridge beside it, package and scripts in the language's own subdirectory
+(`provision_folder` in `studio/script_modules.hpp`: the bridge file is only created, the package is
+**refreshed** when the platform's is newer, freshness measured over the language's own sources alone
+because a `__pycache__` written on first import would otherwise make a stale copy look new, and the
+copy source is the studio's own `plugins/` before any loaded bridge, since a loaded one is often the
+folder's own copy) — writes the skeleton there, makes the folder a **module search directory** and then
+either reloads a bridge already loaded (`module_manager::reload_plugin`) or scans so the folder's own
+copy loads. A folder may carry **two** languages at once and is still one search directory.
+
+One field carries the whole difference between the languages: **`missing_dependency_hint`** is empty
+for Lua, because the interpreter is inside the plugin file and there is no absent runtime to point at.
+
+**`keep_one_bridge` applies to every language**, and it was briefly a per-language flag by mistake —
+worth knowing, because the mistake is easy to repeat. One registry plus one search-directory list means
+two copies of *any* bridge discover the same scripts and register the same names; `module_registrar::add`
+refuses the duplicate, `module_loader` withdraws the file, and a permanent red "failed" row is left in
+the dock. CPython has a stronger reason on top — `Ctx` lives in a per-DLL static that only the copy
+winning the `_atp` inittab race fills, so its losers could not create modules anyway — but a stronger
+reason for the same rule is not a different rule. Every scan is therefore followed by `keep_one_bridge`
+for each language; it drops the extras through `module_manager::unload_plugin` (the pair of
+`load_plugin`) and names them in the Log, keeping only a failed bridge that has none loaded beside it.
+
+A module may not be named `atp` in either language, by two different mechanisms — `atp.py` beside the
+`atp` package replaces it in `sys.modules`, and `atp.lua` *is* the Lua package file. The name checks
+differ otherwise and deliberately: Python refuses `_1` because the class it would derive is `1`, and
+Lua derives nothing and accepts it.
+
+**A folder's own bridge is never replaced** (a loaded library is locked), so one provisioned before an
+update keeps loading the old bridge with no error of its own — `stale_loaded_bridge` is therefore asked
+at startup and at every rescan, per language, and the warning names both files; when a module folder
+behaves as if the platform were older, that copy is the first suspect. The build-tree equivalent is
+forgetting `atp_studio_python_assets` or `atp_studio_lua_assets`, which leaves `plugins/` beside
+`atp_studio` stale — and `find_bridge_source` looks exactly there first. `reload_plugin` is generic (a
+rebuilt C++ plugin goes the same way) but **forbidden while the pipeline runs**, since it unregisters
+factories the live tree is holding; the window guards that, the core does not. The plugins dock's
+rescan button calls `module_manager::reload_all` (every loaded file re-read) **before** `rescan`,
+because `rescan` leaves a loaded plugin alone by contract and a bridge reads its scripts only at load —
+the two together meant an edited script never reached the palette. There is **no `script_dirs`
+setting**: what each bridge is told to scan is derived from the search directories
+(`derive_script_dirs`, once per language) and prepended to that language's inherited variable, because
+a module folder *is* a plugin folder and two lists would show it twice and then drift; the whole set is
+captured and rewritten by `script_environment`, which must be applied for **all** languages at once —
+a missed one shows up as modules silently absent from the palette. Settings keys are `editor_command`
+(`{file}` substituted) and `last_script_language`.
+
+**The whole tree compiles as UTF-8**, source and execution charset alike: the root `CMakeLists.txt`
+adds `/utf-8` for MSVC before the subdirectories, so the vendored dependencies get it too, and
+`atp_platform` carries it as an INTERFACE option so an out-of-tree plugin is compiled the same way —
+which is what makes `plugin_c.h`'s "every string crossing this boundary is UTF-8" true for someone
+else's build. gcc and clang need nothing. It is a correctness switch, not tidiness: without it MSVC
+reads a source through the process code page and encodes narrow literals back through it, so the bytes
+of a literal depend on the machine, and the MCP tool descriptions — which contain em dashes and travel
+as JSON, where nlohmann's `dump` is strict about UTF-8 and throws — would stop being serialisable on a
+machine whose page does not round-trip them. Printing that UTF-8 is a second question, and `atp::console_utf8`
+(`runtime/console_encoding.hpp`) answers it: both hosts raise one at the top of `main`, which puts a
+Windows console into UTF-8 and **puts it back in the destructor** — the page belongs to the window and
+outlives the process, so leaving it changed would reach every later program in that shell. A process
+with no console, or one whose stream is redirected, is untouched, which is why `atp_mcp` may use it
+without any risk to the protocol on its pipe. `tests/support/source_encoding_tests.cpp` guards the
+setting with the one assertion that can: a universal character name (`"—"`) is one byte under a
+code page and three under UTF-8. **A plain em dash literal guards nothing** — its UTF-8 bytes survive
+a round trip through CP1252 — and a test written that way is green while the setting is wrong, which
+is exactly how several non-ASCII tests here were vacuous before.
+
+**Both bridges carry paths as UTF-8 and never as `path::string()`.** On Windows that conversion goes
+through the process code page and **throws** for anything it cannot represent, and the throw escapes
+`atp_module_count` — an `extern "C"` entry point `plugin_c.h` requires to be exception-free — so a
+module folder named in Cyrillic used to take the whole bridge down instead of failing to list one
+script. The scan variables are read wide (`_wdupenv_s`) for the same reason: a narrow read replaces
+what the page cannot encode and the directory is then silently absent, with no error anywhere. The Lua
+bridge additionally reads scripts itself and loads them with `luaL_loadbuffer` rather than
+`luaL_loadfile`, which would `fopen` a narrow name, and preloads its `atp` package into
+`package.loaded` so `require` never depends on that path either. `plugin_c.h` states the UTF-8 rule;
+the regression tests build their non-ASCII names from numeric code points, because the build sets no
+`/utf-8` and a literal in the source would be read as the code page and quietly test nothing.
 
 `atp_mcp` is a headless MCP server over stdio on top of the studio core — details in `src/mcp/CLAUDE.md`.
 Install, packaging and CPack rules are in `cmake/CLAUDE.md`.
@@ -166,8 +266,8 @@ Full architecture digest with rationale: `docs/architecture.md`. Layer map:
 - `service_directory` is the only service: publish typed interfaces in `initialize`, look peers up in `start` — that split makes module init order irrelevant; remove publications in `stop`. Type safety without `dynamic_cast`: `void*` + `type_index` equality guard.
 - Per-instance settings are **properties**, not creation arguments — factories bind constructor config at registration, so all instances of one factory are identical and different configs are separate registrations.
 - A plugin-created module pins its DLL against unload via the `shared_ptr` in `module_deleter` (it may outlive the loader).
-- Plugin contract (`plugin.hpp`): C symbols `atp_abi_version()` and `atp_register_modules(atp::module_registrar&)`; `plugin_abi` is currently **10** — bump it on any ABI-incompatible change to what a plugin sees (`module_base` virtuals, io types, factories). Host and plugins must share one toolchain and C++ runtime. `atp_build_id()` is an optional third symbol carrying the toolchain and standard-library identity, and the loader refuses a mismatch — it catches what the ABI number cannot (a Debug host with a Release plugin differs in `_ITERATOR_DEBUG_LEVEL`, i.e. container layout, i.e. memory corruption rather than a failed load). Its absence is tolerated silently, so adding it was not a bump; `ATP_PLUGIN_HANDSHAKE()` emits both.
-- **Foreign-language plugins** (`include/atp/plugin_c.h`, host adapter in `src/runtime/include/atp/c_module.hpp`): a second registration path, purely additive, `ATP_C_ABI` versioned separately from `plugin_abi` and expected to stay at **1** because it grows through `struct_size` fields instead. Three pure C symbols (`atp_c_abi_version`/`atp_module_count`/`atp_module_desc_at`, pulled not pushed), POD descriptors declaring ports and properties, and function pointers for the lifecycle; the host builds real `input<T>`/`output<T>`/`property<T>` from an `atp_kind`, so a foreign module connects to a C++ one with no adapter in the config. **Every C++ template, allocation and exception stays host-side** — that is what lets the plugin be a Rust `cdylib` and why `atp_build_id` is not checked there. Constraints worth knowing before touching it: the payload type set is closed (`blob` = `io::blob` is the escape hatch and must stay a real C++ type), ports are declared statically because the builder connects before it initializes, no allocation crosses the boundary in either direction, the boundary is exception-free both ways (`set_error` + a return code becomes a C++ exception host-side, and a host-side failure inside a callback is stored and rethrown after `iterate` so the plugin cannot swallow it), and the adapter stores `module_host*` rather than `module_context*` because `group::initialize` builds each child's context on its own stack. Rationale in full: `docs/architecture.md`, section "C-путь".
+- Plugin contract (`plugin.hpp`): C symbols `atp_abi_version()` and `atp_register_modules(atp::module_registrar&)`; `plugin_abi` is currently **11** — bump it on any ABI-incompatible change to what a plugin sees (`module_base` virtuals, io types, factories). Host and plugins must share one toolchain and C++ runtime. `atp_build_id()` is an optional third symbol carrying the toolchain and standard-library identity, and the loader refuses a mismatch — it catches what the ABI number cannot (a Debug host with a Release plugin differs in `_ITERATOR_DEBUG_LEVEL`, i.e. container layout, i.e. memory corruption rather than a failed load). Its absence is tolerated silently, so adding it was not a bump; `ATP_PLUGIN_HANDSHAKE()` emits both.
+- **Foreign-language plugins** (`include/atp/plugin_c.h`, host adapter in `src/runtime/include/atp/c_module.hpp`): a second registration path, purely additive, `ATP_C_ABI` versioned separately from `plugin_abi` and expected to stay at **1** because it grows through `struct_size` fields instead. Adding one means: append to the struct, read it only behind a size check (`detail::c_desc_source` is the pattern), update `tests/platform/plugin_c_layout_tests.cpp` **and** the hand-written Rust mirror — and never move the acceptance floor, which is the frozen `ATP_MODULE_DESC_SIZE_V1` and not the current `sizeof`. The first such field is `source`, the file a module is declared in (the Python bridge's script); it travels beside the registration in `registered_module` rather than in the factory, because a factory is a plugin ABI type, and reaches `module_info::source` in `load_plugin`, not in `describe`. Three pure C symbols (`atp_c_abi_version`/`atp_module_count`/`atp_module_desc_at`, pulled not pushed), POD descriptors declaring ports and properties, and function pointers for the lifecycle; the host builds real `input<T>`/`output<T>`/`property<T>` from an `atp_kind`, so a foreign module connects to a C++ one with no adapter in the config. **Every C++ template, allocation and exception stays host-side** — that is what lets the plugin be a Rust `cdylib` and why `atp_build_id` is not checked there. Constraints worth knowing before touching it: the payload type set is closed (`blob` = `io::blob` is the escape hatch and must stay a real C++ type), ports are declared statically because the builder connects before it initializes, no allocation crosses the boundary in either direction, the boundary is exception-free both ways (`set_error` + a return code becomes a C++ exception host-side, and a host-side failure inside a callback is stored and rethrown after `iterate` so the plugin cannot swallow it), and the adapter stores `module_host*` rather than `module_context*` because `group::initialize` builds each child's context on its own stack. Rationale in full: `docs/architecture.md`, section "C-путь".
 
 **Execution platform** (`src/runtime/include/atp/`, target `atp_runtime`): `group : module_base` is an owning **composite** whose lifecycle cascades recursively in insertion order (`initialize` — local fail-fast with reverse-order stop of the initialized; `stop` — reverse order, continues on error, rethrows the first; `iterate` — busy-wins aggregation). Group ports are **aliases** to child ports (path form `"child.port"` only). A group is not a unit of execution and not thread-safe. `pipeline` is the aggregate root; `pipeline_runner` owns the named threads. Contracts:
 
@@ -175,4 +275,34 @@ Full architecture digest with rationale: `docs/architecture.md`. Layer map:
 - Errors: first one wins and stops the whole pipeline; `wait()` blocks until the first error, shuts down and rethrows (also after a prior `stop()`; stored until the next `start()`). `stop()` is idempotent and never throws.
 - All runner control is **owner-thread-only** — the stop/wait race is excluded by contract, not by synchronization.
 
-**Config and hosts, property paths**: config schema is **3.0** (`runtime::config_schema_version`) — a group's children live under `"modules"`, and a module node carries `"properties": {"name": scalar}`. The pre-2.0 `children` and `params` keys and the pre-3.0 `replay` flag of a connection are now **rejected as unknown** (hence the major bumps); nesting under `properties` is a validator error. The model stores values as JSON nodes, not strings, so `encode` keeps `5` distinct from `"5"`. `runtime/property_override.hpp` implements the edit-by-path vocabulary — `parse_property_override` splits "path.prop=value" on the **first** `=`, then the **last** `.` to the left — used by `atp_app -p path.prop=value` (repeatable, applied before `runner.start`, so modules see the values already in `initialize`) and by studio's `session::set_property`. In the studio GUI only the project **structure** is read-only while running: property rows stay editable and saving is allowed, with `sync_persistent_properties` pulling live persistent values into the project on the fly and dropping those equal to the default. Naming trap: the edited object is `atp::studio::project` (`studio/project.hpp`, renamed from `document`; locals are `proj`), but the **MCP wire vocabulary stays "document"** — tools `new_document`/`open_document`/`save_document`/`get_document`, the `"document"` result key, the `atp://document` resource and `mcp/document_tools.hpp` all keep their names, while `workspace` exposes the object as `project()` with its path as `project_path()`/`project_dir()`.
+**Config and hosts, property paths**: config schema is **3.2** (`runtime::config_schema_version`) — a group's children live under `"modules"`, and a module node carries `"properties": {"name": scalar}` and, since 3.2, `"config"`. An entry of `"plugins"` may name a **directory** (3.1, minor because the key's shape did not change): the plugins directly in it are loaded, non-recursively and sorted by file name, deduplicated by `weakly_canonical` against the rest of the list. A file there that exports neither entry point throws `atp::not_a_plugin` and is **skipped** when it came from a directory; every other failure — including a file that would not open at all — stops the host, and a file named explicitly is not forgiven anything. The pre-2.0 `children` and `params` keys and the pre-3.0 `replay` flag of a connection are now **rejected as unknown** (hence the major bumps); nesting under `properties` is a validator error. The model stores values as JSON nodes, not strings, so `encode` keeps `5` distinct from `"5"`. `runtime/property_override.hpp` implements the edit-by-path vocabulary — `parse_property_override` splits "path.prop=value" on the **first** `=`, then the **last** `.` to the left — used by `atp_app -p path.prop=value` (repeatable, applied before `runner.start`, so modules see the values already in `initialize`) and by studio's `session::set_property`. In the studio GUI only the project **structure** is read-only while running: property rows stay editable and saving is allowed, with `sync_persistent_properties` pulling live persistent values into the project on the fly and dropping those equal to the default.
+
+**Module config** (`include/atp/config_value.hpp`, `plugin_abi` 11): the third declared entity beside
+ports and properties — a structured setting reaching the module in its **constructor**, that is before
+both `connect` and `initialize`, for what a property cannot express (a list, a table, a nested object)
+and what is not edited live. `module_factory_base::create` therefore takes a `const config_value&`;
+`module_registry::create` keeps overloads without one, `module_factory` deliberately does not, and its
+class constraint is a **disjunction** because a module whose only constructor takes a config is
+constructible from no arguments at all. A module joins the channel only by declaring such a
+constructor, so nothing existing changed. `atp::config_value` is a closed seven-form variant with **no
+parser and no `dump()`** — naming `nlohmann::json` in an ABI signature would drag it into every plugin
+— and the conversion lives host-side in `runtime/config_value_json.hpp`. An object keeps insertion
+order for reproducible traversal, **not** the order written in the file: a document is read as
+`nlohmann::json`, whose object sorts keys. In the schema a module's `"config"` is either an object in
+place or a **string, always a reference** (parsed on the first colon; no prefix means the document's
+top-level `"configs"`, any prefix is a validator error naming it), an entry of `"configs"` must itself
+be an object so a config's root is an object or `null` whichever spelling was used, and the model stores
+both **verbatim** so `encode(decode(doc)) == doc` and a reference is never expanded on save —
+resolution happens in `pipeline_builder`. The C path grew **seven callbacks appended to `atp_api`
+behind `struct_size`, with no `ATP_C_ABI` bump**; two traps there: config text is valid for the
+module's whole lifetime (stronger than a port's, since it points into the host's tree rather than the
+shared scratch), and the boolean `guarded` must not be used for them — it reduces its body to 1 or 0,
+which turns `ATP_CONFIG_OBJECT` into `ATP_CONFIG_BOOL` silently, hence `guarded_value<TRet>` beside it.
+Both bridges materialise the tree once per instance (`dict`/`list`, Lua table); Python binds `config`
+**before `__init__`** so a constructor can read it, and a Lua table loses key order, which nothing
+addresses by position. In studio the config is a **JSON area in the inspector, not a property row**,
+read-only while the pipeline runs like the rest of the structure (via `state_.view->running()`, since
+`project` knows nothing about a runner), and `project::set_shared_config` exists because otherwise the
+reference form would be unreachable from the GUI and a saved reference would not validate on reopening.
+
+Naming trap: the edited object is `atp::studio::project` (`studio/project.hpp`, renamed from `document`; locals are `proj`), but the **MCP wire vocabulary stays "document"** — tools `new_document`/`open_document`/`save_document`/`get_document`, the `"document"` result key, the `atp://document` resource and `mcp/document_tools.hpp` all keep their names, while `workspace` exposes the object as `project()` with its path as `project_path()`/`project_dir()`.

@@ -1,17 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "panels/manager_widget.hpp"
 
+#include "model/editor.hpp"
+
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
+#include <ranges>
+#include <string>
 
 #include <QAction>
 #include <QBrush>
 #include <QClipboard>
 #include <QColor>
+#include <QCoreApplication>
 #include <QFileDialog>
 #include <QGuiApplication>
+#include <QHeaderView>
 #include <QMenu>
 #include <QVBoxLayout>
+
+#include <atp/studio/languages.hpp>
+#include <atp/studio/script_modules.hpp>
 
 namespace atp::studio::ui {
 
@@ -27,7 +38,7 @@ manager_widget::manager_widget(app_state& state, ui_callbacks& callbacks, QWidge
     const style::button_bar bar = style::make_button_bar(dirs.box);
     auto* add = style::tool_button(style::glyph::add, "add a search directory", bar.box);
     auto* remove = style::tool_button(style::glyph::drop, "drop the selected directory", bar.box);
-    auto* rescan = style::tool_button(style::glyph::rescan, "scan the directories again", bar.box);
+    auto* rescan = style::tool_button(style::glyph::rescan, "read the plugins again and scan the directories", bar.box);
     bar.row->addWidget(add);
     bar.row->addWidget(remove);
     bar.row->addWidget(rescan);
@@ -35,9 +46,11 @@ manager_widget::manager_widget(app_state& state, ui_callbacks& callbacks, QWidge
     dirs.form->addRow(bar.box);
     layout->addWidget(dirs.box);
 
-    const style::section found = style::make_section("plugins", this);
+    const style::section found = style::make_section("found plugins", this);
     plugins_ = new QTreeWidget(found.box);
     plugins_->setHeaderLabels({"plugin", "status"});
+    plugins_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    plugins_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     style::embed_tree(plugins_);
     plugins_->setContextMenuPolicy(Qt::CustomContextMenu);
     QObject::connect(plugins_, &QTreeWidget::customContextMenuRequested, this,
@@ -52,9 +65,7 @@ manager_widget::manager_widget(app_state& state, ui_callbacks& callbacks, QWidge
         }
         state_.manager.add_search_dir(std::filesystem::path(dir.toStdWString()));
         sync_settings();
-        state_.manager.rescan();
-        state_.invalidate_descriptions();
-        callbacks_.project_changed();
+        scan();
     });
     QObject::connect(remove, &QToolButton::clicked, this, [this] {
         const int row = dirs_->currentRow();
@@ -65,11 +76,32 @@ manager_widget::manager_widget(app_state& state, ui_callbacks& callbacks, QWidge
         sync_settings();
         callbacks_.project_changed();
     });
-    QObject::connect(rescan, &QToolButton::clicked, this, [this] {
-        state_.manager.rescan();
-        state_.invalidate_descriptions();
-        callbacks_.project_changed();
-    });
+    QObject::connect(rescan, &QToolButton::clicked, this, [this] { scan(); });
+}
+
+void manager_widget::scan() {
+    if (state_.view->running()) {
+        callbacks_.report(QStringLiteral("plugins already loaded were left as they are: re-reading one would "
+                                         "unregister factories the running tree is holding"),
+                          atp::log_level::warning);
+    } else {
+        state_.manager.reload_all();
+    }
+    state_.manager.rescan();
+    const std::filesystem::path exe_dir(QCoreApplication::applicationDirPath().toStdWString());
+    for (const studio::script_language& lang : studio::languages()) {
+        for (const std::filesystem::path& dropped : keep_one_bridge(state_.manager, lang)) {
+            callbacks_.report(QString::fromStdString(dropped_bridge_note(dropped, lang)), atp::log_level::info);
+        }
+        const studio::bridge_source ours = studio::find_bridge_source(state_.manager, exe_dir, lang);
+        if (const std::optional<std::filesystem::path> stale =
+                studio::stale_loaded_bridge(state_.manager, ours, lang)) {
+            callbacks_.report(QString::fromStdString(studio::stale_bridge_note(*stale, ours.bridge)),
+                              atp::log_level::warning);
+        }
+    }
+    state_.invalidate_descriptions();
+    callbacks_.project_changed();
 }
 
 void manager_widget::refresh() {
@@ -95,6 +127,11 @@ void manager_widget::refresh() {
                 if (m.broken) {
                     child->setToolTip(1, QString::fromStdString(m.error));
                 }
+                if (!m.source.empty()) {
+                    const QString source = QString::fromStdString(m.source);
+                    child->setData(0, path_role, source);
+                    child->setToolTip(0, source);
+                }
             }
         } else {
             item->setText(1, "failed");
@@ -107,15 +144,27 @@ void manager_widget::refresh() {
 
 void manager_widget::show_plugin_menu(const QPoint& pos, const QPoint& global) {
     QTreeWidgetItem* item = plugins_->itemAt(pos);
-    if (item == nullptr || item->parent() != nullptr) {
+    if (item == nullptr) {
+        return;
+    }
+    const QString path = item->data(0, path_role).toString();
+    if (path.isEmpty()) {
         return;
     }
     plugins_->setCurrentItem(item);
 
     QMenu menu;
+    QAction* open = item->parent() == nullptr ? nullptr : menu.addAction(QStringLiteral("Open in editor"));
     QAction* copy = menu.addAction(QStringLiteral("Copy path"));
-    if (menu.exec(global) == copy) {
-        QGuiApplication::clipboard()->setText(item->data(0, path_role).toString());
+    QAction* chosen = menu.exec(global);
+    if (chosen == copy) {
+        QGuiApplication::clipboard()->setText(path);
+    } else if (chosen != nullptr && chosen == open) {
+        const std::filesystem::path file(path.toStdWString());
+        if (!open_in_editor(QString::fromStdString(state_.settings.editor_command), file)) {
+            callbacks_.report(QString("could not open an editor for %1; open it by hand").arg(path),
+                              atp::log_level::warning);
+        }
     }
 }
 
@@ -124,6 +173,7 @@ void manager_widget::sync_settings() {
     for (const auto& d : state_.manager.search_dirs()) {
         state_.settings.search_dirs.push_back(d.string());
     }
+    state_.script_env.apply(state_.manager.search_dirs());
     save_settings(state_.settings, state_.settings_file);
 }
 

@@ -91,4 +91,70 @@ bool from_python(atp_kind kind, PyObject* object, atp_value& out, std::string& s
     return false;
 }
 
+PyObject* config_to_python(const atp_api& api, atp_ctx* ctx, std::uint32_t node) {
+    if (api.struct_size < sizeof(atp_api)) {
+        PyErr_SetString(PyExc_RuntimeError, "the host is older than the config accessors");
+        return nullptr;
+    }
+    switch (api.config_kind(ctx, node)) {
+        case ATP_CONFIG_NULL:
+            Py_RETURN_NONE;
+        case ATP_CONFIG_ARRAY: {
+            const std::uint32_t count = api.config_size(ctx, node);
+            PyObject* list = PyList_New(static_cast<Py_ssize_t>(count));
+            if (list == nullptr) {
+                return nullptr;
+            }
+            for (std::uint32_t i = 0; i < count; ++i) {
+                PyObject* item = config_to_python(api, ctx, api.config_child_at(ctx, node, i));
+                if (item == nullptr) {
+                    Py_DECREF(list);
+                    return nullptr;
+                }
+                if (PyList_SetItem(list, static_cast<Py_ssize_t>(i), item) != 0) {
+                    Py_DECREF(list);
+                    return nullptr;
+                }
+            }
+            return list;
+        }
+        case ATP_CONFIG_OBJECT: {
+            const std::uint32_t count = api.config_size(ctx, node);
+            PyObject* dict = PyDict_New();
+            if (dict == nullptr) {
+                return nullptr;
+            }
+            for (std::uint32_t i = 0; i < count; ++i) {
+                const char* key = nullptr;
+                std::size_t length = 0;
+                if (api.config_key_at(ctx, node, i, &key, &length) == 0) {
+                    Py_DECREF(dict);
+                    PyErr_SetString(PyExc_RuntimeError, "a config entry lost its key");
+                    return nullptr;
+                }
+                PyObject* value = config_to_python(api, ctx, api.config_child_at(ctx, node, i));
+                if (value == nullptr) {
+                    Py_DECREF(dict);
+                    return nullptr;
+                }
+                const int stored = PyDict_SetItemString(dict, std::string(key, length).c_str(), value);
+                Py_DECREF(value);
+                if (stored != 0) {
+                    Py_DECREF(dict);
+                    return nullptr;
+                }
+            }
+            return dict;
+        }
+        default:
+            break;
+    }
+    atp_value scalar;
+    if (api.config_value_of(ctx, node, &scalar) == 0) {
+        PyErr_SetString(PyExc_RuntimeError, "a config value could not be read");
+        return nullptr;
+    }
+    return to_python(scalar);
+}
+
 }  // namespace atp::bridge

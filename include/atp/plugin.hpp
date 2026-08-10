@@ -19,13 +19,20 @@ namespace atp {
 /// carries a module_host next to the services, which is where a module logs and wakes its thread, and
 /// an output no longer caches the value it wrote, so peek() and the replay connect are gone;
 /// 10 — every input counts what it received and lost (input_base::stats()) and a queueing one takes
-/// a capacity with an overflow policy instead of growing without a limit.
+/// a capacity with an overflow policy instead of growing without a limit; 11 — create() takes a
+/// config_value.
+///
+/// 11 is not a return of 6, which is worth spelling out or the history reads as a circle. What 6
+/// carried was per-instance *scalars* as a string, and 8 replaced them with properties for good
+/// reason: a property shows up in the inspector, is edited live and has a codec to text and back.
+/// None of that helps a setting which is not a scalar, is needed before initialize and is never
+/// edited live — the niche 8 left open and 11 fills, with a structured value instead of a string.
 ///
 /// Bumping this number is also a change to templates/plugin/CMakeLists.txt, which names the ABI it
 /// was written for and is meant to stop configuring until the plugin there has been looked at. CMake
 /// reads the value below out of this file (cmake/Install.cmake) to export it as a package constant,
 /// so the line must stay in this exact shape.
-inline constexpr unsigned plugin_abi = 10;
+inline constexpr unsigned plugin_abi = 11;
 
 /// The plugin contract is two C symbols:
 ///

@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <functional>
 #include <optional>
 #include <string>
@@ -62,12 +63,35 @@ using log_source = std::function<std::vector<log_line>()>;
     return std::nullopt;
 }
 
-/// One line as a person reads it: "[warning] stage.counter: device reconnected". A truncated
-/// message ends in an ellipsis, because a loss that is invisible is worse than the loss itself.
+/// The moment as a person reads it: "14:23:05.123", local time to the millisecond.
+///
+/// No date, because a log is read within the day it was written and a date would cost width on
+/// every single line; milliseconds, because the drain that carries the line to a console or a dock
+/// runs tens of times a second and a finer figure would say more than the reader can use — the
+/// order inside one burst is already faithful, the ring hands its lines over oldest first.
+///
+/// A machine with no time zone database (a bare container, typically) makes the conversion throw;
+/// the stamp then falls back to UTC rather than taking the whole log down with it, since a
+/// formatter that throws while something is being reported destroys the report as well.
+/// @param at the moment, as recorded by the writing thread
+/// @return the rendered stamp
+[[nodiscard]] inline std::string format_log_time(std::chrono::system_clock::time_point at) {
+    const auto stamp = std::chrono::floor<std::chrono::milliseconds>(at);
+    try {
+        return std::format("{:%H:%M:%S}", std::chrono::zoned_time(std::chrono::current_zone(), stamp));
+    } catch (...) {
+        return std::format("{:%H:%M:%S}", stamp);
+    }
+}
+
+/// One line as a person reads it: "14:23:05.123 [warning] stage.counter: device reconnected". A
+/// truncated message ends in an ellipsis, because a loss that is invisible is worse than the loss
+/// itself.
 /// @param line the drained record
 /// @return the rendered line, without a trailing newline
 [[nodiscard]] inline std::string format_log_line(const log_line& line) {
-    std::string text = "[";
+    std::string text = format_log_time(line.at);
+    text += " [";
     text += level_name(line.level);
     text += "] ";
     text += line.path;

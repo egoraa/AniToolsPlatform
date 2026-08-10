@@ -25,7 +25,7 @@ static_assert(!lp64 || sizeof(atp_value) == 24);
 static_assert(!lp64 || offsetof(atp_value, kind) == 0);
 static_assert(!lp64 || offsetof(atp_value, as) == 8);
 
-static_assert(!lp64 || sizeof(atp_api) == 88);
+static_assert(!lp64 || sizeof(atp_api) == 144);
 static_assert(!lp64 || offsetof(atp_api, struct_size) == 0);
 static_assert(!lp64 || offsetof(atp_api, get_input) == 8);
 static_assert(!lp64 || offsetof(atp_api, take_input) == 16);
@@ -37,6 +37,18 @@ static_assert(!lp64 || offsetof(atp_api, stop_requested) == 56);
 static_assert(!lp64 || offsetof(atp_api, log) == 64);
 static_assert(!lp64 || offsetof(atp_api, wake) == 72);
 static_assert(!lp64 || offsetof(atp_api, set_error) == 80);
+static_assert(!lp64 || offsetof(atp_api, config_root) == 88);
+static_assert(!lp64 || offsetof(atp_api, config_kind) == 96);
+static_assert(!lp64 || offsetof(atp_api, config_size) == 104);
+static_assert(!lp64 || offsetof(atp_api, config_key_at) == 112);
+static_assert(!lp64 || offsetof(atp_api, config_child_at) == 120);
+static_assert(!lp64 || offsetof(atp_api, config_find) == 128);
+static_assert(!lp64 || offsetof(atp_api, config_value_of) == 136);
+
+static_assert(ATP_CONFIG_NONE == 0u);
+static_assert(ATP_CONFIG_NULL == 0);
+static_assert(ATP_CONFIG_OBJECT == 6);
+static_assert(sizeof(atp_config_kind) == sizeof(int));
 
 static_assert(!lp64 || sizeof(atp_input_desc) == 24);
 static_assert(!lp64 || offsetof(atp_input_desc, name) == 0);
@@ -57,7 +69,7 @@ static_assert(!lp64 || offsetof(atp_property_desc, options) == 24);
 static_assert(!lp64 || offsetof(atp_property_desc, option_count) == 32);
 static_assert(!lp64 || offsetof(atp_property_desc, persistent) == 36);
 
-static_assert(!lp64 || sizeof(atp_module_desc) == 144);
+static_assert(!lp64 || sizeof(atp_module_desc) == 152);
 static_assert(!lp64 || offsetof(atp_module_desc, struct_size) == 0);
 static_assert(!lp64 || offsetof(atp_module_desc, name) == 8);
 static_assert(!lp64 || offsetof(atp_module_desc, version) == 16);
@@ -75,6 +87,9 @@ static_assert(!lp64 || offsetof(atp_module_desc, initialize) == 112);
 static_assert(!lp64 || offsetof(atp_module_desc, start) == 120);
 static_assert(!lp64 || offsetof(atp_module_desc, iterate) == 128);
 static_assert(!lp64 || offsetof(atp_module_desc, stop) == 136);
+static_assert(!lp64 || offsetof(atp_module_desc, source) == 144);
+
+static_assert(!lp64 || ATP_MODULE_DESC_SIZE_V1 == 144);
 
 static_assert(ATP_C_ABI == 1);
 

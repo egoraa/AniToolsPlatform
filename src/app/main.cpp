@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atp/console_encoding.hpp>
 #include <atp/group.hpp>
 #include <atp/log_pump.hpp>
 #include <atp/mcp/application_control.hpp>
@@ -70,6 +71,7 @@ constexpr const char* usage =
 }  // namespace
 
 int main(int argc, char** argv) {
+    const atp::console_utf8 console;
     std::filesystem::path config_path;
     std::vector<atp::runtime::property_override> overrides;
     bool metrics = false;

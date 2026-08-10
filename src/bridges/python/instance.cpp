@@ -8,6 +8,7 @@
 #include "errors.hpp"
 #include "interpreter.hpp"
 #include "module_slot.hpp"
+#include "values.hpp"
 
 namespace atp::bridge {
 namespace {
@@ -64,7 +65,15 @@ extern "C" void* instance_create(const atp_api* api, atp_ctx* ctx, void* user_da
         delete state;
         return nullptr;
     }
-    state->self = PyObject_CallMethod(package(), "_create", "(LO)", slot->python_index, state->ctx_object);
+    PyObject* config = config_to_python(*api, ctx, api->struct_size < sizeof(atp_api) ? 0u : api->config_root(ctx));
+    if (config == nullptr) {
+        PyErr_Print();
+        Py_DECREF(state->ctx_object);
+        delete state;
+        return nullptr;
+    }
+    state->self = PyObject_CallMethod(package(), "_create", "(LOO)", slot->python_index, state->ctx_object, config);
+    Py_DECREF(config);
     if (state->self == nullptr) {
         PyErr_Print();
         Py_DECREF(state->ctx_object);

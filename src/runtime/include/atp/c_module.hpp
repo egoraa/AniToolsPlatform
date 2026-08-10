@@ -294,6 +294,20 @@ template <typename T>
     return text == nullptr ? std::string_view{} : std::string_view{text};
 }
 
+/// Reads a field the v1 layout did not have, or nothing when the plugin is older than the field.
+///
+/// The size check is the whole point of struct_size and belongs here rather than at each use: a
+/// plugin built against ATP_C_ABI 1 hands over a shorter object, and reading past what it declared
+/// would be reading its neighbours.
+/// @param desc descriptor as the plugin declared it
+/// @return the source path, empty when absent or not declared
+[[nodiscard]] inline std::string_view c_desc_source(const atp_module_desc& desc) {
+    if (desc.struct_size < offsetof(atp_module_desc, source) + sizeof(desc.source)) {
+        return {};
+    }
+    return c_text(desc.source);
+}
+
 /// Rejects a descriptor that cannot be turned into a module, before anything is built from it.
 ///
 /// The checks are all of the "a C struct cannot express this" kind: a required function pointer left
@@ -301,11 +315,9 @@ template <typename T>
 /// malformed plugin fails while the host is still setting up rather than on the first pass.
 /// @throws std::runtime_error naming the field
 inline void validate_c_desc(const atp_module_desc& desc) {
-    // A frozen size, not sizeof: when this struct grows, the constant stays at the v1 layout so that
-    // a plugin built against ATP_C_ABI 1 keeps loading into a host that knows more fields.
-    if (desc.struct_size < sizeof(atp_module_desc)) {
+    if (desc.struct_size < ATP_MODULE_DESC_SIZE_V1) {
         throw std::runtime_error("module descriptor struct_size is " + std::to_string(desc.struct_size) +
-                                 ", expected at least " + std::to_string(sizeof(atp_module_desc)));
+                                 ", expected at least " + std::to_string(ATP_MODULE_DESC_SIZE_V1));
     }
     if (c_text(desc.name).empty()) {
         throw std::runtime_error("module descriptor has no name");
@@ -330,6 +342,63 @@ inline void validate_c_desc(const atp_module_desc& desc) {
     }
 }
 
+/// config_kind -> atp_config_kind. The two enumerations list the same seven forms in the same order,
+/// and this spells the mapping out anyway rather than casting: the C header is a separate contract, and
+/// a reordering there has to fail here instead of silently renaming every form.
+[[nodiscard]] inline int c_config_kind(config_kind kind) noexcept {
+    switch (kind) {
+        case config_kind::null:
+            return ATP_CONFIG_NULL;
+        case config_kind::boolean:
+            return ATP_CONFIG_BOOL;
+        case config_kind::integer:
+            return ATP_CONFIG_INT;
+        case config_kind::real:
+            return ATP_CONFIG_REAL;
+        case config_kind::string:
+            return ATP_CONFIG_TEXT;
+        case config_kind::array:
+            return ATP_CONFIG_ARRAY;
+        case config_kind::object:
+            return ATP_CONFIG_OBJECT;
+    }
+    return ATP_CONFIG_NULL;
+}
+
+/// Reads a scalar config node into an atp_value, refusing the three forms atp_kind cannot name.
+///
+/// Text points straight into the node's own std::string, which lives as long as the module does — no
+/// copy into the scratch buffer, so a config string cannot be invalidated by an unrelated port read.
+/// @return false for null, an array or an object, leaving @p out untouched
+[[nodiscard]] inline bool c_config_scalar(const config_value& value, atp_value& out) {
+    switch (value.kind()) {
+        case config_kind::boolean:
+            out.kind = ATP_KIND_BOOL;
+            out.as.boolean = value.as_bool() ? 1 : 0;
+            return true;
+        case config_kind::integer:
+            out.kind = ATP_KIND_I64;
+            out.as.i64 = value.as_int();
+            return true;
+        case config_kind::real:
+            out.kind = ATP_KIND_F64;
+            out.as.f64 = value.as_double();
+            return true;
+        case config_kind::string: {
+            const std::string* text = value.string_ptr();
+            out.kind = ATP_KIND_TEXT;
+            out.as.bytes.data = text->data();
+            out.as.bytes.size = text->size();
+            return true;
+        }
+        case config_kind::null:
+        case config_kind::array:
+        case config_kind::object:
+            return false;
+    }
+    return false;
+}
+
 }  // namespace detail
 
 /// A module the platform drives through the C ABI of plugin_c.h.
@@ -345,15 +414,21 @@ inline void validate_c_desc(const atp_module_desc& desc) {
 class c_module final : public module_base {
    public:
     /// Builds the ports and the module state from a validated descriptor.
+    ///
+    /// The config is stored and indexed before desc.create runs, because that call is the C path's
+    /// analogue of a constructor and the module is entitled to read its config from inside it.
     /// @param desc descriptor, which must outlive this object — the loader keeps the plugin's
     ///        library pinned for exactly that reason
+    /// @param cfg config for this instance, readable through the api's config_* callbacks
     /// @throws std::runtime_error if a port cannot be built, or std::invalid_argument if a property
     ///         default is unparsable or outside its own options
-    explicit c_module(const atp_module_desc& desc) : desc_(&desc), name_(detail::c_text(desc.name)) {
+    c_module(const atp_module_desc& desc, const config_value& cfg)
+        : desc_(&desc), name_(detail::c_text(desc.name)), config_(cfg) {
         for (std::uint32_t i = 0; i < desc.version_count; ++i) {
             version_.parts[i] = desc.version[i];
         }
         version_.count = desc.version_count;
+        index_config(config_);
         build_inputs();
         build_outputs();
         build_properties();
@@ -584,6 +659,30 @@ class c_module final : public module_base {
         std::rethrow_exception(raised);
     }
 
+    /// Runs a callback body that answers with a value rather than success or failure, converting
+    /// anything it throws into a stored exception and @p on_failure.
+    ///
+    /// Separate from guarded() below because that one is boolean by construction — it reduces the
+    /// body's answer to 1 or 0, which is right for the eight callbacks that report success and wrong
+    /// for a callback returning a handle or a kind: ATP_CONFIG_OBJECT would come back as 1, that is
+    /// ATP_CONFIG_BOOL, and every handle would come back as the root's. The failure value is passed in
+    /// rather than defaulted, since it is ATP_CONFIG_NONE for a handle and ATP_CONFIG_NULL for a kind.
+    template <typename TRet, typename TFn>
+    static TRet guarded_value(atp_ctx* ctx, TRet on_failure, TFn&& body) noexcept {
+        if (ctx == nullptr || ctx->owner == nullptr) {
+            return on_failure;
+        }
+        c_module& self = *ctx->owner;
+        try {
+            return body(self);
+        } catch (...) {
+            if (self.pending_ == nullptr) {
+                self.pending_ = std::current_exception();
+            }
+            return on_failure;
+        }
+    }
+
     /// Runs a callback body, converting anything it throws into a stored exception and a refusal.
     template <typename TFn>
     static int guarded(atp_ctx* ctx, TFn&& body) noexcept {
@@ -609,6 +708,30 @@ class c_module final : public module_base {
     }
     [[nodiscard]] const property_entry* property_at(std::uint32_t i) const {
         return i < property_index_.size() ? &property_index_[i] : nullptr;
+    }
+
+    /// Flattens the config into a preorder list of pointers, so a foreign module can address a node by
+    /// an opaque number instead of a path. Built once, before desc.create runs, and never again: the
+    /// entries point inside config_, which is why config_ must be in place first.
+    void index_config(const config_value& node) {
+        nodes_.push_back(&node);
+        for (std::size_t i = 0; i < node.size(); ++i) {
+            index_config(node[i]);
+        }
+    }
+
+    /// Handle -> node. A handle is the preorder index plus one, which leaves zero free for
+    /// ATP_CONFIG_NONE and gives the root 1.
+    [[nodiscard]] const config_value* config_at(std::uint32_t node) const {
+        return node != ATP_CONFIG_NONE && node <= nodes_.size() ? nodes_[node - 1] : nullptr;
+    }
+
+    /// Node -> handle, by scanning the flat list. Linear on purpose: the index is preorder, so child
+    /// handles could be computed instead, but a config is tens of nodes read once in the constructor
+    /// and the extra bookkeeping would cost more than the scan.
+    [[nodiscard]] std::uint32_t handle_of(const config_value* node) const {
+        const auto at = std::ranges::find(nodes_, node);
+        return at == nodes_.end() ? ATP_CONFIG_NONE : static_cast<std::uint32_t>(std::distance(nodes_.begin(), at) + 1);
     }
 
     /// The callback table handed to every instance. One object for the whole process: the callbacks
@@ -699,6 +822,64 @@ class c_module final : public module_base {
                 return true;
             });
         };
+        table.config_root = [](atp_ctx* ctx) noexcept {
+            return guarded_value<std::uint32_t>(ctx, ATP_CONFIG_NONE, [](c_module& self) -> std::uint32_t {
+                return self.nodes_.empty() ? ATP_CONFIG_NONE : 1u;
+            });
+        };
+        table.config_kind = [](atp_ctx* ctx, std::uint32_t node) noexcept {
+            return guarded_value<int>(ctx, ATP_CONFIG_NULL, [&](c_module& self) -> int {
+                const config_value* value = self.config_at(node);
+                return value == nullptr ? ATP_CONFIG_NULL : detail::c_config_kind(value->kind());
+            });
+        };
+        table.config_size = [](atp_ctx* ctx, std::uint32_t node) noexcept {
+            return guarded_value<std::uint32_t>(ctx, 0u, [&](c_module& self) -> std::uint32_t {
+                const config_value* value = self.config_at(node);
+                return value == nullptr ? 0u : static_cast<std::uint32_t>(value->size());
+            });
+        };
+        table.config_key_at = [](atp_ctx* ctx, std::uint32_t node, std::uint32_t i, const char** out,
+                                 std::size_t* len) noexcept {
+            return guarded(ctx, [&](c_module& self) {
+                const config_value* value = self.config_at(node);
+                if (value == nullptr || out == nullptr || len == nullptr || !value->is_object() || i >= value->size()) {
+                    return false;
+                }
+                const std::string_view key = value->key_at(i);
+                *out = key.data();
+                *len = key.size();
+                return true;
+            });
+        };
+        table.config_child_at = [](atp_ctx* ctx, std::uint32_t node, std::uint32_t i) noexcept {
+            return guarded_value<std::uint32_t>(ctx, ATP_CONFIG_NONE, [&](c_module& self) -> std::uint32_t {
+                const config_value* value = self.config_at(node);
+                if (value == nullptr || i >= value->size()) {
+                    return ATP_CONFIG_NONE;
+                }
+                return self.handle_of(&(*value)[i]);
+            });
+        };
+        table.config_find = [](atp_ctx* ctx, std::uint32_t node, const char* key, std::size_t len) noexcept {
+            return guarded_value<std::uint32_t>(ctx, ATP_CONFIG_NONE, [&](c_module& self) -> std::uint32_t {
+                const config_value* parent = self.config_at(node);
+                if (parent == nullptr || key == nullptr || !parent->is_object()) {
+                    return ATP_CONFIG_NONE;
+                }
+                const config_value* found = parent->find(std::string_view(key, len));
+                return found == nullptr ? ATP_CONFIG_NONE : self.handle_of(found);
+            });
+        };
+        table.config_value_of = [](atp_ctx* ctx, std::uint32_t node, atp_value* out) noexcept {
+            return guarded(ctx, [&](c_module& self) {
+                const config_value* value = self.config_at(node);
+                if (value == nullptr || out == nullptr) {
+                    return false;
+                }
+                return detail::c_config_scalar(*value, *out);
+            });
+        };
         return table;
     }
 
@@ -712,6 +893,9 @@ class c_module final : public module_base {
     std::vector<input_entry> input_index_;
     std::vector<output_entry> output_index_;
     std::vector<property_entry> property_index_;
+
+    config_value config_;
+    std::vector<const config_value*> nodes_;
 
     atp_ctx ctx_{this};
     void* self_ = nullptr;
@@ -747,14 +931,24 @@ class c_module_factory final : public module_factory_base {
         return version_;
     }
 
-    [[nodiscard]] module_ptr create() const override {
-        return module_ptr(new c_module(*desc_), module_deleter{});
+    [[nodiscard]] module_ptr create(const config_value& cfg) const override {
+        return module_ptr(new c_module(*desc_, cfg), module_deleter{});
     }
 
    private:
     const atp_module_desc* desc_;
     std::string name_;
     version version_{};
+};
+
+/// What one module of the C path registered as, and the file its descriptor pointed at.
+///
+/// The source travels beside the registration rather than inside the factory: a factory is a plugin
+/// ABI type and cannot grow a field, while this list never leaves the host.
+struct c_registration {
+    std::string name;
+    version ver;
+    std::string source;
 };
 
 /// Registers every module a C-ABI plugin offers.
@@ -767,23 +961,27 @@ class c_module_factory final : public module_factory_base {
 /// @param abi the plugin's atp_c_abi_version
 /// @param count the plugin's atp_module_count
 /// @param at the plugin's atp_module_desc_at
+/// @return one entry per registered module, in registration order
 /// @throws std::runtime_error on an ABI mismatch, a null descriptor or a malformed one
-inline void register_c_modules(module_registrar& registrar,
-                               c_abi_version_fn* abi,
-                               c_module_count_fn* count,
-                               c_module_desc_at_fn* at) {
+inline std::vector<c_registration> register_c_modules(module_registrar& registrar,
+                                                      c_abi_version_fn* abi,
+                                                      c_module_count_fn* count,
+                                                      c_module_desc_at_fn* at) {
     if (const unsigned plugin_version = abi(); plugin_version != ATP_C_ABI) {
         throw std::runtime_error("plugin has C ABI " + std::to_string(plugin_version) + ", host expects " +
                                  std::to_string(ATP_C_ABI));
     }
+    std::vector<c_registration> made;
     const unsigned total = count();
     for (unsigned i = 0; i < total; ++i) {
         const atp_module_desc* desc = at(i);
         if (desc == nullptr) {
             throw std::runtime_error("module descriptor " + std::to_string(i) + " is null");
         }
-        registrar.add(std::make_unique<c_module_factory>(*desc));
+        const module_factory_base& added = registrar.add(std::make_unique<c_module_factory>(*desc));
+        made.push_back({std::string(added.name()), added.get_version(), std::string(detail::c_desc_source(*desc))});
     }
+    return made;
 }
 
 }  // namespace atp

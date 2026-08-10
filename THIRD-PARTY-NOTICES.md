@@ -9,6 +9,7 @@ has to be reproduced by every downstream distribution forever.
 | Component | Version | License | Reaches the user |
 |---|---|---|---|
 | [nlohmann/json](https://github.com/nlohmann/json) | 3.12.0 | MIT | yes — compiled into `atp_app`, `atp_mcp`, `atp_studio` |
+| [Lua](https://www.lua.org/) | 5.4.8 | MIT | yes — compiled into `atp_lua_bridge` |
 | [Qt 6](https://www.qt.io/) (Widgets, Svg, and the plugins deployed beside the executable) | 6.10.3 | LGPL-3.0-only | yes — shipped next to `atp_studio`, in packages that contain it |
 | [GoogleTest](https://github.com/google/googletest) | 1.17.0 | BSD-3-Clause | no — test binaries only, not distributed |
 | [aqtinstall](https://github.com/miurahr/aqtinstall) | as resolved by pip | MIT | no — a build-time downloader, see `cmake/AutoInstallQt.cmake` |
@@ -44,6 +45,35 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+## Lua 5.4.8 — MIT
+
+Obtained as a release archive by FetchContent (`cmake/BuildLua.cmake`) and used **unmodified**: the
+sources are compiled as C++ rather than C, which the interpreter supports by design and which changes
+no line of them. It is linked statically into `atp_lua_bridge` alone.
+
+```
+Copyright (C) 1994-2025 Lua.org, PUC-Rio.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ## Qt 6.10.3 — LGPL-3.0

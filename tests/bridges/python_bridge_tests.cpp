@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -16,14 +20,30 @@
 #include <atp/module.hpp>
 #include <atp/module_base.hpp>
 #include <atp/module_context.hpp>
+#include <atp/module_host.hpp>
 #include <atp/module_loader.hpp>
 #include <atp/module_registry.hpp>
-#include <atp/null_host.hpp>
 #include <atp/service_directory.hpp>
+#include <atp/studio/languages.hpp>
 #include <atp/studio/module_manager.hpp>
+#include <atp/studio/script_modules.hpp>
 #include <atp/version.hpp>
 
 namespace {
+
+std::filesystem::path unicode_name(std::string_view prefix,
+                                   std::initializer_list<char32_t> points,
+                                   std::string_view suffix) {
+    std::u32string name;
+    for (const char c : prefix) {
+        name.push_back(static_cast<char32_t>(c));
+    }
+    name.append(points);
+    for (const char c : suffix) {
+        name.push_back(static_cast<char32_t>(c));
+    }
+    return std::filesystem::path(name);
+}
 
 struct probe_inputs : atp::io::inputs {
     atp::io::input<std::int32_t>& i32 = make<atp::io::input<std::int32_t>>("i32");
@@ -44,6 +64,17 @@ struct probe_outputs : atp::io::outputs {
 };
 
 class probe_module : public atp::module<atp::io::ports<probe_inputs, probe_outputs>, "py_test_host"> {};
+
+class recording_host final : public atp::module_host {
+   public:
+    void log(atp::log_level level, std::string_view text) noexcept override {
+        lines.emplace_back(level, std::string(text));
+    }
+
+    void wake() noexcept override {}
+
+    std::vector<std::pair<atp::log_level, std::string>> lines;
+};
 
 class python_bridge_test : public ::testing::Test {
    protected:
@@ -71,12 +102,27 @@ class python_bridge_test : public ::testing::Test {
     }
 
     [[nodiscard]] bool registered(const std::string& name, atp::version expected) const {
-        const std::vector<std::pair<std::string, atp::version>>& all = loader_->modules();
-        return std::find(all.begin(), all.end(), std::pair{name, expected}) != all.end();
+        return std::ranges::any_of(loader_->modules(), [&name, expected](const atp::registered_module& m) {
+            return m.name == name && m.ver == expected;
+        });
+    }
+
+    [[nodiscard]] std::string source_of(const std::string& name) const {
+        for (const atp::registered_module& m : loader_->modules()) {
+            if (m.name == name) {
+                return m.source;
+            }
+        }
+        return {};
     }
 
     void create(const std::string& name) {
         module_ = registry_.create(name);
+        ASSERT_NE(module_, nullptr);
+    }
+
+    void create(const std::string& name, const atp::config_value& cfg) {
+        module_ = registry_.create(name, cfg);
         ASSERT_NE(module_, nullptr);
     }
 
@@ -102,10 +148,15 @@ class python_bridge_test : public ::testing::Test {
     probe_module host_;
     atp::module_ptr module_;
     atp::service_directory services_;
-    atp::null_host log_host_;
+    recording_host log_host_;
     atp::module_context context_{services_, log_host_};
     std::stop_source stop_;
 };
+
+std::string unique_module_name(std::string_view stem) {
+    const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::string(stem) + "_" + std::to_string(static_cast<unsigned long long>(ticks));
+}
 
 }  // namespace
 
@@ -121,6 +172,16 @@ TEST_F(python_bridge_test, RegistersAModuleDeclaredByAScript) {
     EXPECT_TRUE(registered("py_declares", atp::version(2, 1)));
     EXPECT_TRUE(registered("py_echo", atp::version(1, 0)));
     EXPECT_EQ(registry_.at("py_declares").get_version(), atp::version(2, 1));
+}
+
+TEST_F(python_bridge_test, EachModuleNamesTheScriptItWasReadFrom) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+
+    const std::filesystem::path declared_in(source_of("py_declares"));
+    EXPECT_EQ(declared_in.filename(), "t_declares.py")
+        << "a module name is not a file name, so the script has to be reported rather than guessed";
+    EXPECT_TRUE(std::filesystem::exists(declared_in)) << declared_in.string();
 }
 
 TEST_F(python_bridge_test, BuildsPlatformPortsFromTheClassBody) {
@@ -195,6 +256,19 @@ TEST_F(python_bridge_test, ReadsAPropertyThroughTheBoundary) {
     EXPECT_EQ(host_.inputs().f64.get(), 2.5);
 }
 
+TEST_F(python_bridge_test, WritesAScriptLogLineThroughTheBoundary) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    create("py_echo");
+    run_lifecycle();
+
+    const auto written =
+        std::ranges::find_if(log_host_.lines, [](const auto& line) { return line.second == "py_echo ready"; });
+    ASSERT_NE(written, log_host_.lines.end()) << "log() is the one call every script makes, so the '#' format it "
+                                                 "parses with has to be the one Python expects";
+    EXPECT_EQ(written->first, atp::log_level::info);
+}
+
 TEST_F(python_bridge_test, RefusesAValueTooLargeForItsPort) {
     scan(ATP_PYTHON_BRIDGE_SCRIPTS);
     load();
@@ -255,4 +329,341 @@ TEST_F(python_bridge_test, SkipsABrokenScriptAndKeepsItsNeighbour) {
     load();
     EXPECT_EQ(loader_->modules().size(), 1u);
     EXPECT_NE(registry_.find("py_neighbour"), nullptr);
+}
+
+TEST(PythonBridgeReload, AScriptWrittenAfterTheLoadArrivesWithTheNextReload) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_studio_new_python_module";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    atp::studio::apply_script_path({dir.string()}, "", atp::studio::python_language);
+
+    (void)atp::studio::create_script_module(dir, "py_studio_first", atp::studio::python_language);
+
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_PYTHON_BRIDGE);
+    ASSERT_EQ(manager.plugins().size(), 1u);
+    ASSERT_TRUE(manager.plugins().front().loaded) << manager.plugins().front().error;
+    ASSERT_NE(manager.registry().find("py_studio_first"), nullptr)
+        << "scan path: " << atp::studio::inherited_script_path(atp::studio::python_language);
+
+    (void)atp::studio::create_script_module(dir, "py_studio_second", atp::studio::python_language);
+    ASSERT_TRUE(manager.reload_plugin(ATP_PYTHON_BRIDGE));
+
+    EXPECT_NE(manager.registry().find("py_studio_first"), nullptr);
+    ASSERT_NE(manager.registry().find("py_studio_second"), nullptr);
+    EXPECT_EQ(manager.registry().versions("py_studio_first").size(), 1u);
+    EXPECT_EQ(manager.registry().versions("py_studio_second").size(), 1u);
+
+    const atp::studio::module_info info =
+        atp::studio::module_manager::describe(manager.registry().at("py_studio_second"));
+    EXPECT_FALSE(info.broken) << info.error;
+    ASSERT_EQ(info.inputs.size(), 1u);
+    EXPECT_EQ(info.inputs.front().name, "value");
+    ASSERT_EQ(info.outputs.size(), 1u);
+    EXPECT_EQ(info.outputs.front().name, "result");
+    ASSERT_EQ(info.properties.size(), 1u);
+    EXPECT_EQ(info.properties.front().name, "factor");
+    EXPECT_EQ(info.properties.front().default_value, "2");
+
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(PythonBridgeReload, ADirectoryThatAppearsAfterTheFirstLoadIsScannedByTheReload) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_studio_late_python_dir";
+    std::filesystem::remove_all(dir);
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_PYTHON_BRIDGE);
+    ASSERT_TRUE(manager.plugins().front().loaded) << manager.plugins().front().error;
+    ASSERT_EQ(manager.registry().find("py_studio_late"), nullptr);
+
+    std::filesystem::create_directories(dir);
+    (void)atp::studio::create_script_module(dir, "py_studio_late", atp::studio::python_language);
+    atp::studio::apply_script_path({dir.string()}, "", atp::studio::python_language);
+    ASSERT_TRUE(manager.reload_plugin(ATP_PYTHON_BRIDGE));
+
+    EXPECT_NE(manager.registry().find("py_studio_late"), nullptr)
+        << "a script directory named after the bridge was loaded never reached discovery";
+
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(PythonBridgeReload, AProvisionedFolderCarriesABridgeThatFindsTheScriptsBesideIt) {
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "atp_studio_provisioned_folder";
+    std::filesystem::create_directories(root);
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+
+    atp::studio::bridge_source source;
+    source.bridge = ATP_PYTHON_BRIDGE;
+    source.package = std::filesystem::path(ATP_PYTHON_BRIDGE).parent_path() / "python" / "atp";
+    ASSERT_TRUE(std::filesystem::exists(source.package)) << source.package.string();
+
+    const atp::studio::folder_setup done = atp::studio::provision_folder(root, source, atp::studio::python_language);
+    ASSERT_TRUE(std::filesystem::exists(root / atp::studio::bridge_filename(atp::studio::python_language)));
+    ASSERT_TRUE(std::filesystem::exists(done.scripts_dir / "atp" / "__init__.py"));
+    const std::string module_name = unique_module_name("py_provisioned");
+    (void)atp::studio::create_script_module(done.scripts_dir, module_name, atp::studio::python_language);
+
+    atp::studio::module_manager manager;
+    manager.load_plugin(root / atp::studio::bridge_filename(atp::studio::python_language));
+    ASSERT_TRUE(manager.plugins().front().loaded) << manager.plugins().front().error;
+    EXPECT_NE(manager.registry().find(module_name), nullptr)
+        << "the copied bridge did not scan the python/ directory beside itself";
+
+    std::error_code ignored;
+    std::filesystem::remove(done.scripts_dir / (module_name + ".py"), ignored);
+}
+
+TEST(PythonBridgeReload, ASecondBridgeInOneProcessRegistersButCannotCreate) {
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "atp_studio_second_bridge";
+    std::filesystem::create_directories(root);
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+
+    atp::studio::bridge_source source;
+    source.bridge = ATP_PYTHON_BRIDGE;
+    source.package = std::filesystem::path(ATP_PYTHON_BRIDGE).parent_path() / "python" / "atp";
+    const atp::studio::folder_setup done = atp::studio::provision_folder(root, source, atp::studio::python_language);
+    const std::string module_name = unique_module_name("py_second_copy");
+    (void)atp::studio::create_script_module(done.scripts_dir, module_name, atp::studio::python_language);
+
+    atp::studio::module_manager original;
+    original.load_plugin(ATP_PYTHON_BRIDGE);
+    ASSERT_TRUE(original.plugins().front().loaded) << original.plugins().front().error;
+
+    atp::studio::module_manager copy;
+    copy.load_plugin(root / atp::studio::bridge_filename(atp::studio::python_language));
+    ASSERT_TRUE(copy.plugins().front().loaded) << copy.plugins().front().error;
+    ASSERT_NE(copy.registry().find(module_name), nullptr);
+
+    const atp::studio::module_info info = atp::studio::module_manager::describe(copy.registry().at(module_name));
+    EXPECT_TRUE(info.broken) << "a second bridge copy sharing one interpreter is expected to fail at creation";
+    EXPECT_TRUE(info.error.contains("create refused")) << info.error;
+
+    std::error_code ignored;
+    std::filesystem::remove(done.scripts_dir / (module_name + ".py"), ignored);
+}
+
+/// What the studio actually does, as opposed to the two-registry case above: one manager, so the
+/// second copy tries to register names the first already holds and is withdrawn whole. The row it
+/// leaves behind is a red "failed" line about a file the session is deliberately not using, and
+/// dropping it is the point of keep_one_python_bridge.
+TEST(PythonBridgeReload, ASecondBridgeInOneRegistryIsDroppedRatherThanLeftFailed) {
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "atp_studio_second_bridge_one_registry";
+    std::filesystem::create_directories(root);
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+
+    atp::studio::bridge_source source;
+    source.bridge = ATP_PYTHON_BRIDGE;
+    source.package = std::filesystem::path(ATP_PYTHON_BRIDGE).parent_path() / "python" / "atp";
+    const atp::studio::folder_setup done = atp::studio::provision_folder(root, source, atp::studio::python_language);
+    const std::string module_name = unique_module_name("py_one_registry");
+    (void)atp::studio::create_script_module(done.scripts_dir, module_name, atp::studio::python_language);
+    atp::studio::apply_script_path({done.scripts_dir.string()}, "", atp::studio::python_language);
+
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_PYTHON_BRIDGE);
+    ASSERT_TRUE(manager.plugins().front().loaded) << manager.plugins().front().error;
+    manager.load_plugin(root / atp::studio::bridge_filename(atp::studio::python_language));
+    ASSERT_EQ(manager.plugins().size(), 2u);
+    ASSERT_FALSE(manager.plugins().back().loaded) << "one registry cannot hold the same names twice";
+
+    const std::vector<std::filesystem::path> dropped =
+        atp::studio::keep_one_bridge(manager, atp::studio::python_language);
+
+    ASSERT_EQ(dropped.size(), 1u);
+    EXPECT_EQ(dropped.front().filename(),
+              std::filesystem::path(atp::studio::bridge_filename(atp::studio::python_language)));
+    ASSERT_EQ(manager.plugins().size(), 1u);
+    EXPECT_TRUE(manager.plugins().front().loaded);
+
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+    std::error_code ignored;
+    std::filesystem::remove(done.scripts_dir / (module_name + ".py"), ignored);
+}
+
+/// A bridge that failed on its own is the opposite case: with nothing loaded beside it, the error is
+/// all the person has, and it is usually about the CPython runtime rather than about the bridge.
+TEST(PythonBridgeReload, AFailedBridgeAloneIsKept) {
+    atp::studio::module_manager manager;
+    manager.load_plugin(std::filesystem::temp_directory_path() /
+                        atp::studio::bridge_filename(atp::studio::python_language));
+    ASSERT_EQ(manager.plugins().size(), 1u);
+    ASSERT_FALSE(manager.plugins().front().loaded);
+
+    EXPECT_TRUE(atp::studio::keep_one_bridge(manager, atp::studio::python_language).empty());
+    EXPECT_EQ(manager.plugins().size(), 1u);
+}
+
+TEST(PythonBridgeReload, AnEditedScriptReachesThePaletteOnlyThroughReloadAll) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_studio_edited_python_module";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    atp::studio::apply_script_path({dir.string()}, "", atp::studio::python_language);
+
+    const std::string module_name = unique_module_name("py_edited");
+    const std::filesystem::path file =
+        atp::studio::create_script_module(dir, module_name, atp::studio::python_language);
+
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_PYTHON_BRIDGE);
+    ASSERT_TRUE(manager.plugins().front().loaded) << manager.plugins().front().error;
+    ASSERT_NE(manager.registry().find(module_name), nullptr);
+
+    std::ofstream(file, std::ios::trunc) << "import atp\n\n\nclass Edited(atp.Module):\n"
+                                         << "    name = \"" << module_name << "\"\n"
+                                         << "    version = (2, 4)\n\n"
+                                         << "    amount = atp.Input(atp.i32)\n"
+                                         << "    result = atp.Output(atp.i32)\n\n"
+                                         << "    def iterate(self):\n        return atp.IDLE\n";
+
+    manager.rescan();
+    EXPECT_EQ(manager.registry().at(module_name).get_version(), atp::version(1, 0))
+        << "a scan is not supposed to re-read a plugin it already loaded";
+
+    manager.reload_all();
+
+    const atp::studio::module_info info = atp::studio::module_manager::describe(manager.registry().at(module_name));
+    EXPECT_FALSE(info.broken) << info.error;
+    EXPECT_EQ(info.ver, atp::version(2, 4));
+    ASSERT_EQ(info.inputs.size(), 1u);
+    EXPECT_EQ(info.inputs.front().name, "amount");
+
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+    std::filesystem::remove_all(dir);
+}
+
+/// A module built before a reload keeps a pointer to its descriptor and dereferences it once more
+/// when it is destroyed, so re-running discovery must not reuse the array the first batch lives in.
+/// The gap this closes is reachable by hand: a stopped pipeline still owns its modules, and the
+/// rescan button reloads because nothing is running.
+TEST(PythonBridgeReload, AModuleOutlivesTheReloadThatRediscoveredIt) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_studio_reload_outlives";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    atp::studio::apply_script_path({dir.string()}, "", atp::studio::python_language);
+
+    const std::string module_name = unique_module_name("py_outlives");
+    (void)atp::studio::create_script_module(dir, module_name, atp::studio::python_language);
+
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_PYTHON_BRIDGE);
+    ASSERT_TRUE(manager.plugins().front().loaded) << manager.plugins().front().error;
+    atp::module_ptr built = manager.registry().create(module_name);
+    ASSERT_NE(built, nullptr);
+
+    for (int extra = 0; extra < 8; ++extra) {
+        (void)atp::studio::create_script_module(dir, module_name + "_x" + std::to_string(extra),
+                                                atp::studio::python_language);
+    }
+    manager.reload_all();
+
+    EXPECT_EQ(built->iterate(std::stop_token{}), atp::work_status::idle);
+    built.reset();
+
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(PythonBridgeReload, AScriptDirectoryNamedTwiceIsWalkedOnce) {
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "atp_studio_named_twice";
+    std::error_code ignored;
+    std::filesystem::create_directories(root);
+
+    atp::studio::bridge_source source;
+    source.bridge = ATP_PYTHON_BRIDGE;
+    source.package = std::filesystem::path(ATP_PYTHON_BRIDGE).parent_path() / "python" / "atp";
+    const atp::studio::folder_setup done = atp::studio::provision_folder(root, source, atp::studio::python_language);
+    const std::string module_name = unique_module_name("py_named_twice");
+    (void)atp::studio::create_script_module(done.scripts_dir, module_name, atp::studio::python_language);
+    atp::studio::apply_script_path({done.scripts_dir.string()}, "", atp::studio::python_language);
+
+    atp::studio::module_manager manager;
+    manager.load_plugin(root / atp::studio::bridge_filename(atp::studio::python_language));
+
+    EXPECT_TRUE(manager.plugins().front().loaded)
+        << "a directory reached both through ATP_PYTHON_PATH and as the bridge's own python/ was walked twice: "
+        << manager.plugins().front().error;
+    EXPECT_NE(manager.registry().find(module_name), nullptr);
+
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+    std::filesystem::remove(done.scripts_dir / (module_name + ".py"), ignored);
+}
+
+TEST(PythonBridgeReload, ANonAsciiFolderAndScriptNameAreReadAndReported) {
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / unicode_name("atp_py_", {0x0451, 0x043b, 0x043a, 0x0430}, "");
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    const std::filesystem::path script =
+        root / unicode_name("", {0x0442, 0x005f, 0x043f, 0x0440, 0x043e, 0x0431, 0x0430}, ".py");
+    {
+        std::ofstream out(script);
+        out << R"PY(import atp
+
+
+class Probe(atp.Module):
+    name = "py_non_ascii"
+    version = (1, 0)
+    value = atp.Input(atp.i32)
+
+    def iterate(self):
+        return atp.IDLE
+)PY";
+    }
+#ifdef _WIN32
+    _wputenv_s(L"ATP_PYTHON_PATH", root.wstring().c_str());
+#else
+    setenv("ATP_PYTHON_PATH", root.string().c_str(), 1);
+#endif
+
+    atp::module_registry registry;
+    const atp::module_loader loader(ATP_PYTHON_BRIDGE, registry);
+
+    ASSERT_NE(registry.find("py_non_ascii"), nullptr)
+        << "a narrow read of the scan variable replaces what the code page cannot represent, and the "
+           "directory is then silently not there";
+
+    std::string reported;
+    for (const atp::registered_module& m : loader.modules()) {
+        if (m.name == "py_non_ascii") {
+            reported = m.source;
+        }
+    }
+    const std::filesystem::path from_report(
+        std::u8string(reinterpret_cast<const char8_t*>(reported.data()), reported.size()));
+    EXPECT_EQ(from_report, script) << "the descriptor carries the script as UTF-8";
+    EXPECT_TRUE(std::filesystem::exists(from_report));
+
+    atp::studio::apply_script_path({}, "", atp::studio::python_language);
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+}
+
+TEST_F(python_bridge_test, ConfigReachesAScriptAsADict) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    create("py_config", atp::config_value::object({
+                            {"channels", atp::config_value::array({1, 2, 6})},
+                            {"name", "rig"},
+                            {"nested", atp::config_value::object({{"deep", true}})},
+                        }));
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "channels=6 name=rig nested=True keys=channels,name,nested");
+}
+
+TEST_F(python_bridge_test, AScriptWithNoConfigSeesNone) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    create("py_config");
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "config=None");
 }

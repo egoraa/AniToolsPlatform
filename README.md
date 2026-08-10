@@ -6,8 +6,10 @@ core sit a Qt visual editor and an MCP server, so a pipeline can be built by han
 agent — and it is the same pipeline in all three cases.
 
 The platform is designed around third-party modules: plugins are built separately, against an
-installed SDK, and loaded through a versioned ABI — in C++, or in any language that can export three
-C functions.
+installed SDK, and loaded through a versioned ABI. Five languages have a working path today — **C++**
+and **C** against the SDK's own headers, **Rust** as a `cdylib` with no SDK at all, and **Python** or
+**Lua** as a script the platform's bridge reads. A module written in any of them connects to a module written in
+any other with nothing in between: the host builds the same typed ports on both sides.
 
 ## Targets
 
@@ -20,6 +22,8 @@ C functions.
 | `atp_mcp` | An MCP server over stdio exposing the catalog, editing and execution as tools. |
 | `atp_demo`, `atp_host_static`, `atp_host_dynamic` | The examples in `examples/`. |
 | `atp_demo_plugin`, `atp_c_demo_plugin` | Loadable example plugins: one in C++, one in pure C. |
+| `atp_python_bridge` | A C-path plugin embedding CPython, so a module can be a script. Built when CPython 3.11+ development files are found (`ATP_BUILD_PYTHON_BRIDGE`). |
+| `atp_lua_bridge` | The same idea with Lua, which is vendored and compiled in — so it needs nothing on the machine (`ATP_BUILD_LUA_BRIDGE`). |
 
 ## Build
 
@@ -175,6 +179,86 @@ One thing to get right in a language with its own unwinding: a panic crossing in
 undefined behaviour, so guard every entry point (the Rust template wraps them in `catch_unwind` and
 reports the panic through `set_error`, which stops the pipeline with the panic's text instead of the
 process).
+
+## Writing a module in Python
+
+Python is the one path where you do not build a plugin at all. The plugin is `atp_python_bridge` —
+a C-path plugin embedding CPython, shipped with the platform — and what you write is a script it
+reads at load time:
+
+```python
+import atp
+
+class Averager(atp.Module):
+    name = "py_averager"
+    value  = atp.Input(atp.i32)
+    report = atp.Output(atp.text)
+    window = atp.Property(atp.i32, 4)
+
+    def iterate(self):
+        v = self.value.take()
+        if v is None:
+            return atp.IDLE
+        ...
+        return atp.BUSY
+```
+
+Nothing is compiled and nothing links the SDK. The class body is read at import — that is the static
+declaration the ABI requires — and the host builds real platform ports from it, so a Python module
+meets a C++ one on ordinary connections. Drop the script into `plugins/python/` next to `atp_app`, or
+point `ATP_PYTHON_PATH` at it to work on it inside your own repository. `templates/plugin_python/` is
+a working starting point, and in an installed package it carries a copy of the `atp` package beside
+it, so an editor resolves the import while the module is being written.
+
+In `atp_studio` the whole gesture is one menu item: **File → New module…** asks for a language, a name
+and a folder, and makes that folder able to host modules on its own — the bridge next to it, the `atp`
+package and the scripts in the language's own subdirectory, which is the shape an installation has:
+
+```
+my_modules/
+    atp_python_bridge.dll
+    python/
+        atp/            # the package, so an editor resolves `import atp`
+        py_my_thing.py  # the skeleton, which already runs
+```
+
+The bridge is copied only when the folder has none — a copy already loaded could not be replaced
+anyway, so a stale one is named in the Log instead. The `atp` package is also **refreshed** when the
+platform's is newer, because it is platform code and a copy one release behind fails in ways that
+point nowhere near it. The module then appears in the palette without a restart, and the file opens in
+an editor.
+
+One folder can host both languages at once; it stays a single search directory, because the two differ
+in every path they touch.
+
+The folder also becomes a **module search directory** — the one list the Plugins dock keeps — and what
+each bridge is told to scan follows from it: its own subdirectory of every search directory that has
+one, put in front of whatever that language's variable (`ATP_PYTHON_PATH`, `ATP_LUA_PATH`) already
+held. A folder of scripts *without* a bridge belongs in that
+same list. One settings key goes with the feature, `editor_command`, where `{file}` stands for the path;
+empty means the desktop's own association, which on Windows commonly runs a `.py` rather than opening
+it, so that is the key to set.
+
+Point `atp_app` at such a folder and it needs nothing else. One limitation is worth knowing: a process
+loads **one** bridge. A second copy registers its modules and then refuses to create them, so the studio
+keeps whichever bridge got there first, unloads any other it finds, and says so in the Log.
+
+The bridge is built when CMake finds CPython 3.11+ development files, and it is compiled against the
+stable ABI, so one built bridge serves any later CPython. What a Python module does not get: hot
+reload (one interpreter per process, never finalized) — an edited script is picked up the next time the
+plugin loads, which in the studio is the Plugins dock's rescan button and never inside a running
+pipeline — zero-copy for `blob`, and — inherited from the C path itself — `service_directory` and
+groups.
+
+## What each language costs
+
+| Language | What you write | Starting point | Built by |
+|---|---|---|---|
+| C++ | A plugin against `plugin.hpp`; full port type freedom, `service_directory`, groups. Must share the host's toolchain and C++ runtime. | `templates/plugin/` | CMake + the installed SDK |
+| C | A plugin against `plugin_c.h`; closed payload type set, no toolchain requirement. | `examples/plugin_c_demo/` | CMake, `atp_add_plugin(... C_ABI)` |
+| Rust | A `cdylib` mirroring `plugin_c.h` by hand in `src/abi.rs`; no SDK, no CMake, no dependencies. | `templates/plugin_rust/` | `cargo build` alone |
+| Python | A module, not a plugin — the bridge is the plugin. No build step at all. | `templates/plugin_python/` | nothing; the script is read at load |
+| Lua | The same, and the bridge carries its own interpreter, so the machine needs nothing installed. | `templates/plugin_lua/` | nothing; the script is read at load |
 
 ## Reading further
 

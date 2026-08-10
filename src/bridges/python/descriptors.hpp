@@ -16,6 +16,12 @@ namespace atp::bridge {
 /// freed, since the host keeps the pointers for as long as the registration lives and the library is
 /// pinned anyway. The cost is that repeated loads accumulate storage, which is bounded by how many
 /// times a process reloads the bridge.
+///
+/// The descriptors themselves are part of that never-freed storage, and each call adds a batch
+/// rather than emptying the previous one. A module the host built keeps a pointer to its descriptor
+/// for its whole life and dereferences it once more when it is destroyed — so a reload that reused
+/// the array would leave every module of the run before it pointing into freed memory, and a
+/// pipeline that is merely stopped still owns its modules.
 [[nodiscard]] const std::vector<atp_module_desc>& discover();
 
 /// The batch the last discover() produced, without running discovery again.

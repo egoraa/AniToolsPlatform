@@ -110,6 +110,29 @@ class plugin_library {
 
 }  // namespace detail
 
+/// A file that opened as a library but exports neither entry point: not a plugin at all, as opposed
+/// to a plugin that is broken. The distinction exists for scanning a directory — a foreign library
+/// lying next to the plugins is skipped, while a plugin whose ABI does not match must stop the host.
+/// Derived from std::runtime_error, so every handler written before this type keeps catching it.
+class not_a_plugin : public std::runtime_error {
+   public:
+    using std::runtime_error::runtime_error;
+};
+
+/// One module a plugin registered, with the file it declares itself in.
+///
+/// `source` is empty for everything compiled into a plugin, and carries a path only where a plugin
+/// builds its modules out of files — the Python bridge and its scripts. It rides here rather than in
+/// the factory because a factory is a plugin ABI type: growing it would be an ABI break, while this
+/// list is the host's own.
+struct registered_module {
+    std::string name;
+    version ver;
+    std::string source;
+
+    friend bool operator==(const registered_module&, const registered_module&) = default;
+};
+
 /// Plugin loader: opens the library, checks the ABI and registers the plugin's modules into the
 /// given registry. The registry has to outlive the loader, while the modules created by the
 /// plugin's factories MAY outlive it — each pins its library through the module_ptr deleter, and
@@ -134,16 +157,25 @@ class module_loader {
             const bool speaks_c = library_->find(c_abi_version_symbol) != nullptr;
             const bool speaks_cxx = library_->find(abi_version_symbol) != nullptr;
             if (!speaks_c && !speaks_cxx) {
-                throw std::runtime_error("plugin '" + path_.string() + "' exports neither '" + abi_version_symbol +
-                                         "' nor '" + c_abi_version_symbol + "'");
+                throw not_a_plugin("plugin '" + path_.string() + "' exports neither '" + abi_version_symbol +
+                                   "' nor '" + c_abi_version_symbol + "'");
             }
+            std::vector<c_registration> from_c;
             if (speaks_c) {
-                register_c_path(registrar);
+                from_c = register_c_path(registrar);
             }
             if (speaks_cxx) {
                 register_cxx_path(registrar);
             }
-            modules_ = registrar.registered();
+            modules_.reserve(registrar.registered().size());
+            for (const auto& [name, ver] : registrar.registered()) {
+                modules_.push_back({name, ver, source_of(from_c, name, ver)});
+            }
+        } catch (const not_a_plugin&) {
+            for (const auto& [name, ver] : registrar.registered()) {
+                registry.remove(name, ver);
+            }
+            throw;
         } catch (const std::exception& e) {
             for (const auto& [name, ver] : registrar.registered()) {
                 registry.remove(name, ver);
@@ -181,8 +213,8 @@ class module_loader {
         return *this;
     }
 
-    /// (name, version) pairs of the modules this plugin registered.
-    [[nodiscard]] const std::vector<std::pair<std::string, version>>& modules() const {
+    /// The modules this plugin registered, in registration order.
+    [[nodiscard]] const std::vector<registered_module>& modules() const {
         return modules_;
     }
 
@@ -195,14 +227,25 @@ class module_loader {
     /// Registers the modules of a plugin that is not C++. Adds the plugin's path to whatever went
     /// wrong: the C side of the boundary knows the descriptor it choked on but not which file it came
     /// from.
-    void register_c_path(module_registrar& registrar) const {
+    [[nodiscard]] std::vector<c_registration> register_c_path(module_registrar& registrar) const {
         try {
-            register_c_modules(registrar, load_symbol<c_abi_version_fn>(c_abi_version_symbol),
-                               load_symbol<c_module_count_fn>(c_module_count_symbol),
-                               load_symbol<c_module_desc_at_fn>(c_module_desc_at_symbol));
+            return register_c_modules(registrar, load_symbol<c_abi_version_fn>(c_abi_version_symbol),
+                                      load_symbol<c_module_count_fn>(c_module_count_symbol),
+                                      load_symbol<c_module_desc_at_fn>(c_module_desc_at_symbol));
         } catch (const std::exception& e) {
             throw std::runtime_error("plugin '" + path_.string() + "': " + e.what());
         }
+    }
+
+    [[nodiscard]] static std::string source_of(const std::vector<c_registration>& from_c,
+                                               const std::string& name,
+                                               version ver) {
+        for (const c_registration& made : from_c) {
+            if (made.name == name && made.ver == ver) {
+                return made.source;
+            }
+        }
+        return {};
     }
 
     void register_cxx_path(module_registrar& registrar) const {
@@ -248,8 +291,8 @@ class module_loader {
         if (!library_) {
             return;
         }
-        for (const auto& [name, ver] : modules_) {
-            registry_->remove(name, ver);
+        for (const registered_module& m : modules_) {
+            registry_->remove(m.name, m.ver);
         }
         modules_.clear();
         library_.reset();
@@ -258,7 +301,7 @@ class module_loader {
     std::filesystem::path path_;
     module_registry* registry_;
     std::shared_ptr<detail::plugin_library> library_;
-    std::vector<std::pair<std::string, version>> modules_;
+    std::vector<registered_module> modules_;
 };
 
 }  // namespace atp

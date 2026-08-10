@@ -290,6 +290,7 @@ fn registry() -> &'static Registry {
                 start: Some(start),
                 iterate: Some(iterate),
                 stop: Some(stop),
+                source: core::ptr::null(),
             },
         }
     })

@@ -520,6 +520,87 @@ jobs:
         echo "the exception was reported as a module error:"
         grep -m2 'the fail property was set' fail.log
 
+  # A module written in Lua: the third consumer of the C path, and the one that proves the path needs
+  # no runtime on the machine at all. Unlike the python job there is nothing to set up and nothing
+  # that can be silently absent — the interpreter is vendored and compiled into the plugin — so this
+  # job also has no "was the bridge built" guard: a bridge that did not build fails the build step.
+  lua:
+    name: lua plugin
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.x'
+
+    - name: Build the host and the bridge
+      run: |
+        cmake -B build -S . -G "Unix Makefiles" \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DATP_WERROR=ON \
+          -DATP_BUILD_STUDIO=OFF
+        cmake --build build --target atp_app atp_demo_plugin atp_app_demo_assets atp_app_lua_assets
+
+    - name: Run a pipeline with a module written in Lua
+      # Two greps, two claims: an int crossed from a C++ module into the script and came back as a
+      # string on one port, and as an int on another — with no adapter anywhere in the config.
+      run: |
+        cd build/src/app
+        set +e
+        timeout 10 ./atp_app config/pipeline_lua.json > run.log 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" -ne 124 ]; then
+          echo "::error::atp_app exited with status $rc before the window closed"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^printer label: [0-9]* x 5 = ' run.log; then
+          echo "::error::nothing came back from the Lua module"
+          cat run.log
+          exit 1
+        fi
+        if ! grep -q '^sink.value: ' run.log; then
+          echo "::error::the Lua module's i32 output never reached the C++ one"
+          cat run.log
+          exit 1
+        fi
+        echo "a module written in Lua ran inside the C++ host:"
+        grep -m4 -E '^(printer label|sink\.value): ' run.log
+
+    - name: An error becomes a reported error
+      # The Lua counterpart of the rust job's panic step and the python job's exception step. An error
+      # left on the interpreter's stack would sit under the next call's arguments and be read as one;
+      # the bridge turns it into the module error that stops the pipeline, with the script's own file
+      # and line in the message and a traceback behind it.
+      run: |
+        cd build/src/app
+        set +e
+        timeout 10 ./atp_app -p scale.fail=true config/pipeline_lua.json > fail.log 2>&1
+        rc=$?
+        set -e
+        if [ "$rc" -eq 124 ] || [ "$rc" -eq 0 ]; then
+          echo "::error::an error in the module did not stop the pipeline (status $rc)"
+          cat fail.log
+          exit 1
+        fi
+        if ! grep -q 'the fail property was set' fail.log; then
+          echo "::error::the pipeline stopped, but not with the script's own text"
+          cat fail.log
+          exit 1
+        fi
+        if ! grep -q 'stack traceback' fail.log; then
+          echo "::error::the error reached the host without the traceback the handler adds"
+          cat fail.log
+          exit 1
+        fi
+        echo "the error was reported as a module error:"
+        grep -m2 'the fail property was set' fail.log
+
   # Formatting needs no compiler and no build — just the sources and the tool — so this job is the
   # cheapest of the lot and finishes while the others are still configuring.
   format:

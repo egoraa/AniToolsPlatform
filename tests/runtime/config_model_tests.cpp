@@ -120,4 +120,32 @@ TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
     EXPECT_TRUE(atp::runtime::validate(out).empty());
 }
 
+TEST(ConfigModel, InlineConfigSurvivesRoundTrip) {
+    const nlohmann::json doc = nlohmann::json::parse(R"({
+        "version": "3.2",
+        "pipeline": {"modules": [{"module": "resampler", "config": {"channels": [1, 2]}}]}
+    })");
+    EXPECT_EQ(atp::runtime::encode(atp::runtime::decode(doc)), doc);
+}
+
+TEST(ConfigModel, ConfigReferenceSurvivesRoundTripUnexpanded) {
+    const nlohmann::json doc = nlohmann::json::parse(R"({
+        "version": "3.2",
+        "configs": {"rig": {"channels": [1, 2]}},
+        "pipeline": {"modules": [{"module": "resampler", "config": "rig"}]}
+    })");
+    const nlohmann::json back = atp::runtime::encode(atp::runtime::decode(doc));
+    EXPECT_EQ(back, doc);
+    EXPECT_TRUE(back["pipeline"]["modules"][0]["config"].is_string());
+}
+
+TEST(ConfigModel, AbsentConfigIsNotWrittenBack) {
+    const nlohmann::json doc = nlohmann::json::parse(R"({
+        "version": "3.2",
+        "pipeline": {"modules": [{"module": "resampler"}]}
+    })");
+    const nlohmann::json back = atp::runtime::encode(atp::runtime::decode(doc));
+    EXPECT_FALSE(back["pipeline"]["modules"][0].contains("config"));
+}
+
 }  // namespace

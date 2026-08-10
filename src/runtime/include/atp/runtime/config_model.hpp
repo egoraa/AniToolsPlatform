@@ -20,7 +20,10 @@ namespace atp::runtime {
 /// Config schema version the application understands: the config's major has to match and its minor
 /// must not exceed ours, so that fields "from the future" are rejected rather than silently
 /// ignored. The "version" field is the first thing checked.
-inline constexpr version config_schema_version{3, 0};
+///
+/// 3.2 added a module's "config" and the document's "configs": a minor step, because keys are added
+/// while the shape of the existing ones does not change, so a 3.1 document still reads unaltered.
+inline constexpr version config_schema_version{3, 2};
 
 /// Application-level error: reading, includes, building from a config.
 class config_error : public std::runtime_error {
@@ -29,11 +32,18 @@ class config_error : public std::runtime_error {
 };
 
 /// A plain module within a group.
+///
+/// `config` is the structured setting the module reads in its constructor, held **exactly as
+/// written** — an object stays an object and a reference stays a string. Expanding a reference on the
+/// way out is not allowed, and keeping the original spelling is the cheapest way of never doing it:
+/// encode becomes a copy of the node and encode(decode(doc)) == doc needs no logic of its own.
+/// Resolving a reference and converting to config_value happen in the builder instead.
 struct module_node {
     std::string factory;
     std::string name;
     std::optional<version> factory_version;
     std::vector<std::pair<std::string, nlohmann::json>> properties;
+    std::optional<nlohmann::json> config;
 };
 
 struct group_node;
@@ -70,13 +80,36 @@ struct thread_node {
 };
 
 /// A whole config document in typed form.
+///
+/// `configs` holds the shared blocks a module's "config" may name instead of spelling one out, stored
+/// verbatim for the same reason module_node::config is. An entry is required to be an object, so that
+/// the root of a config is an object (or null) whichever spelling was used and a module never has to
+/// write code about which one the file chose.
 struct config {
     version schema;
     std::vector<std::string> plugins;
     group_node pipeline;
     std::vector<thread_node> threads;
     std::vector<std::pair<std::string, std::string>> assignments;
+    std::vector<std::pair<std::string, nlohmann::json>> configs;
 };
+
+/// Splits a module's "config" string into the source it names and the entry within it.
+///
+/// A string is always a reference, never a literal — a config that is itself a string is written as
+/// {"value": "…"} — and it is parsed on the **first** colon, the same move parse_property_override
+/// makes when it splits "path.prop=value" on the first '='. No prefix means the default source, the
+/// document's own "configs" block, and the entry name is returned. Any prefix is a source that does
+/// not exist yet, hence nullopt: adding one later costs a case here and no change to the schema.
+///
+/// @return the entry name for a string without a prefix, nullopt for a string carrying one
+[[nodiscard]] inline std::optional<std::string> parse_config_ref(std::string_view text) {
+    const std::size_t colon = text.find(':');
+    if (colon == std::string_view::npos) {
+        return std::string(text);
+    }
+    return std::nullopt;
+}
 
 namespace detail {
 
@@ -96,6 +129,9 @@ inline module_node decode_module(const nlohmann::json& j) {
         for (const auto& [name, value] : props.items()) {
             m.properties.emplace_back(name, value);
         }
+    }
+    if (j.contains("config")) {
+        m.config = j.at("config");
     }
     return m;
 }
@@ -152,6 +188,9 @@ inline nlohmann::json encode_child(const child_node& c) {
                 props[name] = value;
             }
             j["properties"] = std::move(props);
+        }
+        if (c.module->config) {
+            j["config"] = *c.module->config;
         }
         return j;
     }
@@ -229,6 +268,10 @@ inline nlohmann::json encode_group_body(const group_node& g) {
     for (const auto& [group_path, thread] : assign.items()) {
         cfg.assignments.emplace_back(group_path, thread.get<std::string>());
     }
+    const nlohmann::json configs = doc.value("configs", nlohmann::json::object());
+    for (const auto& [name, value] : configs.items()) {
+        cfg.configs.emplace_back(name, value);
+    }
     return cfg;
 }
 
@@ -270,6 +313,13 @@ inline nlohmann::json encode_group_body(const group_node& g) {
             assign[path] = thread;
         }
         doc["assign"] = std::move(assign);
+    }
+    if (!cfg.configs.empty()) {
+        nlohmann::json configs = nlohmann::json::object();
+        for (const auto& [name, value] : cfg.configs) {
+            configs[name] = value;
+        }
+        doc["configs"] = std::move(configs);
     }
     return doc;
 }

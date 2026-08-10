@@ -5,10 +5,13 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QBrush>
 #include <QClipboard>
+#include <QColor>
 #include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QKeySequence>
+#include <QListWidgetItem>
 #include <QMenu>
 #include <QStringList>
 
@@ -18,6 +21,16 @@ log_widget::log_widget(QWidget* parent) : QListWidget(parent) {
     style::embed_view(this);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setToolTip("Ctrl+A selects the log, Ctrl+C copies the selection");
+}
+
+void log_widget::append(const QString& text, atp::log_level level) {
+    auto* line = new QListWidgetItem(text);
+    if (level == atp::log_level::error) {
+        line->setForeground(QBrush(QColor(220, 80, 80)));
+    } else if (level == atp::log_level::warning) {
+        line->setForeground(QBrush(QColor(220, 170, 80)));
+    }
+    insertItem(0, line);
 }
 
 QString log_widget::selected_text() const {

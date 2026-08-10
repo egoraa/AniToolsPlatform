@@ -26,6 +26,7 @@ class Echo(atp.Module):
 
     def initialize(self):
         self.passes = 0
+        self.log("py_echo ready")
 
     def _echo(self, source, sink, transform=None):
         value = source.get()

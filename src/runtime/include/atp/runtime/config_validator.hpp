@@ -22,6 +22,15 @@ class validator {
    public:
     std::vector<std::string> errors;
 
+    /// Entry names of the document's "configs" block, collected before the pipeline is walked because
+    /// check_child cannot see the document root from where it stands.
+    std::unordered_set<std::string> config_names;
+
+    /// Whether the "configs" block itself parsed. A malformed block leaves config_names empty, and
+    /// checking references against it anyway would blame every reference in the document for a dangling
+    /// name on top of the one real error — the cause has to be named once.
+    bool configs_usable = true;
+
     void error(const std::string& path, const std::string& message) {
         errors.push_back(path + ": " + message);
     }
@@ -53,6 +62,51 @@ class validator {
         if (dot == std::string::npos || dot == 0 || dot + 1 == text.size() ||
             text.find('.', dot + 1) != std::string::npos) {
             error(path, "expected '<child>.<port>', got '" + text + "'");
+        }
+    }
+
+    /// Reads the document's "configs" block into config_names. The contents of an entry are not
+    /// checked by anything — having no schema is the whole point of the block — but the entry itself
+    /// has to be an object, so a module's config root is an object whichever spelling reached it, and
+    /// the name may not contain a colon, since that is what tells a reference from a source prefix.
+    void check_configs(const nlohmann::json& doc) {
+        if (!doc.contains("configs")) {
+            return;
+        }
+        const nlohmann::json& configs = doc.at("configs");
+        if (!configs.is_object()) {
+            error("configs", "must be an object of name -> object");
+            configs_usable = false;
+            return;
+        }
+        for (const auto& [name, value] : configs.items()) {
+            if (name.contains(':')) {
+                error("configs", "entry name '" + name + "' may not contain ':'");
+                continue;
+            }
+            if (!value.is_object()) {
+                error("configs." + name, "must be an object");
+                continue;
+            }
+            config_names.insert(name);
+        }
+    }
+
+    /// A module's "config" is either the block itself or a string naming an entry of "configs".
+    void check_config(const nlohmann::json& node, const std::string& path) {
+        if (node.is_object()) {
+            return;
+        }
+        if (!node.is_string()) {
+            error(path, "must be an object or a string naming an entry of 'configs'");
+            return;
+        }
+        const std::string text = node.get<std::string>();
+        const std::optional<std::string> ref = parse_config_ref(text);
+        if (!ref) {
+            error(path, "unknown config source '" + text.substr(0, text.find(':')) + "'");
+        } else if (configs_usable && !config_names.contains(*ref)) {
+            error(path, "no entry named '" + *ref + "' in 'configs'");
         }
     }
 
@@ -157,7 +211,7 @@ class validator {
         }
         std::string child_name;
         if (is_module) {
-            check_keys(node, path, {"module", "name", "version", "properties"});
+            check_keys(node, path, {"module", "name", "version", "properties", "config"});
             if (check_name(node.at("module"), path + ".module")) {
                 child_name = node.at("module").get<std::string>();
             }
@@ -181,6 +235,9 @@ class validator {
                         }
                     }
                 }
+            }
+            if (node.contains("config")) {
+                check_config(node.at("config"), path + ".config");
             }
         } else {
             check_keys(node, path, {"group", "modules", "expose", "connections"});
@@ -237,7 +294,8 @@ class validator {
         return v.errors;
     }
     v.check_version(doc);
-    v.check_keys(doc, "$", {"version", "plugins", "pipeline", "threads", "assign"});
+    v.check_keys(doc, "$", {"version", "plugins", "pipeline", "threads", "assign", "configs"});
+    v.check_configs(doc);
 
     if (doc.contains("plugins")) {
         if (!doc.at("plugins").is_array()) {

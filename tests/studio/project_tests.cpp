@@ -809,4 +809,72 @@ TEST(ProjectEditScope, FailedRemoveExposeKeepsTheScopeSnapshot) {
     EXPECT_EQ(proj.group_at("g")->expose_outputs.size(), 1u);
 }
 
+TEST(ProjectEdit, SetConfigAddsReplacesAndClears) {
+    auto proj = atp::studio::project::create();
+    proj.add_module("", "resampler");
+    proj.set_config("", "resampler", nlohmann::json::parse(R"({"channels": [1, 2]})"));
+    ASSERT_NE(proj.config_of("", "resampler"), nullptr);
+    EXPECT_EQ(*proj.config_of("", "resampler"), nlohmann::json::parse(R"({"channels": [1, 2]})"));
+
+    proj.set_config("", "resampler", nlohmann::json("rig"));
+    ASSERT_NE(proj.config_of("", "resampler"), nullptr);
+    EXPECT_TRUE(proj.config_of("", "resampler")->is_string());
+
+    proj.clear_config("", "resampler");
+    EXPECT_EQ(proj.config_of("", "resampler"), nullptr);
+    proj.clear_config("", "resampler");
+}
+
+TEST(ProjectEdit, SharedConfigRejectsABadNameAndANonObject) {
+    auto proj = atp::studio::project::create();
+    EXPECT_THROW(proj.set_shared_config("", nlohmann::json::object()), atp::runtime::config_error);
+    EXPECT_THROW(proj.set_shared_config("a:b", nlohmann::json::object()), atp::runtime::config_error);
+    EXPECT_THROW(proj.set_shared_config("rig", nlohmann::json::array()), atp::runtime::config_error);
+    proj.set_shared_config("rig", nlohmann::json::object());
+    EXPECT_NE(proj.shared_config("rig"), nullptr);
+    proj.clear_shared_config("rig");
+    EXPECT_EQ(proj.shared_config("rig"), nullptr);
+    proj.clear_shared_config("rig");
+}
+
+TEST(ProjectEdit, SetConfigRejectsANonObjectAndAGhostModule) {
+    auto proj = atp::studio::project::create();
+    proj.add_module("", "resampler");
+    EXPECT_THROW(proj.set_config("", "resampler", nlohmann::json::array({1, 2})), atp::runtime::config_error);
+    EXPECT_THROW(proj.set_config("", "ghost", nlohmann::json::object()), atp::runtime::config_error);
+}
+
+TEST(ProjectEdit, ConfigSurvivesSaveOpenAndUndoWithAReferenceStillAString) {
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() / "atp_project_config_round_trip.atp.json";
+    std::error_code ignored;
+    std::filesystem::remove(file, ignored);
+
+    auto proj = atp::studio::project::create();
+    proj.add_module("", "inline_one");
+    proj.add_module("", "referring_one");
+    proj.set_shared_config("rig", nlohmann::json::parse(R"({"channels": [1, 2, 6]})"));
+    proj.set_config("", "inline_one", nlohmann::json::parse(R"({"channels": [1, 2]})"));
+    proj.set_config("", "referring_one", nlohmann::json("rig"));
+    proj.save(file);
+
+    atp::studio::project reopened = atp::studio::project::open(file);
+    ASSERT_NE(reopened.config_of("", "inline_one"), nullptr);
+    EXPECT_EQ(*reopened.config_of("", "inline_one"), nlohmann::json::parse(R"({"channels": [1, 2]})"));
+    ASSERT_NE(reopened.config_of("", "referring_one"), nullptr);
+    EXPECT_TRUE(reopened.config_of("", "referring_one")->is_string())
+        << "a reference must not be expanded into the block it names";
+    ASSERT_NE(reopened.shared_config("rig"), nullptr);
+    EXPECT_EQ(*reopened.shared_config("rig"), nlohmann::json::parse(R"({"channels": [1, 2, 6]})"));
+    EXPECT_EQ(reopened.config_names(), (std::vector<std::string>{"rig"}));
+
+    ASSERT_TRUE(proj.undo());
+    EXPECT_EQ(proj.config_of("", "referring_one"), nullptr);
+    ASSERT_TRUE(proj.redo());
+    ASSERT_NE(proj.config_of("", "referring_one"), nullptr);
+    EXPECT_TRUE(proj.config_of("", "referring_one")->is_string()) << "undo carries the spelling too";
+
+    std::filesystem::remove(file, ignored);
+}
+
 }  // namespace

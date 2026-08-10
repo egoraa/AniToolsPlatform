@@ -25,6 +25,14 @@ namespace atp::studio {
 /// fraction of a second, because the panels ask running() dozens of times per repaint and each ask
 /// would otherwise be a round trip.
 ///
+/// A consequence of that cache is worth naming, because it is what a reader — or a test — trips over:
+/// **running() may go on answering true for up to status_lifetime after the remote host has gone.**
+/// Nothing here polls. The snapshot is reused without any I/O, and the client only learns the
+/// connection is dead when a call fails, so the answer changes at the first call made after the
+/// snapshot expires rather than at the moment the host died. Code that has to observe the change
+/// waits for it with a deadline; code that asserts it has already happened is asserting a promise
+/// this class does not make.
+///
 /// A failed call is not thrown at the panels: it disconnects the client and shows up through
 /// running() and error_text(). That is the state the window has to reach anyway, and a panel is not
 /// the place to decide it. The one exception is set_property, whose refusal belongs to the editor

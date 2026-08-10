@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <chrono>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -63,7 +64,9 @@ TEST(HostNode, LoggingWithoutAnAttachedNotifierDoesNotWake) {
     node.info("still alive");
 
     std::vector<std::string> texts;
-    node.ring().drain([&texts](atp::log_level, std::string_view text, bool) { texts.emplace_back(text); });
+    node.ring().drain([&texts](atp::log_level, std::string_view text, bool, std::chrono::system_clock::time_point) {
+        texts.emplace_back(text);
+    });
     ASSERT_EQ(texts.size(), 1u);
     EXPECT_EQ(texts[0], "still alive");
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -15,7 +16,9 @@ namespace {
 
 std::vector<std::string> drain_texts(atp::log_ring& ring) {
     std::vector<std::string> out;
-    ring.drain([&out](atp::log_level, std::string_view text, bool) { out.emplace_back(text); });
+    ring.drain([&out](atp::log_level, std::string_view text, bool, std::chrono::system_clock::time_point) {
+        out.emplace_back(text);
+    });
     return out;
 }
 
@@ -38,8 +41,23 @@ TEST(LogRing, CarriesTheLevel) {
     ring.write(atp::log_level::error, "boom");
 
     atp::log_level seen = atp::log_level::debug;
-    ring.drain([&seen](atp::log_level level, std::string_view, bool) { seen = level; });
+    ring.drain(
+        [&seen](atp::log_level level, std::string_view, bool, std::chrono::system_clock::time_point) { seen = level; });
     EXPECT_EQ(seen, atp::log_level::error);
+}
+
+TEST(LogRing, StampsTheMomentOfTheWrite) {
+    atp::log_ring ring;
+
+    const auto before = std::chrono::system_clock::now();
+    ring.write(atp::log_level::info, "now");
+    const auto after = std::chrono::system_clock::now();
+
+    std::chrono::system_clock::time_point seen{};
+    ring.drain(
+        [&seen](atp::log_level, std::string_view, bool, std::chrono::system_clock::time_point at) { seen = at; });
+    EXPECT_GE(seen, before);
+    EXPECT_LE(seen, after);
 }
 
 TEST(LogRing, TruncatesAndSaysSo) {
@@ -49,7 +67,7 @@ TEST(LogRing, TruncatesAndSaysSo) {
 
     std::string text;
     bool truncated = false;
-    ring.drain([&](atp::log_level, std::string_view t, bool cut) {
+    ring.drain([&](atp::log_level, std::string_view t, bool cut, std::chrono::system_clock::time_point) {
         text = t;
         truncated = cut;
     });
@@ -100,9 +118,13 @@ TEST(LogRing, ManyProducersLoseNothingButWhatItCounts) {
 
     std::thread reader([&] {
         while (!stop.load(std::memory_order_relaxed)) {
-            ring.drain([&seen](atp::log_level, std::string_view text, bool) { seen.emplace(text); });
+            ring.drain([&seen](atp::log_level, std::string_view text, bool, std::chrono::system_clock::time_point) {
+                seen.emplace(text);
+            });
         }
-        ring.drain([&seen](atp::log_level, std::string_view text, bool) { seen.emplace(text); });
+        ring.drain([&seen](atp::log_level, std::string_view text, bool, std::chrono::system_clock::time_point) {
+            seen.emplace(text);
+        });
     });
 
     {

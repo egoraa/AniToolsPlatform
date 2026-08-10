@@ -22,6 +22,8 @@ namespace atp::bridge {
 /// c_str() already handed to a descriptor would dangle the moment it did.
 struct module_slot {
     std::string name;
+    /// Script the class was read from, which is the file its author edits.
+    std::string source;
     /// Index of the class in the package's registry, passed back to atp._create.
     long long python_index = 0;
     std::deque<std::string> texts;

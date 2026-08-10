@@ -13,6 +13,7 @@
 
 #include <QFormLayout>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -28,6 +29,11 @@ class inspector_widget final : public QWidget {
 
     /// Rebuilds the form from the current selection and project.
     void refresh();
+
+    /// Commits the config editor when it loses focus. Text is parsed there and a project edit happens
+    /// only if it parsed and actually differs, so nothing malformed and nothing unchanged reaches the
+    /// document — an editor holding a half-typed object must not push a snapshot onto undo.
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
    private:
     [[nodiscard]] std::string form_key() const;
@@ -48,6 +54,10 @@ class inspector_widget final : public QWidget {
 
     void build_module_section(const runtime::module_node& m);
 
+    void build_config_section(const runtime::module_node& m);
+
+    void commit_config(const std::string& name);
+
     void build_group_section(const std::string& group_path, const std::string& name, bool renameable);
 
     app_state& state_;
@@ -59,6 +69,12 @@ class inspector_widget final : public QWidget {
     expose_editor* expose_inputs_ = nullptr;
     expose_editor* expose_outputs_ = nullptr;
     std::vector<QWidget*> property_rows_;
+    QPlainTextEdit* config_edit_ = nullptr;
+    std::string config_module_;
+
+    /// Tall enough for a small object without turning the inspector into a text editor. A config that
+    /// needs more room is a shared block, which is what the reference form is for.
+    static constexpr int config_editor_height = 120;
 };
 
 }  // namespace atp::studio::ui

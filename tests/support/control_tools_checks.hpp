@@ -105,13 +105,19 @@ inline constexpr const char* control_target_config = R"({
 /// Everything the control tools must answer over a pipeline built from control_target_config. Both
 /// targets run it: that a session and a bare runtime::application give the same answers is the whole
 /// claim of the shared registration.
+///
+/// Every answer walked below is held in a named local first. Iterating call_tool(...).at(...)
+/// directly reads a subobject of a temporary that dies with the init-expression: C++23 extends it
+/// (P2718R0), but a compiler without that paper — gcc 13 among them — leaves the range dangling, and
+/// the loop then silently sees nothing rather than crashing.
 inline void check_control_tools(const atp::mcp::tool_registry& tools) {
     EXPECT_EQ(call_tool(tools, "get_status").at("running"), true);
     EXPECT_FALSE(call_tool(tools, "get_status").at("threads").empty());
 
     nlohmann::json seen;
     for (int i = 0; i < 500 && seen.is_null(); ++i) {
-        for (const nlohmann::json& c : call_tool(tools, "read_connections").at("connections")) {
+        const nlohmann::json sampled = call_tool(tools, "read_connections");
+        for (const nlohmann::json& c : sampled.at("connections")) {
             if (c.at("writes").get<std::uint64_t>() > 0) {
                 seen = c;
             }

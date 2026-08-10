@@ -34,13 +34,24 @@ class main_window final : public QMainWindow {
     /// Rebuilds every widget from the current project and selection.
     void refresh_all();
 
-    /// Appends a line to the Errors dock.
-    void report(const QString& text);
+    /// Appends a line of the studio's own to the Log dock, rendered like a module's: the current
+    /// time, the level in brackets, then the message. One shape for every line in the dock is what
+    /// lets a reader scan the column rather than parse each row, so a message must not name its
+    /// own severity in words — the bracket already does.
+    ///
+    /// Lines drained from modules do not come this way — they arrive already rendered, carrying
+    /// the moment their own thread wrote them, which is the moment worth showing.
+    /// @param text what to say
+    /// @param level severity, deciding both the bracket and the colour
+    void report(const QString& text, atp::log_level level = atp::log_level::info);
 
-    /// Appends an exception to the Errors dock, prefixed with the context it happened in.
+    /// Appends an exception to the Log dock, prefixed with the context it happened in. Always
+    /// an error — that is what an exception reaching this window is.
+    /// @param context what was being attempted
+    /// @param e the exception
     void report(const std::string& context, const std::exception& e);
 
-    /// Moves whatever the running modules have said into the Errors dock.
+    /// Moves whatever the running modules have said into the Log dock.
     ///
     /// Called from poll(), and public because a test that had to wait for a timer tick instead
     /// would be a test that fails on a busy machine.
@@ -82,9 +93,11 @@ class main_window final : public QMainWindow {
 
     void rebuild_recent_menu();
 
-    QDockWidget* build_errors_dock();
+    QDockWidget* build_log_dock();
 
     void open_dialog();
+
+    void new_script_module();
 
     void attach_dialog_flow();
 
@@ -105,7 +118,7 @@ class main_window final : public QMainWindow {
     canvas_widget* canvas_ = nullptr;
     inspector_widget* inspector_ = nullptr;
     runtime_widget* runtime_ = nullptr;
-    log_widget* errors_ = nullptr;
+    log_widget* log_ = nullptr;
     QMenu* recent_menu_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;
@@ -122,7 +135,7 @@ class main_window final : public QMainWindow {
     QDockWidget* manager_dock_ = nullptr;
     QDockWidget* inspector_dock_ = nullptr;
     QDockWidget* runtime_dock_ = nullptr;
-    QDockWidget* errors_dock_ = nullptr;
+    QDockWidget* log_dock_ = nullptr;
 };
 
 }  // namespace atp::studio::ui

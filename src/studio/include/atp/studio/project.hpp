@@ -548,6 +548,110 @@ class project {
         m.properties.emplace_back(prop, std::move(value));
     }
 
+    /// Sets a module's config: the structured setting its constructor reads, either the block itself or
+    /// a string naming an entry of the document's shared "configs".
+    ///
+    /// Unlike a property this is **not** editable while the pipeline runs, and the difference is not a
+    /// policy choice: a config reaches a module in its constructor, so changing one means building a
+    /// different module. That makes it part of the project's structure, and structure is read-only
+    /// during a run — enforced where every other structural edit is enforced, at the window, since the
+    /// project itself is a document and knows nothing about a runner.
+    ///
+    /// Stored verbatim, so that a reference stays a string through save, open and undo.
+    /// @param group_path group holding the module ("" is the root)
+    /// @param name module name within that group
+    /// @param value an object, or a string naming an entry of "configs"
+    /// @throws runtime::config_error if the value is neither, or the group or module is missing
+    void set_config(const std::string& group_path, const std::string& name, nlohmann::json value) {
+        if (!value.is_object() && !value.is_string()) {
+            throw runtime::config_error("config of '" + name +
+                                        "' must be an object or a string naming an entry of 'configs'");
+        }
+        runtime::module_node& m = require_module(group_path, name);
+        snapshot();
+        m.config = std::move(value);
+    }
+
+    /// Drops a module's config, which means "the module is given nothing". A module that had none is
+    /// not an error and pushes no snapshot, so the clear button is idempotent.
+    /// @throws runtime::config_error if the group or the module is missing
+    void clear_config(const std::string& group_path, const std::string& name) {
+        runtime::module_node& m = require_module(group_path, name);
+        if (!m.config) {
+            return;
+        }
+        snapshot();
+        m.config.reset();
+    }
+
+    /// A module's config as written, or nullptr if it has none.
+    /// @throws runtime::config_error if the group or the module is missing
+    [[nodiscard]] const nlohmann::json* config_of(const std::string& group_path, const std::string& name) {
+        const runtime::module_node& m = require_module(group_path, name);
+        return m.config ? &*m.config : nullptr;
+    }
+
+    /// Declares or replaces a shared config block, the thing a module's config names by string.
+    ///
+    /// Without this the reference form would be unreachable from studio — a project could only ever
+    /// spell a config out in place — and the block a saved reference points at would have to appear by
+    /// some other route, which is to say the document would not validate on reopening.
+    /// @param name entry name, which may not contain ':' — that character is what separates a source
+    ///        prefix from an entry, so a name carrying one could never be referenced
+    /// @param value the block, which has to be an object so that a config's root is an object however
+    ///        it was reached
+    /// @throws runtime::config_error if the name is empty or holds ':', or the value is not an object
+    void set_shared_config(const std::string& name, nlohmann::json value) {
+        if (name.empty() || name.contains(':')) {
+            throw runtime::config_error("config name '" + name + "' must be non-empty and without ':'");
+        }
+        if (!value.is_object()) {
+            throw runtime::config_error("config '" + name + "' must be an object");
+        }
+        snapshot();
+        for (auto& [existing, stored] : cfg_.configs) {
+            if (existing == name) {
+                stored = std::move(value);
+                return;
+            }
+        }
+        cfg_.configs.emplace_back(name, std::move(value));
+    }
+
+    /// Drops a shared config block. A name that is not there is not an error and pushes no snapshot.
+    ///
+    /// Modules referring to it are left alone deliberately: rewriting their configs would be a second,
+    /// silent edit, and the validator names the dangling reference plainly when the document is next
+    /// checked.
+    void clear_shared_config(const std::string& name) {
+        const auto it = std::ranges::find_if(cfg_.configs, [&](const auto& e) { return e.first == name; });
+        if (it == cfg_.configs.end()) {
+            return;
+        }
+        snapshot();
+        cfg_.configs.erase(it);
+    }
+
+    /// A shared config block by name, or nullptr if there is none.
+    [[nodiscard]] const nlohmann::json* shared_config(const std::string& name) const {
+        for (const auto& [existing, stored] : cfg_.configs) {
+            if (existing == name) {
+                return &stored;
+            }
+        }
+        return nullptr;
+    }
+
+    /// Names of the document's shared config blocks, in the order they are stored.
+    [[nodiscard]] std::vector<std::string> config_names() const {
+        std::vector<std::string> names;
+        names.reserve(cfg_.configs.size());
+        for (const auto& [name, value] : cfg_.configs) {
+            names.push_back(name);
+        }
+        return names;
+    }
+
     /// Drops a property value, which means "go back to the module's default". A missing entry is
     /// not an error — the reset button is idempotent — and a snapshot is pushed only on a real
     /// change.

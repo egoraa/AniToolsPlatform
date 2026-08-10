@@ -47,6 +47,29 @@ if (TARGET atp_python_bridge)
             DEPENDS atp_app atp_python_bridge)
 endif ()
 
+# The same arrangement for Lua, with one difference worth noticing: there is nothing to install beside
+# the bridge but its own package, because the interpreter is inside the file. A machine that can run
+# atp_app can run a Lua module.
+if (TARGET atp_lua_bridge)
+    add_dependencies(atp_app atp_lua_bridge)
+    add_custom_target(atp_app_lua_assets ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:atp_app>/${ATP_PLUGIN_DIRNAME}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:atp_lua_bridge>
+                    $<TARGET_FILE_DIR:atp_app>/${ATP_PLUGIN_DIRNAME}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${CMAKE_SOURCE_DIR}/templates/plugin_lua/pipeline.json
+                    $<TARGET_FILE_DIR:atp_app>/config/pipeline_lua.json
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    $<TARGET_FILE_DIR:atp_lua_bridge>/lua
+                    $<TARGET_FILE_DIR:atp_app>/${ATP_PLUGIN_DIRNAME}/lua
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${CMAKE_SOURCE_DIR}/templates/plugin_lua/scale.lua
+                    ${CMAKE_SOURCE_DIR}/templates/plugin_lua/packer.lua
+                    $<TARGET_FILE_DIR:atp_app>/${ATP_PLUGIN_DIRNAME}/lua
+            DEPENDS atp_app atp_lua_bridge)
+endif ()
+
 if (ATP_INSTALL)
     # The sample configs go under bin/config for the same reason they are copied there in the build
     # tree: `atp_app config/demo.json` has to mean the same thing in an unpacked release as it does in
@@ -73,6 +96,17 @@ if (ATP_INSTALL)
                 ${CMAKE_SOURCE_DIR}/templates/plugin_python/pipeline.json
                 DESTINATION ${CMAKE_INSTALL_BINDIR}/config
                 RENAME pipeline_python.json
+                COMPONENT applications)
+    endif ()
+    if (TARGET atp_lua_bridge)
+        install(FILES
+                ${CMAKE_SOURCE_DIR}/templates/plugin_lua/scale.lua
+                ${CMAKE_SOURCE_DIR}/templates/plugin_lua/packer.lua
+                DESTINATION ${CMAKE_INSTALL_BINDIR}/${ATP_PLUGIN_DIRNAME}/lua COMPONENT applications)
+        install(FILES
+                ${CMAKE_SOURCE_DIR}/templates/plugin_lua/pipeline.json
+                DESTINATION ${CMAKE_INSTALL_BINDIR}/config
+                RENAME pipeline_lua.json
                 COMPONENT applications)
     endif ()
 endif ()

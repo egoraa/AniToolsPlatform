@@ -80,14 +80,28 @@ class module_registry {
 
     /// Creates a module of the latest (highest) registered version of this name.
     /// @throws std::runtime_error if the name is unknown
-    [[nodiscard]] module_ptr create(const std::string& name) const {
-        return at(name).create();
+    [[nodiscard]] module_ptr create(const std::string& name, const config_value& cfg) const {
+        return at(name).create(cfg);
     }
 
     /// Creates a module of an exact version (1.2 == 1.2.0: zero padding).
     /// @throws std::runtime_error if the name or the version is unknown
+    [[nodiscard]] module_ptr create(const std::string& name, const version& v, const config_value& cfg) const {
+        return at(name, v).create(cfg);
+    }
+
+    /// Creates a module with no config, for the callers that have none to give — tests and studio's
+    /// add_module among them. The convenience lives here rather than as a default argument on
+    /// module_factory_base::create, because on a virtual function a default is taken from the static
+    /// type of the call, which is a classic trap. It is not offered on module_factory either: there it
+    /// would let a caller that does hold a config drop it silently.
+    [[nodiscard]] module_ptr create(const std::string& name) const {
+        return create(name, config_value{});
+    }
+
+    /// Creates a module of an exact version with no config.
     [[nodiscard]] module_ptr create(const std::string& name, const version& v) const {
-        return at(name, v).create();
+        return create(name, v, config_value{});
     }
 
     /// Factory of the latest registered version of this name.
@@ -200,8 +214,8 @@ class pinned_factory final : public module_factory_base {
     [[nodiscard]] version get_version() const noexcept override {
         return inner_->get_version();
     }
-    [[nodiscard]] module_ptr create() const override {
-        module_ptr m = inner_->create();
+    [[nodiscard]] module_ptr create(const config_value& cfg) const override {
+        module_ptr m = inner_->create(cfg);
         return module_ptr(m.release(), module_deleter{pin_});
     }
 

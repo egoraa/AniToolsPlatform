@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
@@ -48,9 +49,14 @@ class log_ring {
 
     /// Writes one line. Callable from any thread, allocation-free and wait-free apart from the
     /// contended ticket.
+    ///
+    /// The clock is read once, before the ticket is claimed, so the stamp says when the module
+    /// asked to log rather than when it won the race for a slot — under contention those differ,
+    /// and it is the first that the reader of a log is after.
     /// @param level severity
     /// @param text the message; longer than text_capacity it is stored cut, with the flag set
     void write(log_level level, std::string_view text) noexcept {
+        const std::chrono::system_clock::time_point at = std::chrono::system_clock::now();
         std::uint64_t pos = tail_.load(std::memory_order_relaxed);
         while (true) {
             slot& s = slots_[pos % capacity];
@@ -65,6 +71,7 @@ class log_ring {
                     s.size = static_cast<std::uint16_t>(size);
                     s.truncated = text.size() > text_capacity;
                     s.level = level;
+                    s.at = at;
                     s.seq.store(pos + 1, std::memory_order_release);
                     return;
                 }
@@ -81,8 +88,9 @@ class log_ring {
     ///
     /// The sink is taken by const reference rather than by a forwarding one on purpose: it is
     /// called once per line, so a signature promising that it might be consumed would be a lie.
-    /// @param sink invoked as sink(log_level, std::string_view, bool truncated); the view is valid
-    ///        only for the duration of the call
+    /// @param sink invoked as sink(log_level, std::string_view, bool truncated,
+    ///        std::chrono::system_clock::time_point); the view is valid only for the duration of
+    ///        the call
     template <typename TSink>
     void drain(const TSink& sink) {
         while (true) {
@@ -92,7 +100,7 @@ class log_ring {
             if (diff != 0) {
                 return;
             }
-            sink(s.level, std::string_view(s.text.data(), s.size), s.truncated);
+            sink(s.level, std::string_view(s.text.data(), s.size), s.truncated, s.at);
             s.seq.store(head_ + capacity, std::memory_order_release);
             ++head_;
         }
@@ -109,6 +117,7 @@ class log_ring {
         log_level level = log_level::info;
         bool truncated = false;
         std::uint16_t size = 0;
+        std::chrono::system_clock::time_point at{};
         std::array<char, text_capacity> text{};
     };
 

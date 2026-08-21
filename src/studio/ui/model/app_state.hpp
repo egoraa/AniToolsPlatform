@@ -26,7 +26,7 @@
 #include <atp/studio/script_environment.hpp>
 #include <atp/studio/session.hpp>
 #include <atp/studio/settings.hpp>
-#include <atp/version.hpp>
+#include <atp/support/version.hpp>
 
 namespace atp::studio::ui {
 
@@ -81,7 +81,23 @@ struct app_state {
         return doc_path ? doc_path->parent_path() : std::filesystem::current_path();
     }
 
+    /// The same directory, but **empty** rather than the current one when the project was never saved.
+    ///
+    /// What a module config written as "file:<path>" is resolved against, and there the fallback above
+    /// would be actively wrong: the process's current directory is wherever studio was launched from,
+    /// so a relative path would silently resolve somewhere the author never meant, or fail naming a file
+    /// nobody wrote. Empty makes the builder say "this needs the document's directory", which is the
+    /// truth. Plugin paths keep the older fallback, which they have always had.
+    [[nodiscard]] std::filesystem::path saved_dir() const {
+        return doc_path ? doc_path->parent_path() : std::filesystem::path{};
+    }
+
     /// Module description from the cache, computing it on the first request.
+    ///
+    /// The file the module was declared in is filled in here rather than left empty as describe()
+    /// leaves it: the factory does not know it, the manager's plugin rows do, and a caller holding a
+    /// project node has only a factory name to go on. The cache dies with every scan
+    /// (invalidate_descriptions), so the two cannot drift apart.
     /// @return nullptr if the factory is not registered
     [[nodiscard]] const module_info* describe_cached(const std::string& factory, const std::optional<version>& ver) {
         const std::string key = factory + "@" + (ver ? ver->to_string() : "latest");
@@ -93,7 +109,9 @@ struct app_state {
         if (f == nullptr) {
             return nullptr;
         }
-        return &describe_cache.emplace(key, module_manager::describe(*f)).first->second;
+        module_info info = module_manager::describe(*f);
+        info.source = manager.module_source(info.name, info.ver);
+        return &describe_cache.emplace(key, std::move(info)).first->second;
     }
 
     /// Returns the view to the root group with nothing selected.

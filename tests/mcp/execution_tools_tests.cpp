@@ -29,7 +29,7 @@ struct run_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
 
-class run_source : public atp::module<atp::io::ports<atp::io::inputs, run_outputs>, "run_source"> {
+class run_source : public atp::module<atp::ports<atp::io::inputs, run_outputs>, "run_source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         if (sent_) {
@@ -44,7 +44,7 @@ class run_source : public atp::module<atp::io::ports<atp::io::inputs, run_output
     bool sent_ = false;
 };
 
-class run_sink : public atp::module<atp::io::ports<run_inputs>, "run_sink"> {
+class run_sink : public atp::module<atp::ports<run_inputs>, "run_sink"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         return inputs().value.try_pop() ? atp::work_status::busy : atp::work_status::idle;

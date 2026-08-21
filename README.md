@@ -89,12 +89,12 @@ are simply omitted:
 #include <atp/module.hpp>
 
 struct counter_outputs : atp::io::outputs {
-    atp::io::output<int>& count = make<atp::io::output<int>>("count");
+    atp::io::output<int>& count = make<int>("count");
 };
 struct counter_props : atp::io::properties {
-    atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
+    atp::io::property<int>& step = make("step", 1);
 };
-using counter_ports = atp::io::ports<atp::io::inputs, counter_outputs, counter_props>;
+using counter_ports = atp::ports<atp::io::inputs, counter_outputs, counter_props>;
 
 class counter : public atp::module<counter_ports, "counter", atp::ver<"1.0">> {
    public:
@@ -126,7 +126,7 @@ cmake --build <plugin-build>
 
 ```cmake
 find_package(AniToolsPlatform REQUIRED)
-atp_require_plugin_abi(10)
+atp_require_plugin_abi(14)
 atp_add_plugin(my_plugin SOURCES plugin.cpp)
 ```
 

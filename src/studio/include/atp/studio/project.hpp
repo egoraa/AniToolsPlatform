@@ -14,11 +14,12 @@
 #include <utility>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-
+#include <atp/config/node.hpp>
+#include <atp/runtime/config_file.hpp>
 #include <atp/runtime/config_loader.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/studio/clipboard.hpp>
 #include <atp/studio/expose_cascade.hpp>
 #include <atp/studio/node_lookup.hpp>
@@ -54,19 +55,9 @@ class project {
     /// point for a document nobody wrote to disk — the mirror of a remote pipeline.
     /// @param doc config document, schema 2.0
     /// @throws runtime::config_error with every validation error aggregated into one message
-    [[nodiscard]] static project from_document(const nlohmann::json& doc) {
-        const std::vector<std::string> errors = runtime::validate(doc);
-        if (!errors.empty()) {
-            std::string message = "invalid config:";
-            for (const std::string& e : errors) {
-                message += "\n  " + e;
-            }
-            throw runtime::config_error(message);
-        }
-        project p;
-        p.cfg_ = runtime::decode(doc);
-        p.saved_ = runtime::encode(p.cfg_);
-        return p;
+    [[nodiscard]] static project from_document(const atp::config::node& doc) {
+        throw_if_invalid(doc, "invalid config");
+        return decoded(doc);
     }
 
     /// Opens a config together with its layout sidecar.
@@ -74,24 +65,17 @@ class project {
     ///         validation error is aggregated into that one exception, so the caller needs no
     ///         separate channel for the list
     [[nodiscard]] static project open(const std::filesystem::path& file) {
-        project p;
+        bool had_includes = false;
         {
             std::ifstream in(file);
             std::stringstream raw;
             raw << in.rdbuf();
-            p.had_includes_ = raw.str().contains("\"$include\"");
+            had_includes = raw.str().contains("\"$include\"");
         }
-        const nlohmann::json doc = runtime::load_config(file);
-        const std::vector<std::string> errors = runtime::validate(doc);
-        if (!errors.empty()) {
-            std::string message = "invalid config '" + file.string() + "':";
-            for (const std::string& e : errors) {
-                message += "\n  " + e;
-            }
-            throw runtime::config_error(message);
-        }
-        project opened = from_document(doc);
-        opened.had_includes_ = p.had_includes_;
+        const atp::config::node doc = runtime::load_config(file);
+        throw_if_invalid(doc, "invalid config '" + file.string() + "'");
+        project opened = decoded(doc);
+        opened.had_includes_ = had_includes;
         load_positions(layout_sidecar_path(file), opened.positions_);
         return opened;
     }
@@ -103,7 +87,7 @@ class project {
         if (!out) {
             throw runtime::config_error("cannot write config '" + file.string() + "'");
         }
-        out << runtime::encode(cfg_).dump(4) << '\n';
+        out << runtime::json_dump(runtime::encode(cfg_), 4) << '\n';
         save_positions(layout_sidecar_path(file), positions_);
         saved_ = runtime::encode(cfg_);
     }
@@ -141,7 +125,7 @@ class project {
         require_free_name(g, name);
         snapshot();
         runtime::child_node c;
-        c.module = runtime::module_node{factory, std::move(name), factory_version, {}};
+        c.module = runtime::module_node{factory, std::move(name), factory_version, {}, {}};
         g.modules.push_back(std::move(c));
     }
 
@@ -533,8 +517,8 @@ class project {
     void set_property(const std::string& group_path,
                       const std::string& name,
                       const std::string& prop,
-                      nlohmann::json value) {
-        if (!value.is_number() && !value.is_string() && !value.is_boolean()) {
+                      atp::config::node value) {
+        if (!value.is_int() && !value.is_double() && !value.is_string() && !value.is_bool()) {
             throw runtime::config_error("property '" + prop + "' must be a scalar (number, string or boolean)");
         }
         runtime::module_node& m = require_module(group_path, name);
@@ -560,9 +544,9 @@ class project {
     /// Stored verbatim, so that a reference stays a string through save, open and undo.
     /// @param group_path group holding the module ("" is the root)
     /// @param name module name within that group
-    /// @param value an object, or a string naming an entry of "configs"
+    /// @param value an object, a string naming an entry of "configs", or a "file:<path>" string
     /// @throws runtime::config_error if the value is neither, or the group or module is missing
-    void set_config(const std::string& group_path, const std::string& name, nlohmann::json value) {
+    void set_config(const std::string& group_path, const std::string& name, atp::config::node value) {
         if (!value.is_object() && !value.is_string()) {
             throw runtime::config_error("config of '" + name +
                                         "' must be an object or a string naming an entry of 'configs'");
@@ -586,7 +570,7 @@ class project {
 
     /// A module's config as written, or nullptr if it has none.
     /// @throws runtime::config_error if the group or the module is missing
-    [[nodiscard]] const nlohmann::json* config_of(const std::string& group_path, const std::string& name) {
+    [[nodiscard]] const atp::config::node* config_of(const std::string& group_path, const std::string& name) {
         const runtime::module_node& m = require_module(group_path, name);
         return m.config ? &*m.config : nullptr;
     }
@@ -596,17 +580,21 @@ class project {
     /// Without this the reference form would be unreachable from studio — a project could only ever
     /// spell a config out in place — and the block a saved reference points at would have to appear by
     /// some other route, which is to say the document would not validate on reopening.
+    /// A block may also be a "file:<path>" string, which is how one file serves several modules. It may
+    /// **not** be a bare reference to another entry, and that is the whole reason there is no cycle to
+    /// guard against anywhere: refusing it in the one place a block is written keeps every chain of
+    /// references exactly one step long.
     /// @param name entry name, which may not contain ':' — that character is what separates a source
     ///        prefix from an entry, so a name carrying one could never be referenced
-    /// @param value the block, which has to be an object so that a config's root is an object however
-    ///        it was reached
-    /// @throws runtime::config_error if the name is empty or holds ':', or the value is not an object
-    void set_shared_config(const std::string& name, nlohmann::json value) {
+    /// @param value the block itself, which has to be an object so that a config's root is an object
+    ///        however it was reached, or a "file:<path>" string
+    /// @throws runtime::config_error if the name is empty or holds ':', or the value is neither
+    void set_shared_config(const std::string& name, atp::config::node value) {
         if (name.empty() || name.contains(':')) {
             throw runtime::config_error("config name '" + name + "' must be non-empty and without ':'");
         }
-        if (!value.is_object()) {
-            throw runtime::config_error("config '" + name + "' must be an object");
+        if (!value.is_object() && !names_a_config_file(value)) {
+            throw runtime::config_error("config '" + name + "' must be an object or a 'file:' path");
         }
         snapshot();
         for (auto& [existing, stored] : cfg_.configs) {
@@ -633,7 +621,7 @@ class project {
     }
 
     /// A shared config block by name, or nullptr if there is none.
-    [[nodiscard]] const nlohmann::json* shared_config(const std::string& name) const {
+    [[nodiscard]] const atp::config::node* shared_config(const std::string& name) const {
         for (const auto& [existing, stored] : cfg_.configs) {
             if (existing == name) {
                 return &stored;
@@ -717,17 +705,17 @@ class project {
     /// Declares a runner thread.
     /// @throws runtime::config_error on a bad or duplicate name, or if the period contradicts the
     ///         mode
-    void add_thread(const std::string& name, thread_mode mode, std::chrono::milliseconds period = {}) {
+    void add_thread(const std::string& name, runtime::thread_mode mode, std::chrono::milliseconds period = {}) {
         detail::check_name(name, "thread name");
         for (const runtime::thread_node& t : cfg_.threads) {
             if (t.name == name) {
                 throw runtime::config_error("duplicate thread name '" + name + "'");
             }
         }
-        if (mode == thread_mode::throttled && period <= std::chrono::milliseconds::zero()) {
+        if (mode == runtime::thread_mode::throttled && period <= std::chrono::milliseconds::zero()) {
             throw runtime::config_error("throttled thread '" + name + "' requires a positive period");
         }
-        if (mode != thread_mode::throttled && period != std::chrono::milliseconds::zero()) {
+        if (mode != runtime::thread_mode::throttled && period != std::chrono::milliseconds::zero()) {
             throw runtime::config_error("thread '" + name + "': period is only for throttled mode");
         }
         snapshot();
@@ -752,15 +740,15 @@ class project {
     /// @param mode new mode
     /// @param period new period, positive for throttled and zero for the other modes
     /// @throws runtime::config_error if there is no such thread, or the period contradicts the mode
-    void set_thread(const std::string& name, thread_mode mode, std::chrono::milliseconds period = {}) {
+    void set_thread(const std::string& name, runtime::thread_mode mode, std::chrono::milliseconds period = {}) {
         auto it = std::ranges::find_if(cfg_.threads, [&](const runtime::thread_node& t) { return t.name == name; });
         if (it == cfg_.threads.end()) {
             throw runtime::config_error("no thread '" + name + "'");
         }
-        if (mode == thread_mode::throttled && period <= std::chrono::milliseconds::zero()) {
+        if (mode == runtime::thread_mode::throttled && period <= std::chrono::milliseconds::zero()) {
             throw runtime::config_error("throttled thread '" + name + "' requires a positive period");
         }
-        if (mode != thread_mode::throttled && period != std::chrono::milliseconds::zero()) {
+        if (mode != runtime::thread_mode::throttled && period != std::chrono::milliseconds::zero()) {
             throw runtime::config_error("thread '" + name + "': period is only for throttled mode");
         }
         snapshot();
@@ -898,7 +886,44 @@ class project {
     }
 
    private:
+    /// Aborts on a document that does not validate, listing every problem in one message under @p what.
+    ///
+    /// Shared by from_document and open so that neither validates twice: open used to run validate()
+    /// for a message naming the file, then hand the very same document to from_document, which ran it
+    /// again.
+    /// @throws runtime::config_error
+    static void throw_if_invalid(const atp::config::node& doc, const std::string& what) {
+        const std::vector<std::string> errors = runtime::validate(doc);
+        if (errors.empty()) {
+            return;
+        }
+        std::string message = what + ":";
+        for (const std::string& e : errors) {
+            message += "\n  " + e;
+        }
+        throw runtime::config_error(message);
+    }
+
+    /// Builds the project from a document that has **already** been validated — the half of
+    /// from_document that open needs without its message.
+    [[nodiscard]] static project decoded(const atp::config::node& doc) {
+        project p;
+        p.cfg_ = runtime::decode(doc);
+        p.saved_ = runtime::encode(p.cfg_);
+        return p;
+    }
+
     project() = default;
+
+    /// Whether @p value is a "file:<path>" string with a path in it. The validator asks the same
+    /// question of a document; this is the answer for an edit, before there is a document to validate.
+    [[nodiscard]] static bool names_a_config_file(const atp::config::node& value) {
+        if (!value.is_string()) {
+            return false;
+        }
+        const std::string text = value.as_string();
+        return text.starts_with(runtime::config_file_prefix) && text.size() > runtime::config_file_prefix.size();
+    }
 
     void snapshot() {
         if (batch_depth_ > 0) {
@@ -1007,9 +1032,9 @@ class project {
     runtime::config cfg_;
     bool had_includes_ = false;
     std::map<std::string, node_position> positions_;
-    std::vector<nlohmann::json> undo_, redo_;
+    std::vector<atp::config::node> undo_, redo_;
     int batch_depth_ = 0;
-    nlohmann::json saved_;
+    atp::config::node saved_;
 };
 
 }  // namespace atp::studio

@@ -3,19 +3,32 @@
 
 #include <algorithm>
 #include <exception>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 
 #include <QComboBox>
 #include <QEvent>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QScrollArea>
+#include <QTextDocument>
 
-#include <nlohmann/json.hpp>
-
+#include <atp/config/node.hpp>
+#include <atp/runtime/config_file.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/studio/node_ref.hpp>
 #include <atp/studio/thread_resolve.hpp>
 
 namespace atp::studio::ui {
+
+namespace {
+
+const QString inline_source = QStringLiteral("(inline)");
+
+}  // namespace
 
 inspector_widget::inspector_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent)
     : QWidget(parent), state_(state), callbacks_(callbacks) {
@@ -51,6 +64,9 @@ std::string inspector_widget::form_key() const {
             if (c.module && c.module->name == state_.selected_child) {
                 key += '\0' + c.module->factory + '@' +
                        (c.module->factory_version ? c.module->factory_version->to_string() : "latest");
+                if (c.module->config && c.module->config->is_string()) {
+                    key += '\0' + c.module->config->as_string();
+                }
             }
         }
     }
@@ -62,6 +78,10 @@ void inspector_widget::rebuild() {
     properties_ = nullptr;
     expose_inputs_ = nullptr;
     expose_outputs_ = nullptr;
+    config_tree_ = nullptr;
+    config_edit_ = nullptr;
+    config_source_ = nullptr;
+    share_name_ = nullptr;
     property_rows_.clear();
 
     const runtime::group_node* g = state_.doc.group_at(state_.current_group);
@@ -96,6 +116,24 @@ void inspector_widget::sync() {
     if (expose_outputs_ != nullptr) {
         expose_outputs_->sync();
     }
+    sync_config();
+    if (config_tree_ != nullptr) {
+        const atp::config::node* stored = effective_config();
+        config_tree_->sync(stored == nullptr ? atp::config::node(atp::config::node::object_type{}) : *stored);
+    }
+}
+
+void inspector_widget::sync_config() {
+    if (config_edit_ == nullptr || config_edit_->document()->isModified() || !config_file_.empty()) {
+        return;
+    }
+    const atp::config::node* stored = effective_config();
+    const QString text = QString::fromStdString(stored == nullptr ? std::string() : runtime::json_dump(*stored, 4));
+    if (text == config_edit_->toPlainText()) {
+        return;
+    }
+    config_edit_->setPlainText(text);
+    config_edit_->document()->setModified(false);
 }
 
 void inspector_widget::apply_lock() {
@@ -127,13 +165,15 @@ style::section inspector_widget::add_section(const QString& title) {
     return s;
 }
 
-void inspector_widget::guard(const char* context, const std::function<void()>& operation) {
+bool inspector_widget::guard(const char* context, const std::function<void()>& operation) {
     try {
         operation();
         callbacks_.project_changed();
     } catch (const std::exception& e) {
         callbacks_.error(QString::fromStdString(std::string(context) + ": " + e.what()));
+        return false;
     }
+    return true;
 }
 
 void inspector_widget::commit_rename(const std::string& old_name, QLineEdit* edit) {
@@ -182,49 +222,206 @@ void inspector_widget::build_module_section(const runtime::module_node& m) {
 }
 
 void inspector_widget::build_config_section(const runtime::module_node& m) {
+    const module_info* info = state_.describe_cached(m.factory, m.factory_version);
+    const bool declared = info != nullptr && info->config_schema.has_value() && !info->config_schema->empty();
+
     const style::section s = add_section("config");
+    config_group_ = state_.current_group;
+    config_module_ = m.name;
+    const std::string written = m.config && m.config->is_string() ? m.config->as_string() : std::string();
+    const bool from_file = written.starts_with(runtime::config_file_prefix);
+    config_file_ = from_file ? written : std::string();
+    shared_name_ = from_file ? std::string() : written;
+    if (!shared_name_.empty()) {
+        const atp::config::node* block = state_.doc.shared_config(shared_name_);
+        if (block != nullptr && block->is_string() && block->as_string().starts_with(runtime::config_file_prefix)) {
+            config_file_ = block->as_string();
+        }
+    }
+
+    config_source_ = new QComboBox(body_);
+    config_source_->setObjectName("config_source");
+    config_source_->addItem(inline_source);
+    for (const std::string& name : state_.doc.config_names()) {
+        config_source_->addItem(QString::fromStdString(name));
+    }
+    const std::string current = shared_name_.empty() ? config_file_ : shared_name_;
+    if (!current.empty() && config_source_->findText(QString::fromStdString(current)) < 0) {
+        config_source_->addItem(QString::fromStdString(current));
+    }
+    config_source_->setCurrentText(current.empty() ? inline_source : QString::fromStdString(current));
+    s.form->addRow("source", config_source_);
+    QObject::connect(config_source_, &QComboBox::currentIndexChanged, this,
+                     [this](int) { change_config_source(config_source_->currentText()); });
+
+    if (declared && shared_name_.empty() && config_file_.empty()) {
+        const atp::config::node empty(atp::config::node::object_type{});
+        config_tree_ = new config_tree(state_, callbacks_, body_);
+        config_tree_->rebuild(config_group_, config_module_, m.config ? *m.config : empty, *info->config_schema);
+        s.form->addRow(config_tree_);
+        build_share_row(s);
+        return;
+    }
+
     config_edit_ = new QPlainTextEdit(body_);
-    config_edit_->setPlaceholderText("an object, or the name of a shared block");
+    config_edit_->setPlaceholderText(shared_name_.empty() ? "an object, or nothing at all"
+                                                          : "an object; this block is not declared yet");
     config_edit_->setFixedHeight(config_editor_height);
-    config_edit_->setPlainText(QString::fromStdString(m.config ? m.config->dump(4) : std::string()));
+    if (config_file_.empty()) {
+        const atp::config::node* shown = effective_config();
+        config_edit_->setPlainText(
+            QString::fromStdString(shown == nullptr ? std::string() : runtime::json_dump(*shown, 4)));
+    } else {
+        config_edit_->setReadOnly(true);
+        config_edit_->setPlainText(QString::fromStdString(config_file_preview()));
+    }
+    config_edit_->document()->setModified(false);
     s.form->addRow(config_edit_);
 
-    config_module_ = m.name;
     config_edit_->installEventFilter(this);
-    QObject::connect(config_edit_, &QPlainTextEdit::destroyed, this, [this] { config_edit_ = nullptr; });
+    QPlainTextEdit* mine = config_edit_;
+    QObject::connect(config_edit_, &QPlainTextEdit::destroyed, this, [this, mine] {
+        if (config_edit_ == mine) {
+            config_edit_ = nullptr;
+        }
+    });
+
+    build_share_row(s);
+}
+
+void inspector_widget::build_share_row(const style::section& s) {
+    if (!shared_name_.empty() || !config_file_.empty()) {
+        return;
+    }
+    auto* row = new QWidget(body_);
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
+    share_name_ = new QLineEdit(row);
+    share_name_->setObjectName("config_share_name");
+    share_name_->setPlaceholderText("name for a shared block");
+    auto* button = new QPushButton("Share", row);
+    button->setObjectName("config_share");
+    layout->addWidget(share_name_);
+    layout->addWidget(button);
+    s.form->addRow(row);
+    QObject::connect(button, &QPushButton::clicked, this, [this] { share_config(); });
+}
+
+std::string inspector_widget::config_file_preview() const {
+    try {
+        const module_config cfg = runtime::load_module_config(
+            std::string_view(config_file_).substr(runtime::config_file_prefix.size()), state_.saved_dir());
+        return cfg.text();
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+}
+
+const atp::config::node* inspector_widget::effective_config() const {
+    if (!shared_name_.empty()) {
+        return state_.doc.shared_config(shared_name_);
+    }
+    try {
+        return state_.doc.config_of(config_group_, config_module_);
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+}
+
+void inspector_widget::change_config_source(const QString& choice) {
+    const std::string next = choice == inline_source ? std::string() : choice.toStdString();
+    if (next == (shared_name_.empty() ? config_file_ : shared_name_)) {
+        return;
+    }
+    QPlainTextEdit* editing = std::exchange(config_edit_, nullptr);
+    bool done = false;
+    if (next.empty()) {
+        const atp::config::node* block = state_.doc.shared_config(shared_name_);
+        done = guard("config", [this, block] {
+            if (block == nullptr) {
+                state_.doc.clear_config(config_group_, config_module_);
+            } else {
+                state_.doc.set_config(config_group_, config_module_, *block);
+            }
+        });
+    } else {
+        done = guard("config",
+                     [this, &next] { state_.doc.set_config(config_group_, config_module_, atp::config::node(next)); });
+    }
+    if (!done) {
+        config_edit_ = editing;
+    }
+    refresh();
+}
+
+void inspector_widget::share_config() {
+    if (share_name_ == nullptr) {
+        return;
+    }
+    const std::string name = share_name_->text().trimmed().toStdString();
+    if (state_.doc.shared_config(name) != nullptr) {
+        callbacks_.error(QString("config: '%1' is already declared; pick it as the source instead")
+                             .arg(QString::fromStdString(name)));
+        return;
+    }
+    const atp::config::node* shown = effective_config();
+    std::optional<atp::config::node> parsed;
+    if (config_edit_ == nullptr) {
+        parsed = shown == nullptr ? atp::config::node(atp::config::node::object_type{}) : *shown;
+    } else {
+        parsed = runtime::try_json_parse(config_edit_->toPlainText().trimmed().toStdString());
+    }
+    if (!parsed) {
+        callbacks_.error("config: not valid JSON");
+        return;
+    }
+    QPlainTextEdit* editing = std::exchange(config_edit_, nullptr);
+    if (!guard("config", [this, &name, &parsed] {
+            state_.doc.set_shared_config(name, *parsed);
+            state_.doc.set_config(config_group_, config_module_, atp::config::node(name));
+        })) {
+        config_edit_ = editing;
+    }
+    refresh();
 }
 
 bool inspector_widget::eventFilter(QObject* watched, QEvent* event) {
     if (watched == config_edit_ && event->type() == QEvent::FocusOut) {
-        commit_config(config_module_);
+        commit_config();
     }
     return QWidget::eventFilter(watched, event);
 }
 
-void inspector_widget::commit_config(const std::string& name) {
-    if (config_edit_ == nullptr) {
+void inspector_widget::commit_config() {
+    if (config_edit_ == nullptr || !config_file_.empty()) {
         return;
     }
     const std::string text = config_edit_->toPlainText().trimmed().toStdString();
-    const nlohmann::json* stored = nullptr;
-    try {
-        stored = state_.doc.config_of(state_.current_group, name);
-    } catch (const std::exception&) {
-        return;
-    }
-    if (text == (stored == nullptr ? std::string() : stored->dump(4))) {
+    const atp::config::node* stored = effective_config();
+    if (text == (stored == nullptr ? std::string() : runtime::json_dump(*stored, 4))) {
+        config_edit_->document()->setModified(false);
         return;
     }
     if (text.empty()) {
-        guard("config", [this, &name] { state_.doc.clear_config(state_.current_group, name); });
+        guard("config", [this] { state_.doc.clear_config(config_group_, config_module_); });
+        if (config_edit_ != nullptr) {
+            config_edit_->document()->setModified(false);
+        }
         return;
     }
-    const nlohmann::json parsed = nlohmann::json::parse(text, nullptr, false);
-    if (parsed.is_discarded()) {
+    const std::optional<atp::config::node> parsed = runtime::try_json_parse(text);
+    if (!parsed) {
         callbacks_.error("config: not valid JSON");
         return;
     }
-    guard("config", [this, &name, &parsed] { state_.doc.set_config(state_.current_group, name, parsed); });
+    guard("config", [this, &parsed] {
+        if (shared_name_.empty()) {
+            state_.doc.set_config(config_group_, config_module_, *parsed);
+        } else {
+            state_.doc.set_shared_config(shared_name_, *parsed);
+        }
+    });
+    config_edit_->document()->setModified(false);
 }
 
 void inspector_widget::build_group_section(const std::string& group_path, const std::string& name, bool renameable) {

@@ -89,7 +89,7 @@ void from_lua(lua_State* state, int index, atp_kind kind, atp_value& out, std::s
 }
 
 void config_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx, std::uint32_t node) {
-    if (api.struct_size < sizeof(atp_api) || lua_checkstack(state, 4) == 0) {
+    if (!atp_api_has_config(&api) || lua_checkstack(state, 4) == 0) {
         lua_pushnil(state);
         return;
     }
@@ -124,6 +124,30 @@ void config_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx, std::uint
         return;
     }
     to_lua(state, scalar);
+}
+
+void config_text_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx) {
+    const char* text = nullptr;
+    std::size_t length = 0;
+    if (!atp_api_has_config_text(&api) || api.config_text(ctx, &text, &length) == 0) {
+        lua_pushliteral(state, "");
+        return;
+    }
+    lua_pushlstring(state, text, length);
+}
+
+void config_origin_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx) {
+    const char* origin = nullptr;
+    std::size_t length = 0;
+    if (!atp_api_has_config_text(&api) || api.config_origin(ctx, &origin, &length) == 0) {
+        lua_pushliteral(state, "");
+        return;
+    }
+    lua_pushlstring(state, origin, length);
+}
+
+void config_opaque_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx) {
+    lua_pushboolean(state, atp_api_has_config_text(&api) && api.config_is_opaque(ctx) != 0);
 }
 
 }  // namespace atp::lua_bridge

@@ -244,9 +244,10 @@ jobs:
 
     - name: Build the host and install the SDK
       # Only the targets this job runs. ATP_BUILD_STUDIO=OFF keeps it from looking for a Qt that is
-      # not here; atp_app_demo_assets is what lays out config/ and plugins/ next to atp_app, and it is
-      # a custom target, so building atp_app alone would not run it — nor create the directory this
-      # job's own plugin is copied into.
+      # not here; atp_app_demo_assets is what lays out config/ next to atp_app, and it is a custom
+      # target, so building atp_app alone would not run it. plugins/ needs no such target — it is the
+      # output directory of every plugin — but atp_demo_plugin is still named here, because that is
+      # what creates the directory this job's own plugin is copied into.
       #
       # --component sdk, because that is what this job wants: the headers and the package, not the
       # applications. A full install would demand every executable that has an install rule be built
@@ -279,9 +280,9 @@ jobs:
       # reached the out-of-tree module, the second that the string it produced reached a module in the
       # other library.
       run: |
-        cp template-build/atp_template_plugin.so build/src/app/plugins/
-        cp templates/plugin/pipeline.json build/src/app/config/
-        cd build/src/app
+        cp template-build/atp_template_plugin.so build/bin/plugins/
+        cp templates/plugin/pipeline.json build/bin/config/
+        cd build/bin
         set +e
         timeout 10 ./atp_app config/pipeline.json > run.log 2>&1
         rc=$?
@@ -379,9 +380,9 @@ jobs:
       # one and came back as a string, the second that a double did too — a second payload kind, on a
       # port the first says nothing about.
       run: |
-        cp templates/plugin_rust/target/release/libatp_rust_plugin.so build/src/app/plugins/atp_rust_plugin.so
-        cp templates/plugin_rust/pipeline.json build/src/app/config/
-        cd build/src/app
+        cp templates/plugin_rust/target/release/libatp_rust_plugin.so build/bin/plugins/atp_rust_plugin.so
+        cp templates/plugin_rust/pipeline.json build/bin/config/
+        cd build/bin
         set +e
         timeout 10 ./atp_app config/pipeline.json > run.log 2>&1
         rc=$?
@@ -410,7 +411,7 @@ jobs:
       # it, the pipeline stops with the panic's own text in the message. atp_app is expected to fail
       # here — a status of 124 would mean the panic never became an error at all.
       run: |
-        cd build/src/app
+        cd build/bin
         set +e
         timeout 10 ./atp_app -p mean.panic=true config/pipeline.json > panic.log 2>&1
         rc=$?
@@ -464,7 +465,7 @@ jobs:
       # find_package is QUIET and the subdirectory returns early without it, so a runner whose Python
       # has no development files would otherwise produce a green job that tested nothing at all.
       run: |
-        if [ ! -f build/src/app/plugins/atp_python_bridge.so ]; then
+        if [ ! -f build/bin/plugins/atp_python_bridge.so ]; then
           echo "::error::the Python bridge was not built — CPython development files were not found"
           exit 1
         fi
@@ -473,7 +474,7 @@ jobs:
       # Two greps, two claims: an int crossed from a C++ module into the script and came back as a
       # string, and a double came back on a port the first says nothing about.
       run: |
-        cd build/src/app
+        cd build/bin
         set +e
         timeout 10 ./atp_app config/pipeline_python.json > run.log 2>&1
         rc=$?
@@ -502,7 +503,7 @@ jobs:
       # turns it into the module error that stops the pipeline, with the script's own file and line in
       # the message.
       run: |
-        cd build/src/app
+        cd build/bin
         set +e
         timeout 10 ./atp_app -p mean.fail=true config/pipeline_python.json > fail.log 2>&1
         rc=$?
@@ -549,7 +550,7 @@ jobs:
       # Two greps, two claims: an int crossed from a C++ module into the script and came back as a
       # string on one port, and as an int on another — with no adapter anywhere in the config.
       run: |
-        cd build/src/app
+        cd build/bin
         set +e
         timeout 10 ./atp_app config/pipeline_lua.json > run.log 2>&1
         rc=$?
@@ -578,7 +579,7 @@ jobs:
       # the bridge turns it into the module error that stops the pipeline, with the script's own file
       # and line in the message and a traceback behind it.
       run: |
-        cd build/src/app
+        cd build/bin
         set +e
         timeout 10 ./atp_app -p scale.fail=true config/pipeline_lua.json > fail.log 2>&1
         rc=$?

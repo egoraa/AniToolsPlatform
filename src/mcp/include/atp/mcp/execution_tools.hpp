@@ -2,6 +2,7 @@
 #ifndef ATP_MCP_EXECUTION_TOOLS_HPP
 #define ATP_MCP_EXECUTION_TOOLS_HPP
 
+#include <filesystem>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -25,7 +26,8 @@ inline void register_execution_tools(tool_registry& tools, workspace& ws) {
                    for (const std::string& plugin : ws.project().config().plugins) {
                        ws.modules().load_plugin(ws.resolve_plugin((ws.project_dir() / plugin).string()));
                    }
-                   ws.run_session().start(ws.project().config());
+                   ws.run_session().start(ws.project().config(),
+                                          ws.project_path() ? ws.project_dir() : std::filesystem::path{});
                    return nlohmann::json{{"running", ws.run_session().running()}};
                }});
 
@@ -42,7 +44,7 @@ inline void register_execution_tools(tool_registry& tools, workspace& ws) {
                "the ones equal to their default. Run it before saving a pipeline that has been tuned "
                "while running.",
                no_arguments_schema(), [&ws](const nlohmann::json&) {
-                   const group* root = ws.run_session().live_root();
+                   const runtime::group* root = ws.run_session().live_root();
                    if (root == nullptr) {
                        throw runtime::config_error("nothing is running, so there are no live values to pull");
                    }

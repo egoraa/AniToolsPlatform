@@ -17,7 +17,7 @@ namespace {
 struct settings_props : atp::io::properties {
     atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
 };
-using settings_ports = atp::io::ports<atp::io::inputs, atp::io::outputs, settings_props>;
+using settings_ports = atp::ports<atp::io::inputs, atp::io::outputs, settings_props>;
 class settings_module : public atp::module<settings_ports, "settings_demo"> {};
 
 class McpSettingsTools : public ::testing::Test {

@@ -6,11 +6,13 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
 #include <atp/mcp/control_tools.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/mcp/workspace.hpp>
 #include <atp/module.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/json_codec.hpp>
 
 #include "support/control_tools_checks.hpp"
 
@@ -27,7 +29,7 @@ struct number_inputs : atp::io::inputs {
 };
 
 class control_source
-    : public atp::module<atp::io::ports<atp::io::inputs, number_outputs, step_properties>, "control_source"> {
+    : public atp::module<atp::ports<atp::io::inputs, number_outputs, step_properties>, "control_source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         outputs().number(properties().step.get());
@@ -35,7 +37,7 @@ class control_source
     }
 };
 
-class control_sink : public atp::module<atp::io::ports<number_inputs>, "control_sink"> {
+class control_sink : public atp::module<atp::ports<number_inputs>, "control_sink"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         return inputs().number.try_pop() ? atp::work_status::busy : atp::work_status::idle;
@@ -51,7 +53,7 @@ class McpControlToolsOverSession : public ::testing::Test {
         ws_ = std::make_unique<atp::mcp::workspace>(root_);
         ws_->modules().registry().add<control_source>();
         ws_->modules().registry().add<control_sink>();
-        ws_->run_session().start(atp::runtime::decode(nlohmann::json::parse(atp_tests::control_target_config)));
+        ws_->run_session().start(atp::runtime::decode(atp::runtime::json_parse(atp_tests::control_target_config)));
         atp::mcp::register_control_tools(tools_, ws_->run_session());
     }
 

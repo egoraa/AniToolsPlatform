@@ -9,12 +9,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# The one compiled unit that names a document library. It is STATIC and nlohmann is PRIVATE to it, so
+# atp_runtime's consumers get json_parse/json_dump without getting the library, its headers or its
+# include path — which is what lets <atp/runtime.hpp> stop costing 25k lines of it per translation unit.
+# It is also the template for the rest of the runtime whenever that follows it out of the headers.
+add_library(atp_json STATIC json_codec.cpp)
+target_include_directories(atp_json PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(atp_json
+        PUBLIC atp_platform
+        PRIVATE nlohmann_json::nlohmann_json atp_warnings)
+
 add_library(atp_runtime INTERFACE)
 target_include_directories(atp_runtime INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # ws2_32 comes with the runtime because socket_platform.hpp lives here: the MCP server, the studio's
 # client and the tests all open sockets, and all three link atp_runtime already. Putting it on the
 # MCP library instead would leave the studio — which must not depend on the MCP layer — without it.
-target_link_libraries(atp_runtime INTERFACE atp_platform nlohmann_json::nlohmann_json
+target_link_libraries(atp_runtime INTERFACE atp_platform atp_json
         $<$<PLATFORM_ID:Windows>:ws2_32>)
 
 # /bigobj is a technical consequence of a header that lives here, not a policy, which is why it rides on

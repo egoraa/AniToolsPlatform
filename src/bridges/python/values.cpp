@@ -92,9 +92,8 @@ bool from_python(atp_kind kind, PyObject* object, atp_value& out, std::string& s
 }
 
 PyObject* config_to_python(const atp_api& api, atp_ctx* ctx, std::uint32_t node) {
-    if (api.struct_size < sizeof(atp_api)) {
-        PyErr_SetString(PyExc_RuntimeError, "the host is older than the config accessors");
-        return nullptr;
+    if (!atp_api_has_config(&api)) {
+        Py_RETURN_NONE;
     }
     switch (api.config_kind(ctx, node)) {
         case ATP_CONFIG_NULL:
@@ -155,6 +154,34 @@ PyObject* config_to_python(const atp_api& api, atp_ctx* ctx, std::uint32_t node)
         return nullptr;
     }
     return to_python(scalar);
+}
+
+namespace {
+
+enum class config_string_field { text, origin };
+
+PyObject* config_string(const atp_api& api, atp_ctx* ctx, config_string_field which) {
+    if (!atp_api_has_config_text(&api)) {
+        return PyUnicode_FromStringAndSize("", 0);
+    }
+    const char* text = nullptr;
+    std::size_t length = 0;
+    const int read = which == config_string_field::text ? api.config_text(ctx, &text, &length)
+                                                        : api.config_origin(ctx, &text, &length);
+    if (read == 0) {
+        return PyUnicode_FromStringAndSize("", 0);
+    }
+    return PyUnicode_DecodeUTF8(text, static_cast<Py_ssize_t>(length), "strict");
+}
+
+}  // namespace
+
+PyObject* config_text_to_python(const atp_api& api, atp_ctx* ctx) {
+    return config_string(api, ctx, config_string_field::text);
+}
+
+PyObject* config_origin_to_python(const atp_api& api, atp_ctx* ctx) {
+    return config_string(api, ctx, config_string_field::origin);
 }
 
 }  // namespace atp::bridge

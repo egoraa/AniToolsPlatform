@@ -5,11 +5,13 @@
 #include <string>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
 #include <QGraphicsScene>
 #include <QGraphicsView>
 
+#include <nlohmann/json.hpp>
+
+#include <atp/config/node.hpp>
 #include <atp/mcp/application_control.hpp>
 #include <atp/mcp/control_tools.hpp>
 #include <atp/mcp/resource_registry.hpp>
@@ -18,6 +20,7 @@
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/module.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
 
 #include "model/app_state.hpp"
@@ -39,14 +42,14 @@ struct number_inputs : atp::io::inputs {
 };
 
 class attach_source
-    : public atp::module<atp::io::ports<atp::io::inputs, number_outputs, attach_properties>, "attach_source"> {
+    : public atp::module<atp::ports<atp::io::inputs, number_outputs, attach_properties>, "attach_source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         outputs().number(properties().step.get());
         return atp::work_status::busy;
     }
 };
-class attach_sink : public atp::module<atp::io::ports<number_inputs>, "attach_sink"> {
+class attach_sink : public atp::module<atp::ports<number_inputs>, "attach_sink"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         return inputs().number.try_pop() ? atp::work_status::busy : atp::work_status::idle;
@@ -70,7 +73,7 @@ class UiAttach : public ::testing::Test {
         (void)atp_ui_tests::ensure_app();
         app_.registry.add<attach_source>();
         app_.registry.add<attach_sink>();
-        const atp::runtime::config cfg = atp::runtime::decode(nlohmann::json::parse(attach_config));
+        const atp::runtime::config cfg = atp::runtime::decode(atp::runtime::json_parse(attach_config));
         atp::runtime::build_pipeline(app_.pipe, app_.runner, cfg, app_.registry);
         app_.runner.start(app_.pipe);
         live_ = std::make_unique<atp::mcp::application_control>(app_);

@@ -65,6 +65,33 @@ setting that lives only while the pipeline runs.
 `initialize` without `start`, because a pipeline whose start cascade fails rolls back by stopping
 everything it had already initialised.
 
+## The config, next to the properties
+
+A property is one scalar with a default, edited live. A **config** is the other channel: a structure
+— a list, a table, a nested object — handed to the instance at creation and never edited afterwards.
+`scale.lua` declares both, `factor` as a property and a `bands` list as config:
+
+```json
+{
+    "module": "lua_scale",
+    "name": "scale",
+    "properties": { "factor": 5 },
+    "config": {
+        "bands": [ { "upto": 20, "name": "small" }, { "upto": 60, "name": "medium" } ],
+        "otherwise": "large"
+    }
+}
+```
+
+It arrives as an ordinary Lua table in `self.config`, readable from `initialize` onward — Lua has no
+constructor, so there is nothing earlier to read it in. It is `nil` when the module's node named no
+config, which is why every read in `scale.lua` has a fallback: a module that fell over on an absent
+config would be one nobody could place, since placing it is how one would give it a config.
+
+One caveat that is this bridge's alone: **an array keeps its order, the keys of a table do not.** The
+host's own value and a Python dict preserve the order the entries were given in; a Lua table cannot,
+so nothing in a Lua module may depend on the order an object was written in.
+
 ## Three things this bridge does differently
 
 **Every instance gets its own interpreter.** Lua has no global interpreter and no lock around one, so

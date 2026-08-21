@@ -21,6 +21,15 @@
 /// The properties cover both halves of the setting vocabulary: `factor` is an ordinary number read
 /// on every pass, `mode` is an enumeration whose set of values is declared here and enforced by the
 /// host, so that a config or studio writing anything else is refused before this code sees it.
+///
+/// The `bands` config covers the third kind of setting. A list of pairs is not something a property
+/// could hold, and it is decided when the pipeline is written rather than turned while it runs —
+/// which is exactly when the config channel is the right one. It is read in create, the C path's
+/// analogue of a constructor and the only place a setting may be known before the ports are
+/// connected, and it is read through handles: nothing is allocated on either side of the boundary,
+/// the strings point into the host's own copy of the config and stay valid for as long as this module
+/// lives. The whole read degrades to defaults, because the accessors may be missing on an older host
+/// (atp_api_has_config) and the module's node may have named no config at all.
 
 /// Indices of this module's ports, which is how the ABI addresses them: the position in the arrays of
 /// the descriptor. Naming them is not decoration — a wrong number reads a different port of the right
@@ -29,14 +38,30 @@ enum scaler_input_index { scaler_in_value = 0 };
 enum scaler_output_index { scaler_out_report = 0 };
 enum scaler_property_index { scaler_prop_factor = 0, scaler_prop_mode = 1 };
 
+/// How many bands the config may name, and how long a band's name may be. Fixed sizes rather than a
+/// growing array: the module allocates once in create and never again, which is the habit this path
+/// rewards.
+enum { scaler_max_bands = 4, scaler_name_size = 24 };
+
+/// One entry of the `bands` list: everything scaling to at most `upto` is called `name`.
+typedef struct scaler_band {
+    long long upto;
+    char name[scaler_name_size];
+} scaler_band;
+
 /// State of one instance: what a C++ module would keep in its members.
 ///
 /// The api table and the context are stored here because every call back into the host needs both,
-/// and create is the only place they are handed over.
+/// and create is the only place they are handed over. The bands are a copy rather than a set of
+/// handles: handles would stay valid, but reading them again on every pass would be work done for
+/// nothing, since a config cannot change while the module lives.
 typedef struct scaler_state {
     const atp_api* api;
     atp_ctx* ctx;
     long long total;
+    scaler_band bands[scaler_max_bands];
+    unsigned band_count;
+    char otherwise[scaler_name_size];
 } scaler_state;
 
 /// Creates the state. Returns NULL if it cannot be allocated, which the host reports as a refusal.

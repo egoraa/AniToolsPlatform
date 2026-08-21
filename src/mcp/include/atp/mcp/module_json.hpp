@@ -8,6 +8,7 @@
 
 #include <atp/io/property_codec.hpp>
 #include <atp/mcp/type_name.hpp>
+#include <atp/runtime/config_value_json.hpp>
 #include <atp/studio/module_manager.hpp>
 
 namespace atp::mcp {
@@ -34,6 +35,55 @@ namespace atp::mcp {
         schema["enum"] = p.options;
     }
     return schema;
+}
+
+/// Describes one declared config field as a JSON Schema fragment, recursing into a group's children and
+/// into the element fields of an array of groups. The model needs the shape before it writes a config,
+/// exactly as it needs a property's enum before it writes a value.
+///
+/// A required field carries no "default": it has none, and printing null for one would read as a value
+/// the field may take.
+[[nodiscard]] inline nlohmann::json to_json(const config::field_declaration& f) {
+    nlohmann::json out{{"name", f.name}};
+    switch (f.kind) {
+        case config::field_kind::boolean:
+            out["type"] = "boolean";
+            break;
+        case config::field_kind::integer:
+            out["type"] = "integer";
+            break;
+        case config::field_kind::real:
+            out["type"] = "number";
+            break;
+        case config::field_kind::string:
+            out["type"] = "string";
+            break;
+        case config::field_kind::object:
+            out["type"] = "object";
+            break;
+        case config::field_kind::array:
+            out["type"] = "array";
+            break;
+    }
+    if (f.required) {
+        out["required"] = true;
+    } else if (f.kind != config::field_kind::object && f.kind != config::field_kind::array) {
+        out["default"] = runtime::to_json_value(f.default_value);
+    }
+    if (!f.children.empty()) {
+        nlohmann::json children = nlohmann::json::array();
+        for (const config::field_declaration& child : f.children) {
+            children.push_back(to_json(child));
+        }
+        out[f.kind == config::field_kind::array ? "items" : "fields"] = std::move(children);
+    } else if (f.kind == config::field_kind::array) {
+        config::field_declaration element;
+        element.kind = f.element;
+        nlohmann::json items = to_json(element);
+        items.erase("name");
+        out["items"] = std::move(items);
+    }
+    return out;
 }
 
 /// Describes one declared port.
@@ -64,6 +114,13 @@ namespace atp::mcp {
                         {"broken", m.broken}};
     if (!m.error.empty()) {
         json["error"] = m.error;
+    }
+    if (m.config_schema.has_value()) {
+        nlohmann::json fields = nlohmann::json::array();
+        for (const config::field_declaration& f : *m.config_schema) {
+            fields.push_back(to_json(f));
+        }
+        json["config"] = nlohmann::json{{"fields", std::move(fields)}};
     }
     return json;
 }

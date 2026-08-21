@@ -9,33 +9,26 @@
 #include <utility>
 #include <vector>
 
+#include <atp/hosting/module_declaration.hpp>
+#include <atp/hosting/module_registry.hpp>
 #include <atp/io/input_base.hpp>
 #include <atp/io/inputs.hpp>
 #include <atp/io/output_base.hpp>
 #include <atp/io/outputs.hpp>
 #include <atp/io/properties.hpp>
 #include <atp/io/property_base.hpp>
-#include <atp/module_loader.hpp>
-#include <atp/module_registry.hpp>
+#include <atp/runtime/module_loader.hpp>
 
 namespace atp::studio {
 
-/// Description of one declared port.
-struct port_info {
-    std::string name;
-    std::type_index type;
-};
+/// Description of one declared port. The SDK's own type under studio's historical name: the fields
+/// are the same two, and an alias keeps every consumer — the palette, the canvas, port_types and the
+/// MCP catalog — spelling them as before.
+using port_info = atp::port_declaration;
 
 /// Description of one property: everything the inspector needs to pick a widget and to convert what
-/// was typed back into JSON. The option set is copied, so the description outlives the temporary
-/// probe module it was taken from.
-struct property_info {
-    std::string name;
-    io::property_kind kind;
-    std::string default_value;
-    std::vector<std::string> options;
-    bool persistent = true;
-};
+/// was typed back into JSON.
+using property_info = atp::property_declaration;
 
 /// Description of one registered module.
 struct module_info {
@@ -51,6 +44,10 @@ struct module_info {
     /// Python module. Filled when the plugin is loaded, not by describe(): a factory does not know
     /// which file it came from, and the loader does.
     std::string source;
+
+    /// Fields the module declares its config out of, absent when it declares none — an editor then
+    /// falls back to editing the config as text, which is what studio does for every module today.
+    std::optional<std::vector<atp::config::field_declaration>> config_schema;
 };
 
 /// Description of one plugin file and the modules it brought.
@@ -108,15 +105,15 @@ class module_manager {
     /// the plugin_info rather than thrown.
     void load_plugin(const std::filesystem::path& file) {
         const std::filesystem::path canonical =
-            std::filesystem::weakly_canonical(atp::detail::with_plugin_extension(file));
+            std::filesystem::weakly_canonical(runtime::detail::with_plugin_extension(file));
         plugin_info* existing = find_info(canonical);
         if (existing != nullptr && existing->loaded) {
             return;
         }
         plugin_info info{canonical, false, {}, {}};
         try {
-            module_loader loader(canonical, registry_);
-            for (const registered_module& m : loader.modules()) {
+            runtime::module_loader loader(canonical, registry_);
+            for (const runtime::registered_module& m : loader.modules()) {
                 module_info described = describe(registry_.at(m.name, m.ver));
                 described.source = m.source;
                 info.modules.push_back(std::move(described));
@@ -150,11 +147,11 @@ class module_manager {
     /// @return false if this file was never loaded — there is nothing to reload
     bool reload_plugin(const std::filesystem::path& file) {
         const std::filesystem::path canonical =
-            std::filesystem::weakly_canonical(atp::detail::with_plugin_extension(file));
+            std::filesystem::weakly_canonical(runtime::detail::with_plugin_extension(file));
         if (find_info(canonical) == nullptr) {
             return false;
         }
-        std::erase_if(loaders_, [&canonical](const module_loader& l) { return l.path() == canonical; });
+        std::erase_if(loaders_, [&canonical](const runtime::module_loader& l) { return l.path() == canonical; });
         std::erase_if(plugins_, [&canonical](const plugin_info& p) { return p.path == canonical; });
         load_plugin(canonical);
         return true;
@@ -199,11 +196,11 @@ class module_manager {
     /// @return false if this file was not among the plugins
     bool unload_plugin(const std::filesystem::path& file) {
         const std::filesystem::path canonical =
-            std::filesystem::weakly_canonical(atp::detail::with_plugin_extension(file));
+            std::filesystem::weakly_canonical(runtime::detail::with_plugin_extension(file));
         if (find_info(canonical) == nullptr) {
             return false;
         }
-        std::erase_if(loaders_, [&canonical](const module_loader& l) { return l.path() == canonical; });
+        std::erase_if(loaders_, [&canonical](const runtime::module_loader& l) { return l.path() == canonical; });
         std::erase_if(plugins_, [&canonical](const plugin_info& p) { return p.path == canonical; });
         return true;
     }
@@ -213,26 +210,52 @@ class module_manager {
         return plugins_;
     }
 
-    /// Describes a module's ports and properties through a probe instance: create it, enumerate the
-    /// owned entries and throw it away. This leans on the lifecycle contract — the constructor is
-    /// cheap and the heavy work happens in initialize, which is never called here. A throwing
-    /// constructor makes the module "broken", and the palette shows why.
+    /// The file a loaded module was declared in — in practice the script behind a bridge — found by
+    /// the name and version its factory answers to.
     ///
-    /// The probe is built with an empty config, which is why a port list here cannot yet depend on one.
-    /// When ports learn to follow the config, this is the call that has to learn where to get it.
+    /// The reverse of the lookup load_plugin does, and it has to exist because describe() cannot
+    /// answer it: a factory does not know which file it came from, so the file is recorded on the
+    /// plugin row and nowhere else. Anything holding a factory name rather than a plugin path — a
+    /// project node, say — comes back through here.
+    /// @param name registered module name
+    /// @param ver the module's own version, as describe() reports it
+    /// @return the file, empty when the plugin named none or no loaded plugin carries that module
+    [[nodiscard]] std::string module_source(const std::string& name, const version& ver) const {
+        for (const plugin_info& p : plugins_) {
+            if (!p.loaded) {
+                continue;
+            }
+            for (const module_info& m : p.modules) {
+                if (m.name == name && m.ver == ver) {
+                    return m.source;
+                }
+            }
+        }
+        return {};
+    }
+
+    /// Describes a module's ports and properties through its factory, which answers from the declared
+    /// types and creates nothing.
+    ///
+    /// What this used to be, and why the change is visible from outside: a probe instance was built
+    /// with an empty config and thrown away, so a constructor that threw made the module "broken" in
+    /// the palette, and tolerating an empty config was something every module owed studio. Both are
+    /// gone — a module is described by what it declares, not by whether one could be built.
+    ///
+    /// Broken is still reachable, and that is not a leftover: a module written by hand from
+    /// module_base names no port node, so its factory falls back to probing, and a C module whose
+    /// descriptor carries an unparsable default is refused here exactly as it would be at creation.
+    ///
+    /// A port list still cannot depend on a config. When it learns to, this is the call that has to
+    /// learn where to get one.
     [[nodiscard]] static module_info describe(const module_factory_base& factory) {
         module_info info{std::string(factory.name()), factory.get_version(), {}, {}, {}, false, {}, {}};
         try {
-            const module_ptr probe = factory.create(config_value{});
-            for (io::input_base* p : probe->inputs().owned()) {
-                info.inputs.push_back({p->name(), p->type()});
-            }
-            for (io::output_base* p : probe->outputs().owned()) {
-                info.outputs.push_back({p->name(), p->type()});
-            }
-            for (io::property_base* p : probe->properties().owned()) {
-                info.properties.push_back({p->name(), p->kind(), p->default_string(), p->options(), p->persistent()});
-            }
+            module_declaration decl = factory.declaration();
+            info.inputs = std::move(decl.inputs);
+            info.outputs = std::move(decl.outputs);
+            info.properties = std::move(decl.properties);
+            info.config_schema = std::move(decl.config_schema);
         } catch (const std::exception& e) {
             info.broken = true;
             info.error = e.what();
@@ -242,7 +265,7 @@ class module_manager {
 
    private:
     [[nodiscard]] static bool is_plugin_file(const std::filesystem::path& p) {
-        return p.extension() == plugin_extension;
+        return p.extension() == runtime::plugin_extension;
     }
 
     [[nodiscard]] plugin_info* find_info(const std::filesystem::path& canonical) {
@@ -255,7 +278,7 @@ class module_manager {
     }
 
     module_registry registry_;
-    std::vector<module_loader> loaders_;
+    std::vector<runtime::module_loader> loaders_;
     std::vector<plugin_info> plugins_;
     std::vector<std::filesystem::path> search_dirs_;
 };

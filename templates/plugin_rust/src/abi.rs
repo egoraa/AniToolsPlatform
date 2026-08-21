@@ -166,6 +166,42 @@ pub struct AtpApi {
     pub config_child_at: unsafe extern "C" fn(*mut AtpCtx, u32, u32) -> u32,
     pub config_find: unsafe extern "C" fn(*mut AtpCtx, u32, *const c_char, usize) -> u32,
     pub config_value_of: unsafe extern "C" fn(*mut AtpCtx, u32, *mut AtpValue) -> c_int,
+    pub config_find_path: unsafe extern "C" fn(*mut AtpCtx, u32, *const c_char, usize) -> u32,
+    pub config_text: unsafe extern "C" fn(*mut AtpCtx, *mut *const c_char, *mut usize) -> c_int,
+    pub config_origin: unsafe extern "C" fn(*mut AtpCtx, *mut *const c_char, *mut usize) -> c_int,
+    pub config_is_opaque: unsafe extern "C" fn(*mut AtpCtx) -> c_int,
+}
+
+impl AtpApi {
+    /// Whether the host behind this table carries the config accessors — `config_root` through
+    /// `config_value_of`, appended after `ATP_C_ABI` 1. Calling one on an older host would read a
+    /// pointer that is not there, so every reader asks this first. The C header spells the same
+    /// question as `atp_api_has_config()`.
+    ///
+    /// The threshold is the offset just past `config_value_of` and deliberately **not**
+    /// `size_of::<AtpApi>()`: the two agree only until the next callback is appended, after which a
+    /// plugin built against the newer mirror would refuse a host that does carry the config — the
+    /// exact compatibility `struct_size` exists to provide. `offset_of!` would say it directly but is
+    /// newer than this template's `rust-version`, so it is counted instead: `struct_size` and its
+    /// padding occupy one pointer's worth, then one pointer per callback up to and including
+    /// `config_value_of`. **Appending a callback above means raising this count.**
+    pub fn has_config(&self) -> bool {
+        const CONFIG_END: usize = core::mem::size_of::<usize>() * (1 + 17);
+        self.struct_size as usize >= CONFIG_END
+    }
+
+    /// Whether the host carries `config_find_path` through `config_is_opaque` — the path lookup and the
+    /// raw text of a config that came from a file, appended after the accessors above and again without
+    /// moving `ATP_C_ABI`. The C header spells the same question as `atp_api_has_config_text()`.
+    ///
+    /// A separate question with a threshold of its own, for the reason `has_config` explains: a host
+    /// that has the accessors and predates these four says yes to that one and must say no here.
+    /// Counted the same way — one pointer's worth for `struct_size` and its padding, then one per
+    /// callback up to and including `config_is_opaque`.
+    pub fn has_config_text(&self) -> bool {
+        const TEXT_END: usize = core::mem::size_of::<usize>() * (1 + 21);
+        self.struct_size as usize >= TEXT_END
+    }
 }
 
 #[repr(C)]

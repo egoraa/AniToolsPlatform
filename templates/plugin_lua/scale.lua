@@ -22,8 +22,27 @@ M.factor = atp.property(atp.i32, 3)
 --- in the message.
 M.fail = atp.property(atp.bool, false)
 
+--- Reads the config, an ordinary Lua table this instance was handed at creation — `nil` when the
+--- module's node named none, which is why every read below has a fallback.
+---
+--- The bands are the kind of setting this channel exists for: a list of pairs no property could
+--- hold, fixed before the module is connected rather than turned while it runs. `factor` stays a
+--- property for exactly the opposite reasons. Note that an array keeps its order here while the keys
+--- of a table do not, so nothing in a Lua module may depend on the order an object was written in.
 function M:initialize()
-    self:log("lua_scale ready")
+    local config = self.config or {}
+    self.bands = config.bands or {}
+    self.otherwise = config.otherwise or "large"
+    self:log("lua_scale ready with " .. #self.bands .. " bands")
+end
+
+function M:band_of(value)
+    for _, band in ipairs(self.bands) do
+        if value <= band.upto then
+            return band.name
+        end
+    end
+    return self.otherwise
 end
 
 function M:iterate()
@@ -36,7 +55,7 @@ function M:iterate()
     end
     local scaled = v * self.factor:get()
     self.result:write(scaled)
-    self.label:write(string.format("%d x %d = %d", v, self.factor:get(), scaled))
+    self.label:write(string.format("%d x %d = %d (%s)", v, self.factor:get(), scaled, self:band_of(scaled)))
     return atp.BUSY
 end
 

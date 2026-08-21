@@ -67,8 +67,8 @@ class script_language_test : public ::testing::TestWithParam<const script_langua
 INSTANTIATE_TEST_SUITE_P(EveryLanguage,
                          script_language_test,
                          ::testing::Values(&atp::studio::python_language, &atp::studio::lua_language),
-                         [](const ::testing::TestParamInfo<const script_language*>& info) {
-                             return std::string(info.param->label);
+                         [](const ::testing::TestParamInfo<const script_language*>& param_info) {
+                             return std::string(param_info.param->label);
                          });
 
 TEST_P(script_language_test, TheSkeletonItWritesNamesTheModuleItDeclares) {

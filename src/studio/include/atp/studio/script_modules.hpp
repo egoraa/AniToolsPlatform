@@ -77,7 +77,7 @@ inline void copy_package(const std::filesystem::path& from,
 
 /// File name of this language's bridge on this platform.
 [[nodiscard]] inline std::string bridge_filename(const script_language& lang) {
-    return std::string(lang.bridge_stem) + plugin_extension;
+    return std::string(lang.bridge_stem) + runtime::plugin_extension;
 }
 
 /// Where scripts of a module folder live: the language's subdirectory of it.
@@ -362,8 +362,9 @@ struct bridge_source {
 /// The bridge this session actually loaded, when it is older than the one the studio ships.
 ///
 /// Worth asking at every scan and not only when a module is created. A module folder carries its own
-/// bridge and the studio never replaces a copy — it cannot, a loaded library is locked — so a folder
-/// provisioned before an update goes on loading its old bridge for as long as that file exists, and
+/// bridge and the studio never replaces a copy — replacing the file would not change the library this
+/// process already loaded, and some platforms refuse the write outright — so a folder provisioned
+/// before an update goes on loading its old bridge for as long as that file exists, and
 /// whatever the newer platform added is simply absent. That absence raises no error of its own: the
 /// modules load and work, they merely lack what the newer bridge would have told the host about them,
 /// which reads as a broken studio rather than as a stale file.
@@ -388,8 +389,8 @@ struct bridge_source {
 [[nodiscard]] inline std::string stale_bridge_note(const std::filesystem::path& loaded,
                                                    const std::filesystem::path& platform) {
     return "the bridge in use, " + loaded.string() + ", is older than the studio's own, " + platform.string() +
-           "; a copy already loaded cannot be replaced, so delete it and scan again if modules of that folder "
-           "behave as if the platform were older";
+           "; replacing the file would not change the copy already loaded, so delete it and scan again "
+           "if modules of that folder behave as if the platform were older";
 }
 
 /// What provision_folder had to do, so the caller can say it out loud.
@@ -411,9 +412,9 @@ struct folder_setup {
 /// The package is **refreshed** when the source is newer, and that is not a convenience: it is
 /// platform code rather than the author's, a folder provisioned before an update keeps working only if
 /// it follows the bridge, and a package one release behind fails in ways that point nowhere near it —
-/// the discovery walk lives there. The bridge file is only ever created, never replaced: a copy
-/// already loaded in this process cannot be overwritten at all, so a stale one is reported instead of
-/// half-copied.
+/// the discovery walk lives there. The bridge file is only ever created, never replaced: overwriting
+/// cannot change the copy this process already loaded, and some platforms refuse the write outright,
+/// so a stale one is reported instead of half-copied.
 ///
 /// A folder may be provisioned for more than one language, and nothing here objects: the languages
 /// differ in every path they touch, and the folder stays one plugin search directory.

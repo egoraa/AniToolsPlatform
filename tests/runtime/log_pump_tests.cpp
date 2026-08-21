@@ -8,15 +8,15 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/log_pump.hpp>
 #include <atp/module.hpp>
-#include <atp/pipeline.hpp>
+#include <atp/runtime/log_pump.hpp>
+#include <atp/runtime/pipeline.hpp>
 
 namespace {
 
 using namespace std::chrono_literals;
 
-class chatty final : public atp::module<atp::io::ports<>, "chatty"> {
+class chatty final : public atp::module<atp::ports<>, "chatty"> {
    public:
     void initialize(atp::module_context& context) override {
         context.host.warning("hello");
@@ -26,16 +26,16 @@ class chatty final : public atp::module<atp::io::ports<>, "chatty"> {
 }  // namespace
 
 TEST(LogPump, CarriesLinesToTheSink) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     pipe.root().make<chatty>("talker");
     pipe.root().initialize(pipe.context());
 
     std::mutex mutex;
-    std::vector<atp::log_line> seen;
+    std::vector<atp::runtime::log_line> seen;
     {
-        atp::log_pump pump(
+        atp::runtime::log_pump pump(
             pipe,
-            [&](const atp::log_line& line) {
+            [&](const atp::runtime::log_line& line) {
                 const std::scoped_lock lock(mutex);
                 seen.push_back(line);
             },
@@ -57,16 +57,16 @@ TEST(LogPump, CarriesLinesToTheSink) {
 }
 
 TEST(LogPump, DrainsWhatIsLeftWhenItStops) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     pipe.root().make<chatty>("talker");
     pipe.root().initialize(pipe.context());
 
     std::mutex mutex;
-    std::vector<atp::log_line> seen;
+    std::vector<atp::runtime::log_line> seen;
     {
-        atp::log_pump pump(
+        atp::runtime::log_pump pump(
             pipe,
-            [&](const atp::log_line& line) {
+            [&](const atp::runtime::log_line& line) {
                 const std::scoped_lock lock(mutex);
                 seen.push_back(line);
             },
@@ -79,19 +79,19 @@ TEST(LogPump, DrainsWhatIsLeftWhenItStops) {
 }
 
 TEST(LogPump, FormatsAReadableLine) {
-    const atp::log_line line{"stage.counter", atp::log_level::warning, "device reconnected", false,
-                             std::chrono::system_clock::now()};
-    EXPECT_EQ(atp::format_log_line(line),
-              atp::format_log_time(line.at) + " [warning] stage.counter: device reconnected");
+    const atp::runtime::log_line line{"stage.counter", atp::log_level::warning, "device reconnected", false,
+                                      std::chrono::system_clock::now()};
+    EXPECT_EQ(atp::runtime::format_log_line(line),
+              atp::runtime::format_log_time(line.at) + " [warning] stage.counter: device reconnected");
 }
 
 TEST(LogPump, MarksTruncationInTheFormattedLine) {
-    const atp::log_line line{"a", atp::log_level::info, "text", true, std::chrono::system_clock::now()};
-    EXPECT_EQ(atp::format_log_line(line), atp::format_log_time(line.at) + " [info] a: text...");
+    const atp::runtime::log_line line{"a", atp::log_level::info, "text", true, std::chrono::system_clock::now()};
+    EXPECT_EQ(atp::runtime::format_log_line(line), atp::runtime::format_log_time(line.at) + " [info] a: text...");
 }
 
 TEST(LogPump, FormatsTheStampAsATimeOfDayToTheMillisecond) {
-    const std::string stamp = atp::format_log_time(std::chrono::system_clock::now());
+    const std::string stamp = atp::runtime::format_log_time(std::chrono::system_clock::now());
     ASSERT_EQ(stamp.size(), 12u);
     EXPECT_EQ(stamp[2], ':');
     EXPECT_EQ(stamp[5], ':');
@@ -102,21 +102,21 @@ TEST(LogPump, FormatsTheStampAsATimeOfDayToTheMillisecond) {
 }
 
 TEST(LogPump, StampsALineWithTheMomentTheModuleWroteIt) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     pipe.root().make<chatty>("talker");
 
     const auto before = std::chrono::system_clock::now();
     pipe.root().initialize(pipe.context());
     const auto after = std::chrono::system_clock::now();
 
-    const std::vector<atp::log_line> lines = pipe.collect_logs();
+    const std::vector<atp::runtime::log_line> lines = pipe.collect_logs();
     ASSERT_EQ(lines.size(), 1u);
     EXPECT_GE(lines[0].at, before);
     EXPECT_LE(lines[0].at, after);
 }
 
 TEST(LogPump, ParsesLevelNames) {
-    EXPECT_EQ(atp::level_from_name("error"), atp::log_level::error);
-    EXPECT_EQ(atp::level_from_name("debug"), atp::log_level::debug);
-    EXPECT_FALSE(atp::level_from_name("loud").has_value());
+    EXPECT_EQ(atp::runtime::level_from_name("error"), atp::log_level::error);
+    EXPECT_EQ(atp::runtime::level_from_name("debug"), atp::log_level::debug);
+    EXPECT_FALSE(atp::runtime::level_from_name("loud").has_value());
 }

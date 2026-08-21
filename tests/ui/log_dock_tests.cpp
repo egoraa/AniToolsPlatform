@@ -9,7 +9,7 @@
 #include <QListWidgetItem>
 #include <QString>
 
-#include <atp/log_pump.hpp>
+#include <atp/runtime/log_pump.hpp>
 
 #include "model/app_state.hpp"
 #include "shell/main_window.hpp"

@@ -10,12 +10,12 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atp/group.hpp>
 #include <atp/mcp/arguments.hpp>
 #include <atp/mcp/tool_registry.hpp>
-#include <atp/pipeline_runner.hpp>
 #include <atp/runtime/connection_sample.hpp>
+#include <atp/runtime/group.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 #include <atp/runtime/property_override.hpp>
 
 namespace atp::mcp {
@@ -40,13 +40,13 @@ class application_control {
     }
 
     /// Pass counters per thread.
-    [[nodiscard]] std::vector<pipeline_runner::thread_stats> stats() const {
+    [[nodiscard]] std::vector<runtime::pipeline_runner::thread_stats> stats() const {
         return app_->runner.stats();
     }
 
     /// Live module tree, or nullptr when nothing runs. The check is running() rather than the
     /// presence of a pipeline, matching session: a stopped tree is still there but no longer live.
-    [[nodiscard]] group* live_root() const {
+    [[nodiscard]] runtime::group* live_root() const {
         return running() ? &app_->pipe.root() : nullptr;
     }
 
@@ -56,27 +56,27 @@ class application_control {
     }
 
     /// Per-module cost; empty when nothing runs or metrics were never enabled.
-    [[nodiscard]] std::vector<group::module_stats> module_metrics() const {
-        const group* root = live_root();
-        return root ? root->metrics() : std::vector<group::module_stats>{};
+    [[nodiscard]] std::vector<runtime::group::module_stats> module_metrics() const {
+        const runtime::group* root = live_root();
+        return root ? root->metrics() : std::vector<runtime::group::module_stats>{};
     }
 
     /// What every input of the running pipeline received and lost; empty if nothing runs.
-    [[nodiscard]] std::vector<group::port_stats> input_metrics() const {
-        const group* root = live_root();
-        return root ? root->input_metrics() : std::vector<group::port_stats>{};
+    [[nodiscard]] std::vector<runtime::group::port_stats> input_metrics() const {
+        const runtime::group* root = live_root();
+        return root ? root->input_metrics() : std::vector<runtime::group::port_stats>{};
     }
 
     /// Whether the running pipeline is timing its modules.
     [[nodiscard]] bool metrics_enabled() const {
-        const group* root = live_root();
+        const runtime::group* root = live_root();
         return root != nullptr && root->metrics_enabled();
     }
 
     /// Turns per-module timing on or off for the whole running pipeline.
     /// @return false if there is nothing running to enable it on
     bool set_metrics_enabled(bool on) {
-        if (group* root = live_root()) {
+        if (runtime::group* root = live_root()) {
             root->set_metrics_enabled(on);
             return true;
         }

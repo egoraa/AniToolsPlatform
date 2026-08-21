@@ -7,11 +7,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atp/hosting/module_factory_base.hpp>
 #include <atp/mcp/arguments.hpp>
 #include <atp/mcp/module_json.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/mcp/workspace.hpp>
-#include <atp/module_factory_base.hpp>
 
 namespace atp::mcp {
 

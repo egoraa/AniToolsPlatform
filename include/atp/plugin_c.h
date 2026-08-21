@@ -11,29 +11,43 @@
 /// The C++ contract in plugin.hpp is shared header-only code with a version number attached — a
 /// plugin compiles its own copies of the registries, instantiates its own io templates and throws
 /// exceptions the host catches, which is why host and plugin must be one toolchain sharing one C++
-/// runtime. Nothing about that is fixable without taking the SDK's ergonomics away from the C++
-/// authors who are its point, so this file adds a path beside it rather than changing it.
+/// runtime. This file adds a path beside that one rather than changing it, since nothing about it is
+/// fixable without taking the SDK's ergonomics away from the C++ authors who are its point.
 ///
 /// The division of labour is the whole design: every C++ template, allocation and exception stays on
 /// the host's side of this boundary. A plugin speaking this ABI contains no std type, frees nothing
 /// the host allocated and instantiates no port — it publishes descriptions and function pointers, and
 /// the host builds the real modules and ports from them. That is what lets a plugin be a Rust cdylib,
-/// a Zig shared library or a bridge embedding an interpreter, with no C++ compiler involved at all,
-/// and it is also why the atp_build_id() toolchain check of the C++ path is deliberately NOT applied
-/// here: there is nothing left for a toolchain mismatch to corrupt.
+/// a Zig shared library or an embedded interpreter with no C++ compiler involved at all, and it is
+/// also why the atp_build_id() toolchain check of the C++ path is deliberately NOT applied here:
+/// there is nothing left for a toolchain mismatch to corrupt.
 ///
 /// The price is a closed set of port payload types (atp_kind). It buys the property that matters
 /// more: a port declared here is an ordinary port of the platform, so a module written in another
 /// language connects to a C++ one directly, with no adapter module in the config.
 ///
+/// **No allocation ever crosses this boundary: neither side frees what the other made.** A payload
+/// the host hands out — the `out` of get_input, take_input, get_property and take_property — points
+/// into the host's own storage and stays valid until the next of those four calls on the same ctx, or
+/// until iterate returns, whichever comes first. Writing an output does not invalidate it, which is
+/// what makes the natural thing legal: read a payload and pass it straight to write_output. Holding
+/// two at once does not work, there being one buffer per module instance — which is also why reading
+/// a port costs no allocation — so a module needing the bytes across another read copies them. A
+/// payload the module hands over — the `value` of write_output and set_property — need only stay
+/// valid for the duration of the call, and the host copies what it keeps. Config text is the one
+/// thing promised for longer; config_value_of says how long and why.
+///
 /// **Every string crossing this boundary is UTF-8**, in both directions: module and port names, the
 /// canonical text of a property value, the bytes of an ATP_KIND_TEXT payload, and the `source` path of
 /// a descriptor. The rule is stated because there is no type to carry it — a `const char*` looks the
 /// same whatever it holds — and because the one plausible alternative is actively harmful on Windows,
-/// where the process code page cannot represent most of Unicode: a host or bridge that reaches for
+/// where the process code page cannot represent most of Unicode: a host that reaches for
 /// `std::filesystem::path::string()` there gets a `filesystem_error` thrown for a folder named in
 /// Cyrillic, and a throw out of one of the entry points below is exactly what this boundary forbids.
 /// `u8string()` is the conversion that holds.
+///
+/// The three symbols at the bottom may be exported beside the C++ pair of plugin.hpp; both paths then
+/// run and both sets of modules are registered.
 ///
 /// This header must keep compiling as C99. It is included by plugins that have no C++ compiler.
 
@@ -74,7 +88,7 @@ typedef enum atp_kind {
 /// lookup, an index out of range and "there is nothing here" alike.
 #define ATP_CONFIG_NONE 0u
 
-/// Form of a config node — the seven forms of atp::config_value, in the same order.
+/// Form of a config node — the seven forms of atp::config::node, in the same order.
 ///
 /// Only the four scalar ones can be read into an atp_value: there is no atp_kind for null, an array or
 /// an object, and config_value_of refuses those rather than inventing one.
@@ -225,12 +239,10 @@ typedef struct atp_api {
     /// root of kind ATP_CONFIG_NULL rather than nothing, so this call never has to be checked for
     /// absence — only its kind asked.
     ///
-    /// The callbacks from here on were appended after ATP_C_ABI 1 and `struct_size` says whether they
-    /// are there; a module built against a newer header than the host it runs in checks the size
-    /// before reading the pointer. Appending is why ATP_C_ABI itself did not move.
-    ///
-    /// The config is readable from inside the create function: it is the C path's analogue of a
-    /// constructor, and this channel exists for what has to be known before a port is connected.
+    /// The callbacks from here on were appended after ATP_C_ABI 1, which is why the number did not
+    /// move; ask atp_api_has_config before calling any of them. The config is readable from inside the
+    /// create function — that call being this path's analogue of a constructor, and this channel
+    /// existing for what has to be known before a port is connected.
     uint32_t (*config_root)(atp_ctx* ctx);
 
     /// Form of a node.
@@ -260,15 +272,76 @@ typedef struct atp_api {
     /// Reads a scalar node into an atp_value.
     ///
     /// Text handed out here points into the host's copy of the config and stays valid for as long as
-    /// the module lives — deliberately stronger than the guarantee on a port's ATP_KIND_TEXT, which
-    /// is a copy taken into a shared buffer and lasts only until the next read. A config string is
-    /// already sitting in a tree the host holds from creation to destruction, so nothing is copied and
-    /// nothing expires; reading a port in between cannot disturb it.
+    /// the module lives — deliberately stronger than the guarantee on a port's ATP_KIND_TEXT, which is
+    /// a copy taken into a shared buffer and lasts only until the next read. A config string already
+    /// sits in a tree the host holds from creation to destruction, so nothing is copied and nothing
+    /// expires; reading a port in between cannot disturb it.
     /// @param out filled in only when the answer is 1
     /// @return 1 for the four scalar forms; 0 for ATP_CONFIG_NULL, an array, an object or a handle
     ///         that names nothing — there is no atp_kind for those, and `*out` is left untouched
     int (*config_value_of)(atp_ctx* ctx, uint32_t node, atp_value* out);
+
+    /// Handle of the node at a dotted path, so "channels[2].rate" is one call instead of four.
+    ///
+    /// The grammar is the host's: segments separated by '.', an index written as "[N]" right after a
+    /// segment, and a leading "[N]" when the root itself is an array. A key that contains '.' or '['
+    /// is unreachable this way and stays reachable through config_find.
+    ///
+    /// Answers ATP_CONFIG_NONE both for "nothing is there" and for a path the grammar refuses, since
+    /// nothing can be thrown across this boundary. A refused path is **not** lost, though: the host
+    /// records the failure on its own side and raises it after the call that swallowed it, so a typo
+    /// surfaces as an error instead of as an empty config.
+    ///
+    /// Only a path from config_root is followed; any other node answers ATP_CONFIG_NONE, the host's
+    /// index of nodes having no reverse mapping to walk from. Reach a subtree by spelling out its
+    /// full path instead.
+    /// @param path UTF-8, @p len bytes, need not be NUL-terminated
+    uint32_t (*config_find_path)(atp_ctx* ctx, uint32_t node, const char* path, size_t len);
+
+    /// Bytes of the file this config came from, for a format the host does not parse — the module
+    /// reads its own YAML, INI or whatever it speaks, and the host learns nothing new.
+    ///
+    /// Text points into the host's copy and lasts as long as the module, like config_value_of's.
+    /// @param out filled in only when the answer is 1
+    /// @return 1 when this config came from a file, 0 when it did not and `*out` is left untouched
+    int (*config_text)(atp_ctx* ctx, const char** out, size_t* len);
+
+    /// Path of that file, so a module parsing the text itself can name it in its own errors and can
+    /// resolve paths written inside its config against it.
+    /// @return 1 when this config came from a file, 0 otherwise
+    int (*config_origin)(atp_ctx* ctx, const char** out, size_t* len);
+
+    /// Whether the text is all there is: 1 when the host did not parse the file at all.
+    ///
+    /// Not derivable from config_kind(config_root): a parsed file holding literally `null` also leaves
+    /// an empty root next to a non-empty text, and a module deciding whether to parse the text itself
+    /// would get that case wrong.
+    int (*config_is_opaque)(atp_ctx* ctx);
 } atp_api;
+
+/// Whether the host behind this table carries the config accessors, which is the question every
+/// reader of them has to ask first.
+///
+/// The threshold is the offset past the last of them and deliberately **not** `sizeof(atp_api)`. The
+/// struct grows by appending, so the two agree only until the next callback is added: from then on a
+/// plugin built against the newer header would compare against a size counting fields this question
+/// is not about, and would refuse a host that does have the config — the exact compatibility
+/// `struct_size` exists to provide. Asking by offset means the answer moves only when these fields do.
+/// @param api the table handed to atp_create_fn
+/// @return 1 if config_root through config_value_of may be called, 0 if the host predates them
+static inline int atp_api_has_config(const atp_api* api) {
+    return api->struct_size >= offsetof(atp_api, config_value_of) + sizeof(api->config_value_of);
+}
+
+/// Whether the host behind this table carries the path lookup and the config's raw text.
+///
+/// A question of its own with an offset of its own, for the reason spelled out above: a host carrying
+/// the config accessors and predating these four answers yes to atp_api_has_config and has to answer
+/// no here. Reusing that one would read four null pointers.
+/// @return 1 if config_find_path through config_is_opaque may be called
+static inline int atp_api_has_config_text(const atp_api* api) {
+    return api->struct_size >= offsetof(atp_api, config_is_opaque) + sizeof(api->config_is_opaque);
+}
 
 /// Creates the module's own state.
 ///
@@ -278,7 +351,7 @@ typedef struct atp_api {
 /// @param api valid for as long as the module lives; worth storing next to the state
 /// @param ctx this instance's context, to be passed back to every api call
 /// @param user_data the `user_data` of the descriptor this function came from, which is how one
-///        create function serves many descriptors — a bridge generating a module per script
+///        create function serves many descriptors, telling it which module it is building
 /// @return the module state, or NULL to refuse creation
 typedef void* (*atp_create_fn)(const atp_api* api, atp_ctx* ctx, void* user_data);
 
@@ -319,8 +392,8 @@ typedef struct atp_output_desc {
     atp_kind kind;
 } atp_output_desc;
 
-/// Declaration of one property: a setting with a default, edited live by the config, the CLI or
-/// studio, and read by the module through get_property/take_property.
+/// Declaration of one property: a setting with a default, edited live by the host and read by the
+/// module through get_property/take_property.
 typedef struct atp_property_desc {
     /// NUL-terminated, unique among this module's properties.
     const char* name;
@@ -378,10 +451,10 @@ typedef struct atp_module_desc {
     /// Where this module is declared, NUL-terminated **UTF-8**, or NULL when it is declared nowhere a
     /// person could open — which is every plugin whose modules are compiled into it.
     ///
-    /// For a plugin that turns files into modules the file is the thing its author edits, and the
-    /// host has no way to guess it: a name is not a file name, and the interpreter that read the
-    /// file is the only side that knows. A host may offer to open it; nothing depends on it, and a
-    /// plugin built before this field existed is accepted unchanged because struct_size says so.
+    /// For a plugin that turns files into modules the file is the thing its author edits, and the host
+    /// has no way to guess it: a name is not a file name, and only the side that read the file knows.
+    /// A host may offer to open it; nothing depends on it, and a plugin built before this field
+    /// existed is accepted unchanged because struct_size says so.
     const char* source;
 } atp_module_desc;
 
@@ -392,24 +465,17 @@ typedef struct atp_module_desc {
 /// to keep working. It stays anchored to the first field added after 1.
 #define ATP_MODULE_DESC_SIZE_V1 (offsetof(atp_module_desc, source))
 
-/// The three symbols a plugin of this path exports. They are pulled, not pushed: the host asks for
-/// the descriptors instead of handing over a registration callback, so loading needs no function
-/// pointer travelling into the plugin, cannot be reentered, and lets a plugin be nothing but static
-/// data.
+/// First of the three symbols a plugin of this path exports.
 ///
-///     ATP_C_EXPORT unsigned atp_c_abi_version(void);
-///     ATP_C_EXPORT unsigned atp_module_count(void);
-///     ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index);
-///
-/// A plugin may export these beside the C++ pair of plugin.hpp; both paths then run and both sets of
-/// modules are registered.
-
+/// They are pulled, not pushed: the host asks for the descriptors instead of handing over a
+/// registration callback, so loading needs no function pointer travelling into the plugin, cannot be
+/// reentered, and lets a plugin be nothing but static data.
 /// @return ATP_C_ABI as the plugin was built against. A mismatch with the host's is refused, and
 ///         this is the only call that is safe under one — plain C, no parameters, no types.
 ATP_C_EXPORT unsigned atp_c_abi_version(void);
 
-/// @return how many modules this plugin offers. Called once, before atp_module_desc_at; a bridge
-///         that discovers its modules (scanning a directory of scripts, say) may do that work here.
+/// @return how many modules this plugin offers. Called once, before atp_module_desc_at; a plugin that
+///         discovers its modules at load time may do that work here.
 ATP_C_EXPORT unsigned atp_module_count(void);
 
 /// Describes one module.
@@ -418,22 +484,6 @@ ATP_C_EXPORT unsigned atp_module_count(void);
 ///         unloaded — the host keeps the pointer for the lifetime of the registration. NULL is a
 ///         refusal and fails the load.
 ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index);
-
-/// Lifetime of a value crossing this boundary, which is the one rule worth reading twice. **No
-/// allocation ever crosses: neither side frees what the other made.**
-///
-/// Host to module — the `out` of get_input, take_input, get_property and take_property: `bytes.data`
-/// points into storage owned by the host and stays valid until the next call that yields a value on
-/// the same ctx (one of those same four) or until iterate returns, whichever comes first. Writing an
-/// output does not invalidate it, which is what makes the natural thing legal: read a payload and pass
-/// it straight to write_output. Holding two payloads at once does not work — there is one buffer per
-/// module instance, which is also why reading a port costs no allocation — so a module that needs the
-/// bytes across another read copies them.
-///
-/// Module to host — the `value` of write_output and set_property: `bytes.data` need only stay valid
-/// for the duration of the call. The host copies what it keeps. This is the same contract the io
-/// layer already gives its own writers, where a delivered value is the writer's own object and every
-/// input copies out of it.
 
 #ifdef __cplusplus
 }

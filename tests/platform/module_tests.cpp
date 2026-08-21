@@ -8,8 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/hosting/null_host.hpp>
 #include <atp/module.hpp>
-#include <atp/null_host.hpp>
 
 namespace {
 
@@ -17,7 +17,7 @@ struct test_in : atp::io::inputs {
     atp::io::input<int>& input1 = make<atp::io::input<int>>("input1");
     atp::io::input<std::string>& input2 = make<atp::io::input<std::string>>("input2");
 };
-using test_ports = atp::io::ports<test_in>;
+using test_ports = atp::ports<test_in>;
 
 class test_module : public atp::module<test_ports> {
    public:
@@ -77,7 +77,7 @@ TEST(Module, ConstAccess) {
     EXPECT_FALSE(cmodule.inputs().input1.empty());
 }
 
-TEST(Module, PortsAreNodePorts) {
+TEST(Module, SectionsKeepTheirPortAddresses) {
     test_ports ports;
     atp::io::input<int>* input1 = &ports.in.input1;
     atp::io::input<std::string>* input2 = &ports.in.input2;
@@ -86,7 +86,7 @@ TEST(Module, PortsAreNodePorts) {
     EXPECT_EQ(&module.inputs().input2, input2);
 }
 
-TEST(Module, ConstructedFromPrewiredPorts) {
+TEST(Module, ConstructedFromPrewiredSections) {
     atp::io::output<int> feeder{"feeder"};
     test_ports ports;
     feeder.connect(ports.in.input1);
@@ -125,7 +125,7 @@ namespace {
 struct erased_probe_in : atp::io::inputs {
     atp::io::input<int>& number = make<atp::io::input<int>>("number");
 };
-using erased_probe_ports = atp::io::ports<erased_probe_in>;
+using erased_probe_ports = atp::ports<erased_probe_in>;
 class erased_probe : public atp::module<erased_probe_ports> {};
 }  // namespace
 
@@ -147,13 +147,13 @@ namespace {
 struct counter_props : atp::io::properties {
     atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
 };
-using counter_props_ports = atp::io::ports<atp::io::inputs, atp::io::outputs, counter_props>;
+using counter_props_ports = atp::ports<atp::io::inputs, atp::io::outputs, counter_props>;
 
 class propertied_module : public atp::module<counter_props_ports, "propertied"> {};
 
 }  // namespace
 
-TEST(Module, PropertiesCovariantAccess) {
+TEST(Module, PropertiesAreATypedMember) {
     propertied_module m;
     EXPECT_EQ(m.properties().step.get(), 1);
 }
@@ -171,4 +171,12 @@ TEST(Module, PropertiesReachableThroughBase) {
 TEST(Module, DefaultModuleHasEmptyProperties) {
     atp::module<> m;
     EXPECT_TRUE(m.properties().list().empty());
+}
+
+TEST(Module, TypeErasedAccessReachesTheSameSections) {
+    propertied_module m;
+    atp::module_base& base = m;
+    EXPECT_EQ(&base.inputs(), &static_cast<atp::io::inputs&>(m.inputs()));
+    EXPECT_EQ(&base.outputs(), &static_cast<atp::io::outputs&>(m.outputs()));
+    EXPECT_EQ(&base.properties(), &static_cast<atp::io::properties&>(m.properties()));
 }

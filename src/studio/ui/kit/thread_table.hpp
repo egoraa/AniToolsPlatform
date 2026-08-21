@@ -44,7 +44,7 @@ class thread_table final : public QWidget {
     QToolButton* remove_ = nullptr;
     std::string signature_;
     bool filling_ = false;
-    std::vector<pipeline_runner::thread_stats> previous_;
+    std::vector<runtime::pipeline_runner::thread_stats> previous_;
 };
 
 }  // namespace atp::studio::ui

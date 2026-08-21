@@ -11,8 +11,8 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/hosting/module_factory.hpp>
 #include <atp/module.hpp>
-#include <atp/module_factory.hpp>
 #include <atp/studio/module_manager.hpp>
 
 namespace {
@@ -72,17 +72,17 @@ struct probe_inputs : atp::io::inputs {
 struct probe_outputs : atp::io::outputs {
     atp::io::output<int>& count = make<atp::io::output<int>>("count");
 };
-using probe_ports = atp::io::ports<probe_inputs, probe_outputs>;
+using probe_ports = atp::ports<probe_inputs, probe_outputs>;
 class probed_module : public atp::module<probe_ports, "probed"> {};
 
-class throwing_module : public atp::module<atp::io::ports<>, "throwing"> {
+class throwing_module : public atp::module<atp::ports<>, "throwing"> {
    public:
     throwing_module() {
         throw std::runtime_error("broken constructor");
     }
 };
 
-TEST(ModuleManager, DescribeProbesPortsAndSurvivesBrokenConstructors) {
+TEST(ModuleManager, DescribeListsPortsWithoutConstructingTheModule) {
     atp::module_factory<probed_module> good("probed");
     const atp::studio::module_info info = atp::studio::module_manager::describe(good);
     EXPECT_FALSE(info.broken);
@@ -91,11 +91,32 @@ TEST(ModuleManager, DescribeProbesPortsAndSurvivesBrokenConstructors) {
     EXPECT_EQ(info.inputs[0].type, std::type_index(typeid(int)));
     ASSERT_EQ(info.outputs.size(), 1u);
     EXPECT_EQ(info.outputs[0].name, "count");
+}
 
-    atp::module_factory<throwing_module> bad("throwing");
-    const atp::studio::module_info broken = atp::studio::module_manager::describe(bad);
-    EXPECT_TRUE(broken.broken);
-    EXPECT_NE(broken.error.find("broken constructor"), std::string::npos);
+TEST(ModuleManager, ABrokenConstructorNoLongerMakesAModuleUndescribable) {
+    atp::module_factory<throwing_module> factory("throwing");
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+
+    EXPECT_FALSE(info.broken) << "ports are declared by the port node, so a constructor that throws says nothing about "
+                                 "what the module declares";
+    EXPECT_TRUE(info.error.empty());
+}
+
+class config_hungry_module : public atp::module<atp::ports<>, "hungry"> {
+   public:
+    explicit config_hungry_module(const atp::module_config& config) {
+        if (config.root().is_null()) {
+            throw std::runtime_error("channels is required");
+        }
+    }
+};
+
+TEST(ModuleManager, AModuleWhoseConstructorDemandsAConfigIsStillDescribable) {
+    atp::module_factory<config_hungry_module> factory("hungry");
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+
+    EXPECT_FALSE(info.broken) << "tolerating an empty config was the price of probing, and probing is gone";
+    EXPECT_TRUE(info.error.empty());
 }
 
 }  // namespace
@@ -122,7 +143,7 @@ struct probe_props : atp::io::properties {
     atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
 };
 class propertied_probe
-    : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, probe_props>, "propertied_probe"> {};
+    : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, probe_props>, "propertied_probe"> {};
 
 TEST(StudioModuleManager, DescribeListsPropertyOptions) {
     atp::module_factory<propertied_probe> factory("propertied_probe");
@@ -177,6 +198,19 @@ TEST(ModuleManager, UnloadPluginWithdrawsItsFactoriesAndItsRow) {
     EXPECT_NE(manager.registry().find("plugin_module"), nullptr);
 }
 
+TEST(ModuleManager, TheFileAModuleWasDeclaredInIsReachableFromItsNameAndVersion) {
+    atp::studio::module_manager manager;
+    manager.load_plugin(ATP_TEST_PLUGIN_C);
+
+    EXPECT_EQ(manager.module_source("c_probe", atp::version{2, 1}), "c_probe_declared_here.txt");
+    EXPECT_TRUE(manager.module_source("c_bare", atp::version{1}).empty());
+    EXPECT_TRUE(manager.module_source("c_probe", atp::version{9, 9}).empty());
+    EXPECT_TRUE(manager.module_source("nobody", atp::version{1}).empty());
+
+    EXPECT_TRUE(manager.unload_plugin(ATP_TEST_PLUGIN_C));
+    EXPECT_TRUE(manager.module_source("c_probe", atp::version{2, 1}).empty());
+}
+
 TEST(ModuleManager, ReloadPluginOfAFileNeverLoadedChangesNothing) {
     atp::studio::module_manager manager;
     EXPECT_FALSE(manager.reload_plugin(ATP_TEST_PLUGIN));
@@ -192,7 +226,7 @@ TEST(ModuleManager, PluginPathCarriesTheExtensionWhicheverWayTheFileWasNamed) {
     manager.load_plugin(ATP_TEST_PLUGIN);
 
     ASSERT_EQ(manager.plugins().size(), 1u);
-    EXPECT_EQ(manager.plugins().front().path.extension().string(), std::string(atp::plugin_extension));
+    EXPECT_EQ(manager.plugins().front().path.extension().string(), std::string(atp::runtime::plugin_extension));
     EXPECT_TRUE(manager.plugins().front().loaded);
 }
 
@@ -211,3 +245,51 @@ TEST(StudioModuleManager, DescribeListsProperties) {
 }
 
 }  // namespace
+
+namespace {
+
+class handmade_broken : public atp::module_base {
+   public:
+    handmade_broken() {
+        throw std::runtime_error("handmade constructor failed");
+    }
+    void initialize(atp::module_context&) override {}
+    void start() override {}
+    atp::work_status iterate(std::stop_token) override {
+        return atp::work_status::idle;
+    }
+    void stop() override {}
+    [[nodiscard]] atp::io::inputs& inputs() override {
+        return in_;
+    }
+    [[nodiscard]] const atp::io::inputs& inputs() const override {
+        return in_;
+    }
+    [[nodiscard]] atp::io::outputs& outputs() override {
+        return out_;
+    }
+    [[nodiscard]] const atp::io::outputs& outputs() const override {
+        return out_;
+    }
+    [[nodiscard]] atp::io::properties& properties() override {
+        return props_;
+    }
+    [[nodiscard]] const atp::io::properties& properties() const override {
+        return props_;
+    }
+
+   private:
+    atp::io::inputs in_;
+    atp::io::outputs out_;
+    atp::io::properties props_;
+};
+
+}  // namespace
+
+TEST(ModuleManager, AModuleWithoutAPortNodeIsStillProbedAndStillCanBeBroken) {
+    atp::module_factory<handmade_broken> factory("handmade_broken");
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+
+    EXPECT_TRUE(info.broken);
+    EXPECT_NE(info.error.find("handmade constructor failed"), std::string::npos);
+}

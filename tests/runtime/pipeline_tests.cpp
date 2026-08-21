@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <gtest/gtest.h>
 
-#include <atp/pipeline.hpp>
+#include <atp/runtime/pipeline.hpp>
 
 TEST(Pipeline, RootServicesAndContextAreWired) {
-    atp::pipeline p;
+    atp::runtime::pipeline p;
     EXPECT_EQ(p.root().get_name(), "root");
     EXPECT_EQ(&p.context().services, &p.services());
     p.root().add_group("stage");

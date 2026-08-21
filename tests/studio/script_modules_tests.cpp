@@ -84,6 +84,15 @@ TEST(PythonLanguage, TheSkeletonDeclaresTheNameTheClassAndThePortsItPromises) {
     EXPECT_EQ(text.find("@CLASS@"), std::string::npos);
 }
 
+TEST(PythonLanguage, TheSkeletonShowsHowTheConfigArrives) {
+    const std::string text = atp::studio::render_python_module("py_my_thing");
+    EXPECT_NE(text.find("def __init__(self):"), std::string::npos)
+        << "the constructor is the only place the config may be read, so the skeleton has to have one";
+    EXPECT_NE(text.find("self.config"), std::string::npos)
+        << "an author who never sees the attribute cannot discover the channel: it is set by the bridge, "
+           "so nothing in the class body hints at it";
+}
+
 TEST(ScriptModules, CreatingWritesTheSkeletonAndRefusesToTouchAnExistingFile) {
     const std::filesystem::path dir = fresh_dir("create");
 
@@ -131,7 +140,7 @@ TEST(ScriptModules, AModuleFolderKeepsItsScriptsBesideTheAtpPackage) {
     EXPECT_EQ(atp::studio::scripts_dir("c:/mine", atp::studio::python_language),
               std::filesystem::path("c:/mine") / "python");
     EXPECT_EQ(atp::studio::bridge_filename(atp::studio::python_language),
-              std::string("atp_python_bridge") + std::string(atp::plugin_extension));
+              std::string("atp_python_bridge") + std::string(atp::runtime::plugin_extension));
 }
 
 TEST(ScriptModules, ProvisioningCopiesTheBridgeAndThePackageOnlyWhenTheyAreMissing) {

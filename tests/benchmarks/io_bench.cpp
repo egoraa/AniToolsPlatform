@@ -9,6 +9,7 @@
 #include <benchmark/benchmark.h>
 
 #include <atp/io/input.hpp>
+#include <atp/io/inputs.hpp>
 #include <atp/io/output.hpp>
 #include <atp/io/property.hpp>
 #include <atp/io/queued_input.hpp>
@@ -230,5 +231,24 @@ void property_set(benchmark::State& state) {
     }
 }
 BENCHMARK(property_set);
+
+template <std::size_t N>
+void registry_find(benchmark::State& state) {
+    atp::io::inputs ins;
+    std::vector<std::string> names;
+    names.reserve(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        names.push_back("port_" + std::to_string(i));
+        ins.make<atp::io::input<int>>(names.back());
+    }
+    std::size_t next = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(ins.find(names[next]));
+        next = (next + 1) % N;
+    }
+}
+BENCHMARK(registry_find<4UL>)->Name("registry_find/4");
+BENCHMARK(registry_find<16UL>)->Name("registry_find/16");
+BENCHMARK(registry_find<64UL>)->Name("registry_find/64");
 
 }  // namespace

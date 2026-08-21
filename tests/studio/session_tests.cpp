@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <any>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -9,9 +12,12 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
+#include <atp/config/read.hpp>
 #include <atp/module.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/studio/module_manager.hpp>
 #include <atp/studio/session.hpp>
 
@@ -23,8 +29,8 @@ struct feed_outputs : atp::io::outputs {
 struct drain_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
-using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
-using drain_ports = atp::io::ports<drain_inputs>;
+using feed_ports = atp::ports<atp::io::inputs, feed_outputs>;
+using drain_ports = atp::ports<drain_inputs>;
 
 class studio_source : public atp::module<feed_ports, "studio_source"> {
    public:
@@ -51,16 +57,29 @@ class studio_sink : public atp::module<drain_ports, "studio_sink"> {
 struct target_props : atp::io::properties {
     atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
 };
-class target_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
+class target_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
+
+class config_reading_module : public atp::module<atp::ports<>, "config_reader"> {
+   public:
+    explicit config_reading_module(const atp::module_config& cfg)
+        : channels_(atp::config::int_or(cfg.find("channels"), 0)) {}
+
+    [[nodiscard]] std::int64_t channels() const {
+        return channels_;
+    }
+
+   private:
+    std::int64_t channels_;
+};
 
 atp::runtime::config make_config(const char* text) {
-    const nlohmann::json proj = nlohmann::json::parse(text);
-    EXPECT_TRUE(atp::runtime::validate(proj).empty());
+    const atp::config::node proj = atp::runtime::json_parse(text);
+    EXPECT_TRUE(atp::runtime::validate((proj)).empty());
     return atp::runtime::decode(proj);
 }
 
 atp::runtime::config session_config() {
-    const nlohmann::json proj = nlohmann::json::parse(R"({
+    const atp::config::node proj = atp::runtime::json_parse(R"({
         "version": "3.0",
         "pipeline": {
             "modules": [
@@ -72,7 +91,7 @@ atp::runtime::config session_config() {
             "connections": [{"from": "left.out", "to": "right.in"}]
         }
     })");
-    EXPECT_TRUE(atp::runtime::validate(proj).empty());
+    EXPECT_TRUE(atp::runtime::validate((proj)).empty());
     return atp::runtime::decode(proj);
 }
 
@@ -122,6 +141,49 @@ TEST(StudioSession, BuildFailureLeavesSessionClean) {
     manager.registry().add<studio_sink>();
     s.start(cfg);
     s.stop();
+}
+
+TEST(StudioSession, AFileConfigResolvesAgainstTheProjectDirectory) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_session_file_config";
+    std::error_code ignored;
+    std::filesystem::remove_all(dir, ignored);
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "rig.json", std::ios::binary) << R"({"channels": 6})";
+
+    atp::studio::module_manager manager;
+    manager.registry().add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
+
+    atp::studio::session s(manager.registry());
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
+    })");
+
+    s.start(cfg, dir);
+    ASSERT_NE(s.live_root(), nullptr);
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(s.live_root()->find_module("config_reader"))->channels(), 6);
+    s.stop();
+
+    std::filesystem::remove_all(dir, ignored);
+}
+
+TEST(StudioSession, AnUnsavedProjectSaysWhyARelativeFileConfigCannotResolve) {
+    atp::studio::module_manager manager;
+    manager.registry().add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
+
+    atp::studio::session s(manager.registry());
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
+    })");
+
+    try {
+        s.start(cfg);
+        FAIL() << "a relative file config without a project directory has to be refused";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("needs the document's directory"), std::string::npos) << e.what();
+    }
+    EXPECT_FALSE(s.running());
 }
 
 TEST(StudioSession, SetPropertyReachesLiveModule) {

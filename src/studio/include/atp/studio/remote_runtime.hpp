@@ -67,8 +67,8 @@ class remote_runtime final : public runtime_view_base {
         return status().value("error", std::string());
     }
 
-    [[nodiscard]] std::vector<pipeline_runner::thread_stats> stats() const override {
-        std::vector<pipeline_runner::thread_stats> out;
+    [[nodiscard]] std::vector<runtime::pipeline_runner::thread_stats> stats() const override {
+        std::vector<runtime::pipeline_runner::thread_stats> out;
         for (const nlohmann::json& t : status().value("threads", nlohmann::json::array())) {
             out.push_back({t.value("name", std::string()), t.value("passes", std::uint64_t{0}),
                            t.value("busy_passes", std::uint64_t{0})});
@@ -88,8 +88,8 @@ class remote_runtime final : public runtime_view_base {
         return out;
     }
 
-    [[nodiscard]] std::vector<group::module_stats> module_metrics() const override {
-        std::vector<group::module_stats> out;
+    [[nodiscard]] std::vector<runtime::group::module_stats> module_metrics() const override {
+        std::vector<runtime::group::module_stats> out;
         for (const nlohmann::json& m : metrics().value("modules", nlohmann::json::array())) {
             out.push_back({m.value("path", std::string()), m.value("calls", std::uint64_t{0}),
                            m.value("busy_calls", std::uint64_t{0}),
@@ -99,8 +99,8 @@ class remote_runtime final : public runtime_view_base {
         return out;
     }
 
-    [[nodiscard]] std::vector<group::port_stats> input_metrics() const override {
-        std::vector<group::port_stats> out;
+    [[nodiscard]] std::vector<runtime::group::port_stats> input_metrics() const override {
+        std::vector<runtime::group::port_stats> out;
         for (const nlohmann::json& p : call("read_input_metrics").value("ports", nlohmann::json::array())) {
             out.push_back({p.value("path", std::string()),
                            {p.value("received", std::uint64_t{0}), p.value("discarded", std::uint64_t{0}),

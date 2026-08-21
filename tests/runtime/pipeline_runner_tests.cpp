@@ -10,8 +10,8 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/runtime/pipeline.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 
 #include "support/pipeline_test_support.hpp"
 
@@ -21,14 +21,14 @@ using atp_tests::event_log;
 using atp_tests::probe_module;
 
 struct rig {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     event_log log;
     probe_module* a;
     probe_module* b;
     probe_module* c;
     probe_module* d;
-    atp::group* stage;
-    atp::group* deep;
+    atp::runtime::group* stage;
+    atp::runtime::group* deep;
 
     rig() {
         a = &pipe.root().make<probe_module>("a", log, "a");
@@ -45,7 +45,7 @@ TEST(PipelineRunner, CascadesRunThroughRunnerAndReverseOnStop) {
     std::latch ticked(1);
     r.a->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.start(r.pipe);
     ticked.wait();
     runner.stop();
@@ -61,7 +61,7 @@ TEST(PipelineRunner, StartFailureStopsInitializedInReverse) {
     rig r;
     r.c->throw_in = "start";
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     EXPECT_THROW(runner.start(r.pipe), std::runtime_error);
     EXPECT_FALSE(runner.running());
     std::vector<std::string> reversed{"d", "c", "b", "a"};
@@ -77,7 +77,7 @@ TEST(PipelineRunner, AssignmentsPlaceGroupsOnNamedThreads) {
     r.c->first_iterate = &ticked;
     r.d->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("main");
     runner.add_thread("aux");
     runner.assign(*r.stage, "aux");
@@ -102,7 +102,7 @@ TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnImplicitMain) {
     r.c->first_iterate = &ticked;
     r.d->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.start(r.pipe);
     ticked.wait();
     runner.stop();
@@ -114,7 +114,7 @@ TEST(PipelineRunner, EmptyConfigurationRunsEverythingOnImplicitMain) {
 }
 
 TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsWithThreadNames) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
 
     struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
@@ -122,20 +122,20 @@ TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsWithThreadNames) {
     struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value", atp::io::unsafe);
     };
-    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
-    using consumer_ports = atp::io::ports<in_section>;
+    using producer_ports = atp::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::ports<in_section>;
     class producer : public atp::module<producer_ports> {};
     class consumer : public atp::module<consumer_ports> {};
 
-    atp::group& left = pipe.root().add_group("left");
+    atp::runtime::group& left = pipe.root().add_group("left");
     left.make<producer>("p");
     left.expose_output("out", "p.value");
-    atp::group& right = pipe.root().add_group("right");
+    atp::runtime::group& right = pipe.root().add_group("right");
     right.make<consumer>("c");
     right.expose_input("in", "c.value");
     pipe.root().connect("left.out", "right.in");
 
-    atp::pipeline_runner split;
+    atp::runtime::pipeline_runner split;
     split.add_thread("producing");
     split.add_thread("consuming");
     split.assign(left, "producing");
@@ -149,28 +149,28 @@ TEST(PipelineRunner, ValidatesUnsafeCrossThreadConnectionsWithThreadNames) {
         EXPECT_NE(what.find("consuming"), std::string::npos);
     }
 
-    atp::pipeline_runner together;
+    atp::runtime::pipeline_runner together;
     together.start(pipe);
     together.stop();
 }
 
 TEST(PipelineRunner, ConfigurationErrors) {
     rig r;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("main");
     EXPECT_THROW(runner.add_thread("main"), std::runtime_error);
-    EXPECT_THROW(runner.add_thread("t", {atp::thread_mode::throttled, {}}), std::invalid_argument);
-    EXPECT_THROW(runner.add_thread("s", {atp::thread_mode::on_demand, std::chrono::milliseconds(5)}),
+    EXPECT_THROW(runner.add_thread("t", {atp::runtime::thread_mode::throttled, {}}), std::invalid_argument);
+    EXPECT_THROW(runner.add_thread("s", {atp::runtime::thread_mode::on_demand, std::chrono::milliseconds(5)}),
                  std::invalid_argument);
     EXPECT_THROW(runner.assign(*r.stage, "nowhere"), std::invalid_argument);
 
-    atp::group stranger("stranger");
+    atp::runtime::group stranger("stranger");
     runner.assign(stranger, "main");
     EXPECT_THROW(runner.start(r.pipe), std::invalid_argument);
 }
 
 TEST(PipelineRunner, FailedValidationLeavesRunnerReusable) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
 
     struct out_section : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
@@ -178,20 +178,20 @@ TEST(PipelineRunner, FailedValidationLeavesRunnerReusable) {
     struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value", atp::io::unsafe);
     };
-    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
-    using consumer_ports = atp::io::ports<in_section>;
+    using producer_ports = atp::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::ports<in_section>;
     class producer : public atp::module<producer_ports> {};
     class consumer : public atp::module<consumer_ports> {};
 
-    atp::group& left = pipe.root().add_group("left");
+    atp::runtime::group& left = pipe.root().add_group("left");
     left.make<producer>("p");
     left.expose_output("out", "p.value");
-    atp::group& right = pipe.root().add_group("right");
+    atp::runtime::group& right = pipe.root().add_group("right");
     right.make<consumer>("c");
     right.expose_input("in", "c.value");
     pipe.root().connect("left.out", "right.in");
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("producing");
     runner.add_thread("consuming");
     runner.assign(left, "producing");
@@ -207,7 +207,7 @@ TEST(PipelineRunner, FailedValidationLeavesRunnerReusable) {
 }
 
 TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     std::latch delivered(1);
 
     struct feed_outputs : atp::io::outputs {
@@ -216,8 +216,8 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
     struct drain_inputs : atp::io::inputs {
         atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
     };
-    using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
-    using drain_ports = atp::io::ports<drain_inputs>;
+    using feed_ports = atp::ports<atp::io::inputs, feed_outputs>;
+    using drain_ports = atp::ports<drain_inputs>;
     class gated_source : public atp::module<feed_ports> {
        public:
         std::atomic<bool> go{false};
@@ -243,16 +243,16 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
         }
     };
 
-    atp::group& left = pipe.root().add_group("left");
+    atp::runtime::group& left = pipe.root().add_group("left");
     gated_source& src = left.make<gated_source>("src");
     left.expose_output("out", "src.value");
-    atp::group& right = pipe.root().add_group("right");
+    atp::runtime::group& right = pipe.root().add_group("right");
     counting_sink& sink = right.make<counting_sink>("sink");
     sink.delivered = &delivered;
     right.expose_input("in", "sink.value");
     pipe.root().connect("left.out", "right.in");
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("producing");
     runner.add_thread("consuming");
     runner.assign(left, "producing");
@@ -269,7 +269,7 @@ TEST(PipelineRunner, IdleThreadBacksOffAndWakesOnData) {
 }
 
 TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
 
     struct feed_outputs : atp::io::outputs {
         atp::io::output<int>& value = make<atp::io::output<int>>("value");
@@ -277,8 +277,8 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
     struct drain_inputs : atp::io::inputs {
         atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
     };
-    using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
-    using drain_ports = atp::io::ports<drain_inputs>;
+    using feed_ports = atp::ports<atp::io::inputs, feed_outputs>;
+    using drain_ports = atp::ports<drain_inputs>;
     class gated_source : public atp::module<feed_ports> {
        public:
         std::atomic<bool> go{false};
@@ -303,16 +303,16 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
         }
     };
 
-    atp::group& left = pipe.root().add_group("left");
+    atp::runtime::group& left = pipe.root().add_group("left");
     gated_source& src = left.make<gated_source>("src");
     left.expose_output("out", "src.value");
-    atp::group& right = pipe.root().add_group("right");
+    atp::runtime::group& right = pipe.root().add_group("right");
     counting_sink& sink = right.make<counting_sink>("sink");
     right.expose_input("in", "sink.value");
     pipe.root().connect("left.out", "right.in");
 
-    atp::pipeline_runner runner;
-    runner.add_thread("producing", {atp::thread_mode::spinning});
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("producing", {atp::runtime::thread_mode::spinning});
     runner.add_thread("consuming");
     runner.assign(left, "producing");
     runner.assign(right, "consuming");
@@ -342,7 +342,7 @@ TEST(PipelineRunner, DeliveryWakesIdleConsumerThread) {
 }
 
 TEST(PipelineRunner, StatsCountPassesPerThread) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     std::latch ticked(2);
 
     class counting_module : public atp::module<> {
@@ -358,15 +358,15 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
         }
     };
 
-    atp::group& left = pipe.root().add_group("left");
+    atp::runtime::group& left = pipe.root().add_group("left");
     counting_module& busy = left.make<counting_module>("busy");
     busy.status = atp::work_status::busy;
     busy.first = &ticked;
-    atp::group& right = pipe.root().add_group("right");
+    atp::runtime::group& right = pipe.root().add_group("right");
     counting_module& idle = right.make<counting_module>("idle");
     idle.first = &ticked;
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     EXPECT_TRUE(runner.stats().empty());
 
     runner.add_thread("working");
@@ -390,7 +390,7 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
 
 TEST(PipelineRunner, ThrottledPacesIterations) {
     constexpr auto period = std::chrono::milliseconds(20);
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     class ticking_module : public atp::module<> {
        public:
         std::vector<std::chrono::steady_clock::time_point> ticks;
@@ -399,11 +399,11 @@ TEST(PipelineRunner, ThrottledPacesIterations) {
             return atp::work_status::busy;
         }
     };
-    atp::group& g = pipe.root().add_group("paced");
+    atp::runtime::group& g = pipe.root().add_group("paced");
     ticking_module& m = g.make<ticking_module>("m");
 
-    atp::pipeline_runner runner;
-    runner.add_thread("paced", {atp::thread_mode::throttled, period});
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("paced", {atp::runtime::thread_mode::throttled, period});
     runner.assign(g, "paced");
     runner.start(pipe);
     std::this_thread::sleep_for(period * 10);
@@ -419,7 +419,7 @@ TEST(PipelineRunner, ThrottledPacesIterations) {
 }
 
 TEST(PipelineRunner, SpinningThreadIteratesWithoutSleep) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     class idle_counter : public atp::module<> {
        public:
         std::atomic<int> passes{0};
@@ -428,11 +428,11 @@ TEST(PipelineRunner, SpinningThreadIteratesWithoutSleep) {
             return atp::work_status::idle;
         }
     };
-    atp::group& g = pipe.root().add_group("hot");
+    atp::runtime::group& g = pipe.root().add_group("hot");
     idle_counter& m = g.make<idle_counter>("m");
 
-    atp::pipeline_runner runner;
-    runner.add_thread("hot", {atp::thread_mode::spinning});
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("hot", {atp::runtime::thread_mode::spinning});
     runner.assign(g, "hot");
     runner.start(pipe);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -445,7 +445,7 @@ TEST(PipelineRunner, IterateFailureStopsPipelineAndWaitRethrows) {
     rig r;
     r.b->throw_in = "iterate";
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("main");
     runner.add_thread("aux");
     runner.assign(*r.stage, "aux");
@@ -462,7 +462,7 @@ TEST(PipelineRunner, FirstErrorWins) {
     r.a->throw_in = "iterate";
     r.b->throw_in = "iterate";
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("main");
     runner.add_thread("aux");
     runner.assign(*r.stage, "aux");
@@ -476,7 +476,7 @@ TEST(PipelineRunner, StopIsIdempotentAndErrorIsClean) {
     std::latch ticked(1);
     r.a->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.start(r.pipe);
     ticked.wait();
     runner.stop();
@@ -490,7 +490,7 @@ TEST(PipelineRunner, WaitAfterStopRethrowsPendingError) {
     r.a->first_iterate = &reached;
     r.a->throw_in = "iterate";
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.start(r.pipe);
     reached.wait();
     runner.stop();
@@ -499,7 +499,7 @@ TEST(PipelineRunner, WaitAfterStopRethrowsPendingError) {
 }
 
 TEST(PipelineRunner, WaitOnIdleRunnerIsNoOp) {
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.wait();
     EXPECT_EQ(runner.error(), nullptr);
 }
@@ -508,7 +508,7 @@ TEST(PipelineRunner, SecondWaitRethrowsSameError) {
     rig r;
     r.b->throw_in = "iterate";
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.start(r.pipe);
     EXPECT_THROW(runner.wait(), std::runtime_error);
     EXPECT_THROW(runner.wait(), std::runtime_error);
@@ -519,7 +519,7 @@ TEST(PipelineRunner, DestructorStopsRunningPipeline) {
     std::latch ticked(1);
     r.a->first_iterate = &ticked;
     {
-        atp::pipeline_runner runner;
+        atp::runtime::pipeline_runner runner;
         runner.start(r.pipe);
         ticked.wait();
     }
@@ -528,7 +528,7 @@ TEST(PipelineRunner, DestructorStopsRunningPipeline) {
 }
 
 TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     std::latch delivered(1);
 
     struct out_section : atp::io::outputs {
@@ -537,8 +537,8 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
     struct in_section : atp::io::inputs {
         atp::io::input<int>& value = make<atp::io::input<int>>("value");
     };
-    using producer_ports = atp::io::ports<atp::io::inputs, out_section>;
-    using consumer_ports = atp::io::ports<in_section>;
+    using producer_ports = atp::ports<atp::io::inputs, out_section>;
+    using consumer_ports = atp::ports<in_section>;
     class producer : public atp::module<producer_ports> {
        public:
         atp::work_status iterate(std::stop_token) override {
@@ -571,16 +571,16 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
         atp::io::watcher watcher_;
     };
 
-    atp::group& left = pipe.root().add_group("left");
+    atp::runtime::group& left = pipe.root().add_group("left");
     left.make<producer>("p");
     left.expose_output("out", "p.value");
-    atp::group& right = pipe.root().add_group("right");
+    atp::runtime::group& right = pipe.root().add_group("right");
     consumer& c = right.make<consumer>("c");
     c.delivered = &delivered;
     right.expose_input("in", "c.value");
     pipe.root().connect("left.out", "right.in");
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("producing");
     runner.add_thread("consuming");
     runner.assign(left, "producing");
@@ -593,7 +593,7 @@ TEST(PipelineRunner, DataFlowsBetweenThreadsThroughExposedPorts) {
 }
 
 TEST(PipelineRunner, StopIsNoexceptEvenWithDetachedGroups) {
-    static_assert(noexcept(std::declval<atp::pipeline_runner&>().stop()),
+    static_assert(noexcept(std::declval<atp::runtime::pipeline_runner&>().stop()),
                   "stop() is documented as never throwing, and the destructor relies on it");
 
     rig r;
@@ -601,7 +601,7 @@ TEST(PipelineRunner, StopIsNoexceptEvenWithDetachedGroups) {
     r.a->first_iterate = &ticked;
     r.b->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread("main");
     runner.add_thread("aux");
     runner.assign(*r.stage, "aux");
@@ -619,7 +619,7 @@ TEST(PipelineRunner, DestructorStopsAPipelineThatHasDetachedGroups) {
     r.a->first_iterate = &ticked;
     r.b->first_iterate = &ticked;
     {
-        atp::pipeline_runner runner;
+        atp::runtime::pipeline_runner runner;
         runner.add_thread("main");
         runner.add_thread("aux");
         runner.assign(*r.stage, "aux");
@@ -635,7 +635,7 @@ TEST(PipelineRunner, ANameLongerThanThePlatformAllowsDoesNotBringTheThreadDown) 
     std::latch ticked(1);
     r.a->first_iterate = &ticked;
 
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline_runner runner;
     runner.add_thread(std::string(512, 'x'));
     runner.start(r.pipe);
     ticked.wait();

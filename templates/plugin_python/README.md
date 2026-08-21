@@ -18,6 +18,32 @@ input, two outputs, three properties. `packer.py` shows what the first one leave
 input, and a **blob** output, which is the escape hatch for a payload the closed type set of the C
 path does not name.
 
+## Properties and the config
+
+`averager.py` declares both, and which one a setting belongs in is decided by the setting:
+
+- `window` is a **property** — one scalar with a default, editable while the pipeline runs, read
+  through `self.window.get()`;
+- `weights` is part of the **config** — a list, which no property could hold, fixed before the module
+  is connected and never edited afterwards.
+
+The config is bound to `self.config` **before `__init__`**, so the constructor can read it while
+deciding what the module is; ports are bound after, and belong to `initialize`. `self.config` is
+`None` when the module's node named no config, which is why `averager.py` reads it as
+`self.config or {}` — a module that throws on an absent config is one nobody can place, since placing
+it is how one would give it the config it wanted.
+
+In `pipeline.json` the two sit side by side:
+
+```json
+{
+    "module": "py_averager",
+    "name": "mean",
+    "properties": { "window": 4, "mode": "verbose" },
+    "config": { "weights": [1, 2, 3, 4] }
+}
+```
+
 ## The `atp` package beside the script
 
 In the release, next to this README, there is an `atp/` directory — the same package that sits next

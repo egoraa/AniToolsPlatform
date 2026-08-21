@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <gtest/gtest.h>
 
-#include <atp/version.hpp>
+#include <atp/support/version.hpp>
 
 static_assert(atp::version{1, 2} == atp::version{1, 2, 0});
 static_assert(atp::version{1, 2, 3} < atp::version{1, 10});

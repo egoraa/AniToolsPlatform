@@ -37,39 +37,20 @@ qt_add_resources(atp_studio "icons" PREFIX "/" FILES ${ATP_STUDIO_ICONS})
 
 atp_deploy_qt(atp_studio)
 
-# Every bridge lands in ATP_PLUGIN_DIRNAME beside atp_studio, which is where an installation has it
-# relative to the executable (bin/ and bin/plugins/). Studio needs it there for two different reasons:
-# a person can add that directory as a search directory and get script modules at all, and
-# `File > New module...` copies the bridge and its package into the folder it is creating a module in
-# — find_bridge_source looks exactly here before it considers any loaded bridge. Without these steps
-# the feature works in a package and not in the build tree, which is the wrong way round for the tree
-# where it is developed. The package follows its bridge because a bridge looks for it in the language's
-# own subdirectory next to itself. Forgetting to rebuild one of these targets leaves a stale bridge
-# beside the studio that it will nonetheless treat as the platform's own.
+# There is deliberately nothing here that copies the bridges in. Each builds into ATP_PLUGIN_DIRNAME
+# beside atp_studio and writes its package into the language's own subdirectory next to itself, which
+# is exactly the shape studio::find_bridge_source looks for — plugins/<bridge> beside the executable,
+# package in plugins/<lang>/ — and what `File > New module...` provisions a module folder from. Studio
+# still needs the bridge to be there and the two asset targets this replaces are what used to put it
+# there; they existed only because atp_studio lived in a directory of its own, and their failure mode
+# was silent, a stale bridge beside the studio that it would nonetheless treat as the platform's own.
+# The dependencies stay: building the studio has to build the bridges it will hand out.
 if (TARGET atp_python_bridge)
     add_dependencies(atp_studio atp_python_bridge)
-    add_custom_target(atp_studio_python_assets ALL
-            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:atp_studio>/${ATP_PLUGIN_DIRNAME}
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:atp_python_bridge>
-                    $<TARGET_FILE_DIR:atp_studio>/${ATP_PLUGIN_DIRNAME}
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    $<TARGET_FILE_DIR:atp_python_bridge>/python
-                    $<TARGET_FILE_DIR:atp_studio>/${ATP_PLUGIN_DIRNAME}/python
-            DEPENDS atp_studio atp_python_bridge)
 endif ()
 
 if (TARGET atp_lua_bridge)
     add_dependencies(atp_studio atp_lua_bridge)
-    add_custom_target(atp_studio_lua_assets ALL
-            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:atp_studio>/${ATP_PLUGIN_DIRNAME}
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:atp_lua_bridge>
-                    $<TARGET_FILE_DIR:atp_studio>/${ATP_PLUGIN_DIRNAME}
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    $<TARGET_FILE_DIR:atp_lua_bridge>/lua
-                    $<TARGET_FILE_DIR:atp_studio>/${ATP_PLUGIN_DIRNAME}/lua
-            DEPENDS atp_studio atp_lua_bridge)
 endif ()
 
 if (ATP_INSTALL)

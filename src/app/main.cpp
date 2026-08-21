@@ -14,9 +14,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atp/console_encoding.hpp>
-#include <atp/group.hpp>
-#include <atp/log_pump.hpp>
 #include <atp/mcp/application_control.hpp>
 #include <atp/mcp/control_tools.hpp>
 #include <atp/mcp/resource_registry.hpp>
@@ -27,6 +24,9 @@
 #include <atp/runtime/config_loader.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/console_encoding.hpp>
+#include <atp/runtime/group.hpp>
+#include <atp/runtime/log_pump.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
 #include <atp/runtime/property_override.hpp>
 
@@ -39,25 +39,25 @@ void handle_signal(int) {
     g_stop = 1;
 }
 
-void print_metrics(const atp::group& root) {
-    std::vector<atp::group::module_stats> stats = root.metrics();
-    std::ranges::sort(
-        stats, [](const atp::group::module_stats& a, const atp::group::module_stats& b) { return a.total > b.total; });
+void print_metrics(const atp::runtime::group& root) {
+    std::vector<atp::runtime::group::module_stats> stats = root.metrics();
+    std::ranges::sort(stats, [](const atp::runtime::group::module_stats& a,
+                                const atp::runtime::group::module_stats& b) { return a.total > b.total; });
     std::cout << "\nmodule                              calls     busy      total ms       max us\n";
-    for (const atp::group::module_stats& s : stats) {
+    for (const atp::runtime::group::module_stats& s : stats) {
         std::cout << std::left << std::setw(32) << s.path << std::right << std::setw(10) << s.calls << std::setw(9)
                   << s.busy_calls << std::setw(13) << std::chrono::duration<double, std::milli>(s.total).count()
                   << std::setw(13) << std::chrono::duration<double, std::micro>(s.max).count() << '\n';
     }
 }
 
-void print_input_metrics(const atp::group& root) {
-    std::vector<atp::group::port_stats> ports = root.input_metrics();
-    std::ranges::sort(ports, [](const atp::group::port_stats& a, const atp::group::port_stats& b) {
+void print_input_metrics(const atp::runtime::group& root) {
+    std::vector<atp::runtime::group::port_stats> ports = root.input_metrics();
+    std::ranges::sort(ports, [](const atp::runtime::group::port_stats& a, const atp::runtime::group::port_stats& b) {
         return a.stats.discarded > b.stats.discarded;
     });
     std::cout << "\nport                              received    discarded     pending        peak    capacity\n";
-    for (const atp::group::port_stats& p : ports) {
+    for (const atp::runtime::group::port_stats& p : ports) {
         std::cout << std::left << std::setw(32) << p.path << std::right << std::setw(10) << p.stats.received
                   << std::setw(13) << p.stats.discarded << std::setw(12) << p.stats.pending << std::setw(12)
                   << p.stats.peak_pending << std::setw(12) << p.stats.capacity << '\n';
@@ -71,7 +71,7 @@ constexpr const char* usage =
 }  // namespace
 
 int main(int argc, char** argv) {
-    const atp::console_utf8 console;
+    const atp::runtime::console_utf8 console;
     std::filesystem::path config_path;
     std::vector<atp::runtime::property_override> overrides;
     bool metrics = false;
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
                     std::cerr << usage;
                     return 2;
                 }
-                const std::optional<atp::log_level> level = atp::level_from_name(argv[++i]);
+                const std::optional<atp::log_level> level = atp::runtime::level_from_name(argv[++i]);
                 if (!level) {
                     std::cerr << usage;
                     return 2;
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     try {
-        const nlohmann::json doc = atp::runtime::load_config(config_path);
+        const atp::config::node doc = atp::runtime::load_config(config_path);
         const std::vector<std::string> errors = atp::runtime::validate(doc);
         if (!errors.empty()) {
             std::cerr << "invalid config '" << config_path.string() << "':\n";
@@ -153,9 +153,9 @@ int main(int argc, char** argv) {
 
         std::signal(SIGINT, handle_signal);
         std::signal(SIGTERM, handle_signal);
-        atp::log_pump logs(app.pipe, [log_threshold](const atp::log_line& line) {
+        atp::runtime::log_pump logs(app.pipe, [log_threshold](const atp::runtime::log_line& line) {
             if (line.level <= log_threshold) {
-                std::cerr << atp::format_log_line(line) << '\n';
+                std::cerr << atp::runtime::format_log_line(line) << '\n';
             }
         });
         app.runner.start(app.pipe);

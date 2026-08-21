@@ -6,12 +6,14 @@
 
 #include <algorithm>
 #include <exception>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <QString>
 #include <QStringList>
 
+#include <atp/config/node.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
 #include <atp/studio/clipboard.hpp>
 #include <atp/studio/node_ref.hpp>
@@ -26,18 +28,18 @@ namespace atp::studio::ui {
 /// @param declared the target's own declaration of the property
 /// @param value the value the clipboard carries
 /// @return true if the value is one the target could have been given by hand
-[[nodiscard]] inline bool value_fits(const property_info& declared, const nlohmann::json& value) {
+[[nodiscard]] inline bool value_fits(const property_info& declared, const atp::config::node& value) {
     if (!declared.persistent) {
         return false;
     }
     switch (declared.kind) {
         case io::property_kind::number:
-            if (!value.is_number()) {
+            if (!value.is_int() && !value.is_double()) {
                 return false;
             }
             break;
         case io::property_kind::boolean:
-            if (!value.is_boolean()) {
+            if (!value.is_bool()) {
                 return false;
             }
             break;
@@ -50,7 +52,8 @@ namespace atp::studio::ui {
     if (declared.options.empty()) {
         return true;
     }
-    return std::ranges::find(declared.options, runtime::detail::scalar_to_string(value)) != declared.options.end();
+    const std::optional<std::string> text = runtime::detail::scalar_to_string(value);
+    return text && std::ranges::find(declared.options, *text) != declared.options.end();
 }
 
 /// Lifts the explicitly set property values off a module into the property clipboard.
@@ -120,7 +123,7 @@ inline bool paste_properties(app_state& state,
         return false;
     }
 
-    std::vector<std::pair<std::string, nlohmann::json>> wanted;
+    std::vector<std::pair<std::string, atp::config::node>> wanted;
     QStringList skipped;
     for (const auto& [prop, value] : state.clip_properties.values) {
         const auto declared =

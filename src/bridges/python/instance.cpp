@@ -34,6 +34,15 @@ bool defines(PyObject* object, const char* method) {
     return true;
 }
 
+std::string decoding_context(const atp_api& api, atp_ctx* ctx) {
+    const char* origin = nullptr;
+    std::size_t length = 0;
+    if (atp_api_has_config_text(&api) && api.config_origin(ctx, &origin, &length) != 0) {
+        return "decoding the config text of '" + std::string(origin, length) + "'";
+    }
+    return "decoding the config text";
+}
+
 atp_status call_lifecycle(instance* state, bool present, const char* method) {
     if (!present) {
         return ATP_OK;
@@ -65,14 +74,31 @@ extern "C" void* instance_create(const atp_api* api, atp_ctx* ctx, void* user_da
         delete state;
         return nullptr;
     }
-    PyObject* config = config_to_python(*api, ctx, api->struct_size < sizeof(atp_api) ? 0u : api->config_root(ctx));
+    PyObject* config = config_to_python(*api, ctx, atp_api_has_config(api) ? api->config_root(ctx) : 0u);
     if (config == nullptr) {
         PyErr_Print();
         Py_DECREF(state->ctx_object);
         delete state;
         return nullptr;
     }
-    state->self = PyObject_CallMethod(package(), "_create", "(LOO)", slot->python_index, state->ctx_object, config);
+    PyObject* text = config_text_to_python(*api, ctx);
+    PyObject* origin = config_origin_to_python(*api, ctx);
+    PyObject* opaque = PyBool_FromLong(atp_api_has_config_text(api) ? api->config_is_opaque(ctx) : 0);
+    if (text == nullptr || origin == nullptr || opaque == nullptr) {
+        report_error(*api, ctx, decoding_context(*api, ctx).c_str());
+        Py_XDECREF(opaque);
+        Py_XDECREF(origin);
+        Py_XDECREF(text);
+        Py_DECREF(config);
+        Py_DECREF(state->ctx_object);
+        delete state;
+        return nullptr;
+    }
+    state->self = PyObject_CallMethod(package(), "_create", "(LOOOOO)", slot->python_index, state->ctx_object, config,
+                                      text, origin, opaque);
+    Py_DECREF(opaque);
+    Py_DECREF(origin);
+    Py_DECREF(text);
     Py_DECREF(config);
     if (state->self == nullptr) {
         PyErr_Print();

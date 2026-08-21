@@ -4,11 +4,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/hosting/null_host.hpp>
 #include <atp/io.hpp>
 #include <atp/module.hpp>
-#include <atp/module_loader.hpp>
-#include <atp/null_host.hpp>
-#include <atp/service_directory.hpp>
+#include <atp/module/service_directory.hpp>
+#include <atp/runtime/module_loader.hpp>
 
 #include "test_plugin/boundary_types.hpp"
 
@@ -20,13 +20,13 @@ struct host_inputs : atp::io::inputs {
 struct host_outputs : atp::io::outputs {
     atp::io::output<atp_tests::boundary_payload>& out = make<atp::io::output<atp_tests::boundary_payload>>("out");
 };
-class host_module : public atp::module<atp::io::ports<host_inputs, host_outputs>, "host_echo"> {};
+class host_module : public atp::module<atp::ports<host_inputs, host_outputs>, "host_echo"> {};
 
 }  // namespace
 
 TEST(PluginBoundary, ConnectsTypedPortsInBothDirections) {
     atp::module_registry registry;
-    atp::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
+    atp::runtime::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
     host_module host;
     atp::module_ptr echo = registry.create("plugin_echo");
     ASSERT_NE(echo, nullptr);
@@ -48,7 +48,7 @@ TEST(PluginBoundary, ConnectsTypedPortsInBothDirections) {
 
 TEST(PluginBoundary, RefusesAnIncompatibleTypeAcrossTheBoundary) {
     atp::module_registry registry;
-    atp::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
+    atp::runtime::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
     host_module host;
     atp::module_ptr echo = registry.create("plugin_echo");
     ASSERT_NE(echo, nullptr);
@@ -60,7 +60,7 @@ TEST(PluginBoundary, RefusesAnIncompatibleTypeAcrossTheBoundary) {
 
 TEST(PluginBoundary, DeliversAValueThroughThePlugin) {
     atp::module_registry registry;
-    atp::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
+    atp::runtime::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
     host_module host;
     atp::module_ptr echo = registry.create("plugin_echo");
     ASSERT_NE(echo, nullptr);
@@ -79,7 +79,7 @@ TEST(PluginBoundary, DeliversAValueThroughThePlugin) {
 
 TEST(PluginBoundary, LooksUpAPluginPortByItsConcreteType) {
     atp::module_registry registry;
-    atp::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
+    atp::runtime::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
     atp::module_ptr echo = registry.create("plugin_echo");
     ASSERT_NE(echo, nullptr);
 
@@ -93,7 +93,7 @@ TEST(PluginBoundary, LooksUpAPluginPortByItsConcreteType) {
 
 TEST(PluginBoundary, FindsAServicePublishedByThePlugin) {
     atp::module_registry registry;
-    atp::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
+    atp::runtime::module_loader loader{ATP_TEST_PLUGIN_PORTS, registry};
     atp::service_directory services;
     atp::null_host host;
     atp::module_context context{services, host};

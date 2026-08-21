@@ -4,6 +4,7 @@
 #include "model/clipboard_actions.hpp"
 #include "model/create_group.hpp"
 #include "model/drag_payloads.hpp"
+#include "model/editor.hpp"
 #include "model/property_actions.hpp"
 
 #include <algorithm>
@@ -620,8 +621,14 @@ void canvas_scene::show_node_menu(const QPoint& screen_pos,
                                   bool is_group) {
     const std::vector<std::string> names = selected_node_names();
     const std::string into = is_group ? name : std::string();
+    const QString source = is_group ? QString() : module_source(state_, state_.current_group, name);
 
     QMenu menu;
+    QAction* open = nullptr;
+    if (!source.isEmpty()) {
+        open = menu.addAction(QStringLiteral("Open in editor"));
+        menu.addSeparator();
+    }
     QAction* cut = menu.addAction(QStringLiteral("Cut"));
     cut->setShortcut(QKeySequence::Cut);
     QAction* copy = menu.addAction(QStringLiteral("Copy"));
@@ -646,6 +653,10 @@ void canvas_scene::show_node_menu(const QPoint& screen_pos,
     }
 
     QAction* chosen = menu.exec(screen_pos);
+    if (chosen != nullptr && chosen == open) {
+        open_source(state_, callbacks_, source);
+        return;
+    }
     if (chosen != nullptr && chosen == copy_props) {
         (void)copy_properties(state_, callbacks_, state_.current_group, name);
         return;

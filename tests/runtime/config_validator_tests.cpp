@@ -3,16 +3,17 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/json_codec.hpp>
 
 namespace {
 
-using nlohmann::json;
+using json = atp::config::node;
 
 json valid_config() {
-    return json::parse(R"({
+    return atp::runtime::json_parse(R"({
         "version": "3.0",
         "plugins": ["demo.dll"],
         "pipeline": {
@@ -68,11 +69,14 @@ TEST(ConfigValidator, AcceptsEveryMinorUpToTheSupportedOne) {
     EXPECT_TRUE(check(doc).empty());
 
     doc["version"] = "3.3";
+    EXPECT_TRUE(check(doc).empty());
+
+    doc["version"] = "3.4";
     EXPECT_FALSE(check(doc).empty());
 }
 
 TEST(ConfigValidator, RejectsTheRemovedReplayKey) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "pipeline": {
             "modules": [{"module": "left"}, {"module": "right"}],
@@ -85,7 +89,7 @@ TEST(ConfigValidator, RejectsTheRemovedReplayKey) {
 }
 
 TEST(ConfigValidator, RejectsTheSupersededSchemaVersion) {
-    const json doc = json::parse(R"({"version": "2.0", "pipeline": {"modules": []}})");
+    const json doc = atp::runtime::json_parse(R"({"version": "2.0", "pipeline": {"modules": []}})");
     const auto errors = check(doc);
     ASSERT_FALSE(errors.empty());
     EXPECT_NE(errors[0].find(atp::runtime::config_schema_version.to_string()), std::string::npos);
@@ -101,16 +105,17 @@ TEST(ConfigValidator, UnknownKeysRejectedWithPath) {
 
 TEST(ConfigValidator, ChildMustBeModuleXorGroup) {
     json doc = valid_config();
-    doc["pipeline"]["modules"][0]["modules"][0] = {{"module", "m"}, {"group", "g"}};
+    doc["pipeline"]["modules"][0]["modules"][0] = json::object({{"module", "m"}, {"group", "g"}});
     EXPECT_FALSE(check(doc).empty());
 
-    doc["pipeline"]["modules"][0]["modules"][0] = {{"name", "orphan"}};
+    doc["pipeline"]["modules"][0]["modules"][0] = json::object({{"name", "orphan"}});
     EXPECT_FALSE(check(doc).empty());
 }
 
 TEST(ConfigValidator, DuplicateChildNamesInGroup) {
     json doc = valid_config();
-    doc["pipeline"]["modules"][0]["modules"] = {{{"module", "counter"}}, {{"module", "counter"}}};
+    doc["pipeline"]["modules"][0]["modules"] =
+        json::array({json::object({{"module", "counter"}}), json::object({{"module", "counter"}})});
     EXPECT_FALSE(check(doc).empty());
 }
 
@@ -153,7 +158,7 @@ TEST(ConfigValidator, AssignRules) {
 }
 
 TEST(ConfigValidator, PropertiesMustBeScalarObject) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "pipeline": {"modules": [
             {"module": "m1", "properties": {"ok": 5, "bad": {"nested": 1}}},
@@ -167,7 +172,7 @@ TEST(ConfigValidator, PropertiesMustBeScalarObject) {
 }
 
 TEST(ConfigValidator, OldParamsKeyIsRejected) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "pipeline": {"modules": [{"module": "m", "params": {"x": 1}}]}
     })");
@@ -177,7 +182,7 @@ TEST(ConfigValidator, OldParamsKeyIsRejected) {
 }
 
 TEST(ConfigValidator, OldChildrenKeyIsRejected) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "pipeline": {"children": [{"module": "m"}]}
     })");
@@ -195,7 +200,7 @@ TEST(ConfigValidator, AggregatesAllErrors) {
 }
 
 TEST(ConfigValidator, ConfigMustBeObjectOrString) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "pipeline": {"modules": [{"module": "m", "config": [1, 2]}]}
     })");
@@ -205,7 +210,7 @@ TEST(ConfigValidator, ConfigMustBeObjectOrString) {
 }
 
 TEST(ConfigValidator, ConfigReferenceMustExist) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "configs": {"rig": {}},
         "pipeline": {"modules": [{"module": "m", "config": "absent"}]}
@@ -216,17 +221,56 @@ TEST(ConfigValidator, ConfigReferenceMustExist) {
 }
 
 TEST(ConfigValidator, UnknownConfigPrefixIsNamed) {
-    const json doc = json::parse(R"({
-        "version": "3.2",
-        "pipeline": {"modules": [{"module": "m", "config": "file:rig.json"}]}
+    const json doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "m", "config": "literal:{}"}]}
     })");
     const std::vector<std::string> errors = check(doc);
     ASSERT_EQ(errors.size(), 1U);
-    EXPECT_NE(errors[0].find("file"), std::string::npos);
+    EXPECT_NE(errors[0].find("literal"), std::string::npos);
+}
+
+TEST(ConfigValidator, AcceptsAFileConfigOnAModule) {
+    const json doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "m", "config": "file:rig.yaml"}]}
+    })");
+    EXPECT_TRUE(check(doc).empty());
+}
+
+TEST(ConfigValidator, AcceptsAFileEntryInConfigs) {
+    const json doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "configs": {"rig": "file:rig.json"},
+        "pipeline": {"modules": [{"module": "m", "config": "rig"}]}
+    })");
+    EXPECT_TRUE(check(doc).empty());
+}
+
+TEST(ConfigValidator, RefusesAReferenceInsideConfigs) {
+    const json doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "configs": {"rig": "other", "other": {}},
+        "pipeline": {"modules": [{"module": "m", "config": "rig"}]}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("configs.rig"), std::string::npos);
+    EXPECT_NE(errors[0].find("must be an object or a 'file:' path"), std::string::npos);
+}
+
+TEST(ConfigValidator, RefusesAnEmptyFilePath) {
+    const json doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "m", "config": "file:"}]}
+    })");
+    const std::vector<std::string> errors = check(doc);
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].find("names no file"), std::string::npos);
 }
 
 TEST(ConfigValidator, ConfigsKeyMayNotContainAColon) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "configs": {"a:b": {}},
         "pipeline": {"modules": []}
@@ -237,7 +281,7 @@ TEST(ConfigValidator, ConfigsKeyMayNotContainAColon) {
 }
 
 TEST(ConfigValidator, ConfigsContentIsNotSchemaChecked) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "configs": {"rig": {"anything": [1, "two", {"three": null}]}},
         "pipeline": {"modules": [{"module": "m", "config": "rig"}]}
@@ -246,7 +290,7 @@ TEST(ConfigValidator, ConfigsContentIsNotSchemaChecked) {
 }
 
 TEST(ConfigValidator, ConfigsEntryMustBeAnObject) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "configs": {"rig": [1, 2]},
         "pipeline": {"modules": []}
@@ -257,7 +301,7 @@ TEST(ConfigValidator, ConfigsEntryMustBeAnObject) {
 }
 
 TEST(ConfigValidator, BrokenConfigsBlockDoesNotAlsoBlameEveryReference) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "configs": [],
         "pipeline": {"modules": [{"module": "m", "config": "rig"}]}
@@ -268,7 +312,7 @@ TEST(ConfigValidator, BrokenConfigsBlockDoesNotAlsoBlameEveryReference) {
 }
 
 TEST(ConfigValidator, SchemaThreeOneStillLoads) {
-    const json doc = json::parse(R"({
+    const json doc = atp::runtime::json_parse(R"({
         "version": "3.1",
         "pipeline": {"modules": [{"module": "m"}]}
     })");

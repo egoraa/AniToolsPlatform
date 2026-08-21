@@ -2,12 +2,14 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/studio/project.hpp>
 
 #include "support/required.hpp"
@@ -95,7 +97,8 @@ TEST_F(ProjectFiles, SaveWritesValidConfigAndLayoutSidecar) {
     proj.save(saved);
 
     std::ifstream in(saved);
-    const nlohmann::json written = nlohmann::json::parse(in);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const atp::config::node written = atp::runtime::json_parse(text);
     EXPECT_TRUE(atp::runtime::validate(written).empty());
 
     const atp::studio::project reopened = atp::studio::project::open(saved);
@@ -113,7 +116,7 @@ TEST(ProjectEdit, BuildsPipelineThroughOperations) {
     proj.add_module("right", "printer");
     proj.set_expose_input("right", "in", "printer.value");
     proj.connect("", "left.out", "right.in");
-    proj.add_thread("main_loop", atp::thread_mode::throttled, std::chrono::milliseconds(5));
+    proj.add_thread("main_loop", atp::runtime::thread_mode::throttled, std::chrono::milliseconds(5));
     proj.set_assignment("left", "main_loop");
     proj.add_plugin("libdemo.dll");
     proj.add_plugin("libdemo.dll");
@@ -126,7 +129,7 @@ TEST(ProjectEdit, BuildsPipelineThroughOperations) {
     ASSERT_EQ(cfg.threads.size(), 1u);
     ASSERT_EQ(cfg.assignments.size(), 1u);
     ASSERT_EQ(cfg.plugins.size(), 1u);
-    EXPECT_TRUE(atp::runtime::validate(atp::runtime::encode(cfg)).empty());
+    EXPECT_TRUE(atp::runtime::validate((atp::runtime::encode(cfg))).empty());
 }
 
 TEST(ProjectEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
@@ -139,7 +142,7 @@ TEST(ProjectEdit, RejectsInvariantViolationsWithoutPollutingUndo) {
     EXPECT_THROW(proj.add_group("g", "bad.name"), atp::runtime::config_error);
     EXPECT_THROW(proj.connect("g", "no_dot", "counter.in"), atp::runtime::config_error);
     EXPECT_THROW(proj.connect("g", "ghost.out", "counter.in"), atp::runtime::config_error);
-    EXPECT_THROW(proj.add_thread("t", atp::thread_mode::throttled), atp::runtime::config_error);
+    EXPECT_THROW(proj.add_thread("t", atp::runtime::thread_mode::throttled), atp::runtime::config_error);
     EXPECT_THROW(proj.set_assignment("g", "nowhere"), atp::runtime::config_error);
 
     EXPECT_TRUE(proj.undo());
@@ -155,7 +158,7 @@ TEST(ProjectEdit, RemoveChildCleansReferences) {
     proj.add_module("g", "b");
     proj.connect("g", "a.out", "b.in");
     proj.set_expose_output("g", "alias", "a.out");
-    proj.add_thread("t", atp::thread_mode::on_demand);
+    proj.add_thread("t", atp::runtime::thread_mode::on_demand);
     proj.set_assignment("g", "t");
     proj.set_position("g.a", {1.0f, 2.0f});
 
@@ -183,7 +186,7 @@ TEST(ProjectEdit, RenameChildRewritesReferences) {
     EXPECT_EQ(proj.position("g.producer"), (atp::studio::node_position{1.0f, 2.0f}));
     EXPECT_EQ(proj.position("g.a"), std::nullopt);
 
-    proj.add_thread("t", atp::thread_mode::on_demand);
+    proj.add_thread("t", atp::runtime::thread_mode::on_demand);
     proj.set_assignment("g", "t");
     proj.rename_child("", "g", "stage");
     EXPECT_EQ(proj.config().assignments[0].first, "stage");
@@ -208,17 +211,18 @@ TEST(ProjectEdit, SetPropertyAddsAndReplaces) {
     proj.add_module("", "counter");
     proj.set_property("", "counter", "limit", 5);
     ASSERT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties.size(), 1u);
-    EXPECT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties[0].second, nlohmann::json(5));
+    EXPECT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties[0].second, atp::config::node(5));
     proj.set_property("", "counter", "limit", 7);
     ASSERT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties.size(), 1u);
-    EXPECT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties[0].second, nlohmann::json(7));
+    EXPECT_EQ(atp_tests::required(proj.config().pipeline.modules[0].module).properties[0].second, atp::config::node(7));
     EXPECT_TRUE(proj.can_undo());
 }
 
 TEST(ProjectEdit, SetPropertyRejectsNonScalarAndGhostModule) {
     auto proj = atp::studio::project::create();
     proj.add_module("", "counter");
-    EXPECT_THROW(proj.set_property("", "counter", "limit", nlohmann::json::object()), atp::runtime::config_error);
+    EXPECT_THROW(proj.set_property("", "counter", "limit", atp::config::node(atp::config::node::object_type{})),
+                 atp::runtime::config_error);
     EXPECT_THROW(proj.set_property("", "ghost", "limit", 5), atp::runtime::config_error);
 }
 
@@ -233,14 +237,14 @@ TEST(ProjectEdit, ClearPropertyRemovesPair) {
 
 TEST(ProjectEdit, SetThreadKeepsAssignments) {
     auto proj = atp::studio::project::create();
-    proj.add_thread("worker", atp::thread_mode::on_demand);
+    proj.add_thread("worker", atp::runtime::thread_mode::on_demand);
     proj.add_group("", "inner");
     proj.set_assignment("inner", "worker");
 
-    proj.set_thread("worker", atp::thread_mode::throttled, std::chrono::milliseconds{250});
+    proj.set_thread("worker", atp::runtime::thread_mode::throttled, std::chrono::milliseconds{250});
 
     ASSERT_EQ(proj.config().threads.size(), 1u);
-    EXPECT_EQ(proj.config().threads[0].mode, atp::thread_mode::throttled);
+    EXPECT_EQ(proj.config().threads[0].mode, atp::runtime::thread_mode::throttled);
     EXPECT_EQ(proj.config().threads[0].period, std::chrono::milliseconds{250});
     ASSERT_EQ(proj.config().assignments.size(), 1u);
     EXPECT_EQ(proj.config().assignments[0].second, "worker");
@@ -248,25 +252,25 @@ TEST(ProjectEdit, SetThreadKeepsAssignments) {
 
 TEST(ProjectEdit, SetThreadRejectsContradictoryPeriod) {
     auto proj = atp::studio::project::create();
-    proj.add_thread("worker", atp::thread_mode::throttled, std::chrono::milliseconds{100});
+    proj.add_thread("worker", atp::runtime::thread_mode::throttled, std::chrono::milliseconds{100});
 
-    EXPECT_THROW(proj.set_thread("worker", atp::thread_mode::throttled, std::chrono::milliseconds{0}),
+    EXPECT_THROW(proj.set_thread("worker", atp::runtime::thread_mode::throttled, std::chrono::milliseconds{0}),
                  atp::runtime::config_error);
-    EXPECT_THROW(proj.set_thread("worker", atp::thread_mode::on_demand, std::chrono::milliseconds{5}),
+    EXPECT_THROW(proj.set_thread("worker", atp::runtime::thread_mode::on_demand, std::chrono::milliseconds{5}),
                  atp::runtime::config_error);
-    EXPECT_THROW(proj.set_thread("missing", atp::thread_mode::on_demand), atp::runtime::config_error);
+    EXPECT_THROW(proj.set_thread("missing", atp::runtime::thread_mode::on_demand), atp::runtime::config_error);
     EXPECT_EQ(proj.config().threads[0].period, std::chrono::milliseconds{100});
 }
 
 TEST(ProjectEdit, SetThreadIsUndoable) {
     auto proj = atp::studio::project::create();
-    proj.add_thread("worker", atp::thread_mode::on_demand);
+    proj.add_thread("worker", atp::runtime::thread_mode::on_demand);
 
-    proj.set_thread("worker", atp::thread_mode::spinning);
-    EXPECT_EQ(proj.config().threads[0].mode, atp::thread_mode::spinning);
+    proj.set_thread("worker", atp::runtime::thread_mode::spinning);
+    EXPECT_EQ(proj.config().threads[0].mode, atp::runtime::thread_mode::spinning);
 
     EXPECT_TRUE(proj.undo());
-    EXPECT_EQ(proj.config().threads[0].mode, atp::thread_mode::on_demand);
+    EXPECT_EQ(proj.config().threads[0].mode, atp::runtime::thread_mode::on_demand);
 }
 
 TEST(ProjectModified, NewProjectIsClean) {
@@ -391,7 +395,7 @@ TEST(ProjectMove, MovingAGroupRewritesAssignmentsAndPositionsOfItsSubtree) {
     proj.add_group("", "stage");
     proj.add_group("", "outer");
     proj.add_module("stage", "counter", "src");
-    proj.add_thread("t", atp::thread_mode::on_demand);
+    proj.add_thread("t", atp::runtime::thread_mode::on_demand);
     proj.set_assignment("stage", "t");
     proj.set_position("stage", {1.0f, 2.0f});
     proj.set_position("stage.src", {3.0f, 4.0f});
@@ -542,7 +546,7 @@ TEST(ProjectCopy, DuplicatesAssignmentsAndPositionsOfTheSubtree) {
     proj.add_group("", "stage");
     proj.add_group("", "outer");
     proj.add_module("stage", "counter", "src");
-    proj.add_thread("t", atp::thread_mode::on_demand);
+    proj.add_thread("t", atp::runtime::thread_mode::on_demand);
     proj.set_assignment("stage", "t");
     proj.set_position("stage", {1.0f, 2.0f});
     proj.set_position("stage.src", {3.0f, 4.0f});
@@ -812,11 +816,11 @@ TEST(ProjectEditScope, FailedRemoveExposeKeepsTheScopeSnapshot) {
 TEST(ProjectEdit, SetConfigAddsReplacesAndClears) {
     auto proj = atp::studio::project::create();
     proj.add_module("", "resampler");
-    proj.set_config("", "resampler", nlohmann::json::parse(R"({"channels": [1, 2]})"));
+    proj.set_config("", "resampler", atp::runtime::json_parse(R"({"channels": [1, 2]})"));
     ASSERT_NE(proj.config_of("", "resampler"), nullptr);
-    EXPECT_EQ(*proj.config_of("", "resampler"), nlohmann::json::parse(R"({"channels": [1, 2]})"));
+    EXPECT_EQ(*proj.config_of("", "resampler"), atp::runtime::json_parse(R"({"channels": [1, 2]})"));
 
-    proj.set_config("", "resampler", nlohmann::json("rig"));
+    proj.set_config("", "resampler", atp::config::node("rig"));
     ASSERT_NE(proj.config_of("", "resampler"), nullptr);
     EXPECT_TRUE(proj.config_of("", "resampler")->is_string());
 
@@ -827,21 +831,57 @@ TEST(ProjectEdit, SetConfigAddsReplacesAndClears) {
 
 TEST(ProjectEdit, SharedConfigRejectsABadNameAndANonObject) {
     auto proj = atp::studio::project::create();
-    EXPECT_THROW(proj.set_shared_config("", nlohmann::json::object()), atp::runtime::config_error);
-    EXPECT_THROW(proj.set_shared_config("a:b", nlohmann::json::object()), atp::runtime::config_error);
-    EXPECT_THROW(proj.set_shared_config("rig", nlohmann::json::array()), atp::runtime::config_error);
-    proj.set_shared_config("rig", nlohmann::json::object());
+    EXPECT_THROW(proj.set_shared_config("", atp::config::node(atp::config::node::object_type{})),
+                 atp::runtime::config_error);
+    EXPECT_THROW(proj.set_shared_config("a:b", atp::config::node(atp::config::node::object_type{})),
+                 atp::runtime::config_error);
+    EXPECT_THROW(proj.set_shared_config("rig", atp::config::node(atp::config::node::array_type{})),
+                 atp::runtime::config_error);
+    proj.set_shared_config("rig", atp::config::node(atp::config::node::object_type{}));
     EXPECT_NE(proj.shared_config("rig"), nullptr);
     proj.clear_shared_config("rig");
     EXPECT_EQ(proj.shared_config("rig"), nullptr);
     proj.clear_shared_config("rig");
 }
 
+TEST(ProjectEdit, SharedConfigAcceptsAFileReferenceAndRefusesABareOne) {
+    auto proj = atp::studio::project::create();
+    proj.set_shared_config("rig", atp::config::node("file:rig.json"));
+    ASSERT_NE(proj.shared_config("rig"), nullptr);
+    EXPECT_EQ(*proj.shared_config("rig"), "file:rig.json");
+
+    EXPECT_THROW(proj.set_shared_config("other", atp::config::node("rig")), atp::runtime::config_error)
+        << "a block referring to another block is the only way a reference chain could grow, and the "
+           "schema has no cycle to guard against precisely because this is refused";
+    EXPECT_THROW(proj.set_shared_config("empty", atp::config::node("file:")), atp::runtime::config_error);
+}
+
+TEST(ProjectEdit, AFileConfigSurvivesSaveAndOpenAsWritten) {
+    const std::filesystem::path file = std::filesystem::temp_directory_path() / "atp_project_file_config.atp.json";
+    std::error_code ignored;
+    std::filesystem::remove(file, ignored);
+
+    auto proj = atp::studio::project::create();
+    proj.add_module("", "opaque_one");
+    proj.set_config("", "opaque_one", atp::config::node("file:rig.ini"));
+    proj.set_shared_config("shared", atp::config::node("file:shared.json"));
+    proj.save(file);
+
+    atp::studio::project reopened = atp::studio::project::open(file);
+    ASSERT_NE(reopened.config_of("", "opaque_one"), nullptr);
+    EXPECT_EQ(*reopened.config_of("", "opaque_one"), "file:rig.ini") << "a file reference is never inlined on save";
+    ASSERT_NE(reopened.shared_config("shared"), nullptr);
+    EXPECT_EQ(*reopened.shared_config("shared"), "file:shared.json");
+
+    std::filesystem::remove(file, ignored);
+}
+
 TEST(ProjectEdit, SetConfigRejectsANonObjectAndAGhostModule) {
     auto proj = atp::studio::project::create();
     proj.add_module("", "resampler");
-    EXPECT_THROW(proj.set_config("", "resampler", nlohmann::json::array({1, 2})), atp::runtime::config_error);
-    EXPECT_THROW(proj.set_config("", "ghost", nlohmann::json::object()), atp::runtime::config_error);
+    EXPECT_THROW(proj.set_config("", "resampler", atp::config::node::array({1, 2})), atp::runtime::config_error);
+    EXPECT_THROW(proj.set_config("", "ghost", atp::config::node(atp::config::node::object_type{})),
+                 atp::runtime::config_error);
 }
 
 TEST(ProjectEdit, ConfigSurvivesSaveOpenAndUndoWithAReferenceStillAString) {
@@ -853,19 +893,19 @@ TEST(ProjectEdit, ConfigSurvivesSaveOpenAndUndoWithAReferenceStillAString) {
     auto proj = atp::studio::project::create();
     proj.add_module("", "inline_one");
     proj.add_module("", "referring_one");
-    proj.set_shared_config("rig", nlohmann::json::parse(R"({"channels": [1, 2, 6]})"));
-    proj.set_config("", "inline_one", nlohmann::json::parse(R"({"channels": [1, 2]})"));
-    proj.set_config("", "referring_one", nlohmann::json("rig"));
+    proj.set_shared_config("rig", atp::runtime::json_parse(R"({"channels": [1, 2, 6]})"));
+    proj.set_config("", "inline_one", atp::runtime::json_parse(R"({"channels": [1, 2]})"));
+    proj.set_config("", "referring_one", atp::config::node("rig"));
     proj.save(file);
 
     atp::studio::project reopened = atp::studio::project::open(file);
     ASSERT_NE(reopened.config_of("", "inline_one"), nullptr);
-    EXPECT_EQ(*reopened.config_of("", "inline_one"), nlohmann::json::parse(R"({"channels": [1, 2]})"));
+    EXPECT_EQ(*reopened.config_of("", "inline_one"), atp::runtime::json_parse(R"({"channels": [1, 2]})"));
     ASSERT_NE(reopened.config_of("", "referring_one"), nullptr);
     EXPECT_TRUE(reopened.config_of("", "referring_one")->is_string())
         << "a reference must not be expanded into the block it names";
     ASSERT_NE(reopened.shared_config("rig"), nullptr);
-    EXPECT_EQ(*reopened.shared_config("rig"), nlohmann::json::parse(R"({"channels": [1, 2, 6]})"));
+    EXPECT_EQ(*reopened.shared_config("rig"), atp::runtime::json_parse(R"({"channels": [1, 2, 6]})"));
     EXPECT_EQ(reopened.config_names(), (std::vector<std::string>{"rig"}));
 
     ASSERT_TRUE(proj.undo());

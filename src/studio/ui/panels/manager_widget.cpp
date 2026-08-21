@@ -9,6 +9,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <vector>
 
 #include <QAction>
 #include <QBrush>
@@ -34,6 +35,9 @@ manager_widget::manager_widget(app_state& state, ui_callbacks& callbacks, QWidge
     const style::section dirs = style::make_section("search directories", this);
     dirs_ = new QListWidget(dirs.box);
     style::embed_view(dirs_);
+    dirs_->setContextMenuPolicy(Qt::CustomContextMenu);
+    QObject::connect(dirs_, &QListWidget::customContextMenuRequested, this,
+                     [this](const QPoint& pos) { show_dirs_menu(pos, dirs_->viewport()->mapToGlobal(pos)); });
     dirs.form->addRow(dirs_);
     const style::button_bar bar = style::make_button_bar(dirs.box);
     auto* add = style::tool_button(style::glyph::add, "add a search directory", bar.box);
@@ -58,25 +62,52 @@ manager_widget::manager_widget(app_state& state, ui_callbacks& callbacks, QWidge
     found.form->addRow(plugins_);
     layout->addWidget(found.box, 1);
 
-    QObject::connect(add, &QToolButton::clicked, this, [this] {
-        const QString dir = QFileDialog::getExistingDirectory(this, "Module search directory");
-        if (dir.isEmpty()) {
-            return;
-        }
-        state_.manager.add_search_dir(std::filesystem::path(dir.toStdWString()));
-        sync_settings();
-        scan();
-    });
-    QObject::connect(remove, &QToolButton::clicked, this, [this] {
-        const int row = dirs_->currentRow();
-        if (row < 0) {
-            return;
-        }
-        state_.manager.remove_search_dir(state_.manager.search_dirs()[static_cast<std::size_t>(row)]);
-        sync_settings();
-        callbacks_.project_changed();
-    });
+    QObject::connect(add, &QToolButton::clicked, this, [this] { add_dir(); });
+    QObject::connect(remove, &QToolButton::clicked, this, [this] { drop_dir(dirs_->currentRow()); });
     QObject::connect(rescan, &QToolButton::clicked, this, [this] { scan(); });
+}
+
+void manager_widget::add_dir() {
+    const QString dir = QFileDialog::getExistingDirectory(this, "Module search directory");
+    if (dir.isEmpty()) {
+        return;
+    }
+    state_.manager.add_search_dir(std::filesystem::path(dir.toStdWString()));
+    sync_settings();
+    scan();
+}
+
+void manager_widget::drop_dir(int row) {
+    const std::vector<std::filesystem::path>& dirs = state_.manager.search_dirs();
+    if (row < 0 || static_cast<std::size_t>(row) >= dirs.size()) {
+        return;
+    }
+    const std::filesystem::path dir = dirs[static_cast<std::size_t>(row)];
+    state_.manager.remove_search_dir(dir);
+    sync_settings();
+    callbacks_.project_changed();
+}
+
+void manager_widget::show_dirs_menu(const QPoint& pos, const QPoint& global) {
+    QListWidgetItem* item = dirs_->itemAt(pos);
+    if (item != nullptr) {
+        dirs_->setCurrentItem(item);
+    }
+
+    QMenu menu;
+    QAction* add = menu.addAction(QStringLiteral("Add directory"));
+    QAction* drop = menu.addAction(QStringLiteral("Drop directory"));
+    drop->setEnabled(item != nullptr);
+    menu.addSeparator();
+    QAction* rescan = menu.addAction(QStringLiteral("Rescan"));
+    QAction* chosen = menu.exec(global);
+    if (chosen == add) {
+        add_dir();
+    } else if (chosen == drop) {
+        drop_dir(dirs_->row(item));
+    } else if (chosen == rescan) {
+        scan();
+    }
 }
 
 void manager_widget::scan() {
@@ -160,11 +191,7 @@ void manager_widget::show_plugin_menu(const QPoint& pos, const QPoint& global) {
     if (chosen == copy) {
         QGuiApplication::clipboard()->setText(path);
     } else if (chosen != nullptr && chosen == open) {
-        const std::filesystem::path file(path.toStdWString());
-        if (!open_in_editor(QString::fromStdString(state_.settings.editor_command), file)) {
-            callbacks_.report(QString("could not open an editor for %1; open it by hand").arg(path),
-                              atp::log_level::warning);
-        }
+        open_source(state_, callbacks_, path);
     }
 }
 

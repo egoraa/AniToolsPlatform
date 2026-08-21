@@ -10,7 +10,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/AniToolsPlatformTargets.cmake")
 # bearing rather than cosmetic, so the SDK ships the function instead of documenting the list.
 include("${CMAKE_CURRENT_LIST_DIR}/AniToolsPlatformPluginHelpers.cmake")
 
-# The plugin ABI of this SDK, read out of include/atp/plugin.hpp when the package was configured.
+# The plugin ABI of this SDK, read out of include/atp/plugin/abi.hpp when the package was configured.
 set(AniToolsPlatform_PLUGIN_ABI @ATP_PLUGIN_ABI@)
 
 # Turns an ABI mismatch into a configure error. Without it the mismatch surfaces at the

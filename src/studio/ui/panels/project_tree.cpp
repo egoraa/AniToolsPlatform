@@ -3,6 +3,7 @@
 
 #include "model/clipboard_actions.hpp"
 #include "model/drag_payloads.hpp"
+#include "model/editor.hpp"
 #include "model/property_actions.hpp"
 
 #include <exception>
@@ -435,8 +436,15 @@ void project_tree::show_menu(const QPoint& pos, const QPoint& global) {
     const std::string full = item->data(0, path_role).toString().toStdString();
     const bool is_root = full.empty();
     const node_ref picked = node_ref::parse(full);
+    const bool is_module = !is_root && !item->data(0, group_role).toBool();
+    const QString source = is_module ? module_source(state_, picked.group, picked.name) : QString();
 
     QMenu menu;
+    QAction* open = nullptr;
+    if (!source.isEmpty()) {
+        open = menu.addAction(QStringLiteral("Open in editor"));
+        menu.addSeparator();
+    }
     QAction* new_group = menu.addAction(QStringLiteral("New group"));
     menu.addSeparator();
     QAction* cut = menu.addAction(QStringLiteral("Cut"));
@@ -448,7 +456,6 @@ void project_tree::show_menu(const QPoint& pos, const QPoint& global) {
     QAction* paste = menu.addAction(QStringLiteral("Paste"));
     paste->setShortcut(QKeySequence::Paste);
     paste->setEnabled(!state_.clip.empty());
-    const bool is_module = !is_root && !item->data(0, group_role).toBool();
     QAction* copy_props = nullptr;
     QAction* paste_props = nullptr;
     if (is_module) {
@@ -463,6 +470,10 @@ void project_tree::show_menu(const QPoint& pos, const QPoint& global) {
 
     QAction* chosen = menu.exec(global);
     if (chosen == nullptr) {
+        return;
+    }
+    if (chosen == open) {
+        open_source(state_, callbacks_, source);
         return;
     }
     if (chosen == copy_props) {

@@ -6,13 +6,13 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/host_node.hpp>
 #include <atp/module.hpp>
-#include <atp/pipeline.hpp>
+#include <atp/runtime/host_node.hpp>
+#include <atp/runtime/pipeline.hpp>
 
 namespace {
 
-class talker final : public atp::module<atp::io::ports<>, "talker"> {
+class talker final : public atp::module<atp::ports<>, "talker"> {
    public:
     void initialize(atp::module_context& context) override {
         host = &context.host;
@@ -25,7 +25,7 @@ class talker final : public atp::module<atp::io::ports<>, "talker"> {
 }  // namespace
 
 TEST(HostNode, EachChildGetsItsOwnHost) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     auto& first = pipe.root().make<talker>("first");
     auto& second = pipe.root().make<talker>("second");
     pipe.root().initialize(pipe.context());
@@ -36,12 +36,12 @@ TEST(HostNode, EachChildGetsItsOwnHost) {
 }
 
 TEST(HostNode, CollectedLinesCarryTheModulePath) {
-    atp::pipeline pipe;
-    atp::group& stage = pipe.root().add_group("stage");
+    atp::runtime::pipeline pipe;
+    atp::runtime::group& stage = pipe.root().add_group("stage");
     stage.make<talker>("counter");
     pipe.root().initialize(pipe.context());
 
-    const std::vector<atp::log_line> lines = pipe.collect_logs();
+    const std::vector<atp::runtime::log_line> lines = pipe.collect_logs();
     ASSERT_EQ(lines.size(), 1u);
     EXPECT_EQ(lines[0].path, "stage.counter");
     EXPECT_EQ(lines[0].text, "initialised");
@@ -50,7 +50,7 @@ TEST(HostNode, CollectedLinesCarryTheModulePath) {
 }
 
 TEST(HostNode, DrainingTwiceYieldsNothingTheSecondTime) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     pipe.root().make<talker>("one");
     pipe.root().initialize(pipe.context());
 
@@ -59,7 +59,7 @@ TEST(HostNode, DrainingTwiceYieldsNothingTheSecondTime) {
 }
 
 TEST(HostNode, LoggingWithoutAnAttachedNotifierDoesNotWake) {
-    atp::host_node node;
+    atp::runtime::host_node node;
     node.wake();
     node.info("still alive");
 

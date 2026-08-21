@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include <nlohmann/json.hpp>
+#include <atp/config/node.hpp>
 
 #include <atp/runtime/config_model.hpp>
 #include <atp/studio/node_position.hpp>
@@ -60,7 +60,7 @@ struct property_clip {
     std::string factory;
 
     /// The values, in the order the source module listed them.
-    std::vector<std::pair<std::string, nlohmann::json>> values;
+    std::vector<std::pair<std::string, atp::config::node>> values;
 
     /// Whether there is anything to apply.
     [[nodiscard]] bool empty() const {

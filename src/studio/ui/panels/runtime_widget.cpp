@@ -12,7 +12,7 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
-#include <atp/log_pump.hpp>
+#include <atp/runtime/log_pump.hpp>
 
 namespace atp::studio::ui {
 
@@ -108,17 +108,18 @@ void runtime_widget::refresh() {
     }
     refresh_modules();
     refresh_ports();
-    updated_->setText(QString::fromStdString("updated " + atp::format_log_time(std::chrono::system_clock::now())));
+    updated_->setText(
+        QString::fromStdString("updated " + atp::runtime::format_log_time(std::chrono::system_clock::now())));
 }
 
 void runtime_widget::refresh_ports() {
-    std::vector<group::port_stats> ports = state_.view->input_metrics();
-    std::ranges::sort(ports, [](const group::port_stats& a, const group::port_stats& b) {
+    std::vector<runtime::group::port_stats> ports = state_.view->input_metrics();
+    std::ranges::sort(ports, [](const runtime::group::port_stats& a, const runtime::group::port_stats& b) {
         return a.stats.discarded > b.stats.discarded;
     });
     ports_->setRowCount(static_cast<int>(ports.size()));
     for (std::size_t index = 0; index < ports.size(); ++index) {
-        const group::port_stats& p = ports[index];
+        const runtime::group::port_stats& p = ports[index];
         const int row = static_cast<int>(index);
         ports_->setItem(row, port_column, new QTableWidgetItem(QString::fromStdString(p.path)));
         ports_->setItem(row, received_column, new QTableWidgetItem(QString::number(p.stats.received)));
@@ -130,12 +131,13 @@ void runtime_widget::refresh_ports() {
 }
 
 void runtime_widget::refresh_modules() {
-    std::vector<group::module_stats> stats = state_.view->module_metrics();
-    std::ranges::sort(stats,
-                      [](const group::module_stats& a, const group::module_stats& b) { return a.total > b.total; });
+    std::vector<runtime::group::module_stats> stats = state_.view->module_metrics();
+    std::ranges::sort(stats, [](const runtime::group::module_stats& a, const runtime::group::module_stats& b) {
+        return a.total > b.total;
+    });
     modules_->setRowCount(static_cast<int>(stats.size()));
     for (std::size_t index = 0; index < stats.size(); ++index) {
-        const group::module_stats& s = stats[index];
+        const runtime::group::module_stats& s = stats[index];
         const int row = static_cast<int>(index);
         modules_->setItem(row, module_column, new QTableWidgetItem(QString::fromStdString(s.path)));
         modules_->setItem(row, calls_column, new QTableWidgetItem(QString::number(s.calls)));
@@ -154,7 +156,7 @@ void runtime_widget::start() {
         for (const std::string& p : state_.doc.config().plugins) {
             state_.manager.load_plugin(state_.config_dir() / p);
         }
-        state_.run.start(state_.doc.config());
+        state_.run.start(state_.doc.config(), state_.saved_dir());
         callbacks_.project_changed();
     } catch (const std::exception& e) {
         callbacks_.error(QString::fromStdString(std::string("run: ") + e.what()));

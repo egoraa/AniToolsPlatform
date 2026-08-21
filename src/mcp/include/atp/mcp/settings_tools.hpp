@@ -11,7 +11,8 @@
 #include <atp/mcp/arguments.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/mcp/workspace.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/runtime/config_value_json.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 
 namespace atp::mcp {
 
@@ -19,15 +20,15 @@ namespace detail {
 
 /// Turns the "mode" argument into the runner's enum.
 /// @throws runtime::config_error on an unknown name
-[[nodiscard]] inline thread_mode parse_thread_mode(const std::string& text) {
+[[nodiscard]] inline runtime::thread_mode parse_thread_mode(const std::string& text) {
     if (text == "on_demand") {
-        return thread_mode::on_demand;
+        return runtime::thread_mode::on_demand;
     }
     if (text == "throttled") {
-        return thread_mode::throttled;
+        return runtime::thread_mode::throttled;
     }
     if (text == "spinning") {
-        return thread_mode::spinning;
+        return runtime::thread_mode::spinning;
     }
     throw runtime::config_error("unknown thread mode '" + text + "', expected on_demand, throttled or spinning");
 }
@@ -58,7 +59,7 @@ inline void register_settings_tools(tool_registry& tools, workspace& ws) {
                [&ws](const nlohmann::json& args) {
                    const std::string property = arg_string(args, "property");
                    ws.project().set_property(arg_string(args, "group_path"), arg_string(args, "name"), property,
-                                             arg_scalar(args, "value"));
+                                             runtime::to_config_value(arg_scalar(args, "value")));
                    return nlohmann::json{{"set", property}};
                }});
 
@@ -75,7 +76,7 @@ inline void register_settings_tools(tool_registry& tools, workspace& ws) {
     tools.add({"add_thread", "Declares a runner thread. A throttled thread requires a positive period_ms.",
                detail::add_thread_schema(), [&ws](const nlohmann::json& args) {
                    const std::string name = arg_string(args, "name");
-                   const thread_mode mode = detail::parse_thread_mode(arg_string(args, "mode"));
+                   const runtime::thread_mode mode = detail::parse_thread_mode(arg_string(args, "mode"));
                    const auto period =
                        std::chrono::milliseconds(args.contains("period_ms") && !args.at("period_ms").is_null()
                                                      ? static_cast<long long>(arg_index(args, "period_ms"))

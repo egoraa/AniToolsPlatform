@@ -13,11 +13,11 @@
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-# The ABI number stays in C++ — plugin.hpp is where it is documented, bumped and read by the
+# The ABI number stays in C++ — plugin/abi.hpp is where it is declared, bumped and read by the
 # handshake — and CMake reads it from there, so the package constant cannot drift from the header.
 # Exactly one line may match: a second one would mean the header no longer has a single answer, and
 # guessing which is right is worse than stopping.
-set(_atp_plugin_header ${CMAKE_CURRENT_SOURCE_DIR}/include/atp/plugin.hpp)
+set(_atp_plugin_header ${CMAKE_CURRENT_SOURCE_DIR}/include/atp/plugin/abi.hpp)
 file(STRINGS ${_atp_plugin_header} _atp_abi_lines REGEX "^inline constexpr unsigned plugin_abi = [0-9]+;")
 list(LENGTH _atp_abi_lines _atp_abi_count)
 if (NOT _atp_abi_count EQUAL 1)

@@ -2,7 +2,8 @@
 #include <iostream>
 #include <stop_token>
 
-#include <atp/null_host.hpp>
+#include <atp/hosting/module_registrar.hpp>
+#include <atp/hosting/null_host.hpp>
 
 #include "demo_modules.hpp"
 

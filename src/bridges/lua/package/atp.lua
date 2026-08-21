@@ -110,6 +110,47 @@ end
 --- Expensive work belongs in initialize rather than at the top level of the script. Every instance of
 --- this module gets its own interpreter and runs the file again, which is what lets two of them
 --- iterate on two threads at once; the top level is therefore paid once per instance, not once.
+---
+--- A setting reaches a module by one of two channels, and the setting decides which. A property is one
+--- scalar with a default, edited while the pipeline runs and read with :get(). The other is
+--- **self.config**: the structure this module's "config" holds in the pipeline, turned into ordinary
+--- Lua — an object becomes a table with string keys, an array a table with keys 1..n, a scalar itself,
+--- and a node that named no config becomes nil. It is nothing but a table: no accessor type, no schema,
+--- nothing declared here.
+---
+--- It is set on the instance at creation, so the earliest place to read it is initialize — Lua has no
+--- constructor to read it in, unlike the Python bridge. Read it with fallbacks, because nil is a normal
+--- answer and so is a missing key:
+---
+---     function M:initialize()
+---         local config = self.config or {}
+---         self.bands = config.bands or {}
+---     end
+---
+--- Raising instead makes the module unusable in atp_studio, which creates an instance with an empty
+--- config to discover a module's ports: one it cannot describe is one the palette refuses to place, and
+--- placing it is how anybody would give it the config it was missing.
+---
+--- One caveat is this bridge's alone: **an array keeps its order, the keys of a table do not.** The
+--- host's own value and a Python dict preserve the order the entries were written in; a Lua table
+--- cannot, so nothing here may depend on it — the same reason the declarations above need a proxy.
+---
+--- Three more fields arrive beside it, for a config the document attached as a file:
+---
+---  * **self.config_text** — the bytes of that file, or "" when the config came from no file. The host
+---    parses .json and nothing else, so any other format arrives verbatim and the module parses it
+---    itself; that is the point, and it is why the platform needs to learn no new formats.
+---  * **self.config_origin** — the path of that file, worth naming in your own errors and worth
+---    resolving paths written inside the config against.
+---  * **self.config_opaque** — whether the host left the file unparsed, i.e. whether config_text is all
+---    there is. Do not infer it from `self.config == nil and self.config_text ~= ""`: a .json holding
+---    literally `null` looks exactly the same from here.
+---
+---     function M:initialize()
+---         if self.config_opaque then
+---             self.rules = my_format.parse(self.config_text)
+---         end
+---     end
 function atp.module(name, version)
     if type(name) ~= "string" or name == "" then
         error("a module needs a non-empty name")
@@ -226,13 +267,20 @@ end
 -- edited between the load and the first create would produce ports the host never connected. The
 -- Python bridge cannot drift this way — it keeps the class object — and the difference is worth
 -- naming rather than discovering as a crash in the io layer.
-function atp._instantiate(name, ctx, n_inputs, n_outputs, n_properties, config)
+function atp._instantiate(name, ctx, n_inputs, n_outputs, n_properties, config, config_text, config_origin,
+                          config_opaque)
     for _, own in ipairs(declared) do
         if own.name == name then
             if #own.inputs ~= n_inputs or #own.outputs ~= n_outputs or #own.properties ~= n_properties then
                 error(name .. ": the script declares different ports than when it was loaded")
             end
-            local instance = setmetatable({ _ctx = ctx, config = config }, { __index = own.methods })
+            local instance = setmetatable({
+                _ctx = ctx,
+                config = config,
+                config_text = config_text,
+                config_origin = config_origin,
+                config_opaque = config_opaque,
+            }, { __index = own.methods })
             bind(instance, own.inputs, ctx, bound_input)
             bind(instance, own.outputs, ctx, bound_output)
             bind(instance, own.properties, ctx, bound_property)

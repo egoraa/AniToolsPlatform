@@ -4,7 +4,7 @@
 
 namespace {
 
-class plugin_module : public atp::module<atp::io::ports<>, "plugin_module", atp::ver<"2.0">> {};
+class plugin_module : public atp::module<atp::ports<>, "plugin_module", atp::ver<"2.0">> {};
 
 }  // namespace
 

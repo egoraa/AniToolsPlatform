@@ -8,7 +8,7 @@
 #include <system_error>
 
 #include <atp/studio/project.hpp>
-#include <atp/version.hpp>
+#include <atp/support/version.hpp>
 
 namespace atp::studio {
 

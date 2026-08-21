@@ -25,7 +25,7 @@ static_assert(!lp64 || sizeof(atp_value) == 24);
 static_assert(!lp64 || offsetof(atp_value, kind) == 0);
 static_assert(!lp64 || offsetof(atp_value, as) == 8);
 
-static_assert(!lp64 || sizeof(atp_api) == 144);
+static_assert(!lp64 || sizeof(atp_api) == 176);
 static_assert(!lp64 || offsetof(atp_api, struct_size) == 0);
 static_assert(!lp64 || offsetof(atp_api, get_input) == 8);
 static_assert(!lp64 || offsetof(atp_api, take_input) == 16);
@@ -44,6 +44,10 @@ static_assert(!lp64 || offsetof(atp_api, config_key_at) == 112);
 static_assert(!lp64 || offsetof(atp_api, config_child_at) == 120);
 static_assert(!lp64 || offsetof(atp_api, config_find) == 128);
 static_assert(!lp64 || offsetof(atp_api, config_value_of) == 136);
+static_assert(!lp64 || offsetof(atp_api, config_find_path) == 144);
+static_assert(!lp64 || offsetof(atp_api, config_text) == 152);
+static_assert(!lp64 || offsetof(atp_api, config_origin) == 160);
+static_assert(!lp64 || offsetof(atp_api, config_is_opaque) == 168);
 
 static_assert(ATP_CONFIG_NONE == 0u);
 static_assert(ATP_CONFIG_NULL == 0);

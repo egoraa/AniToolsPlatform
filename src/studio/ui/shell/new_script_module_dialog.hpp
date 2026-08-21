@@ -11,7 +11,7 @@
 #include <QPushButton>
 #include <QString>
 
-#include <atp/module_registry.hpp>
+#include <atp/hosting/module_registry.hpp>
 #include <atp/studio/languages.hpp>
 
 namespace atp::studio::ui {

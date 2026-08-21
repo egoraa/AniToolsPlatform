@@ -10,11 +10,11 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/log_ring.hpp>
+#include <atp/runtime/log_ring.hpp>
 
 namespace {
 
-std::vector<std::string> drain_texts(atp::log_ring& ring) {
+std::vector<std::string> drain_texts(atp::runtime::log_ring& ring) {
     std::vector<std::string> out;
     ring.drain([&out](atp::log_level, std::string_view text, bool, std::chrono::system_clock::time_point) {
         out.emplace_back(text);
@@ -25,7 +25,7 @@ std::vector<std::string> drain_texts(atp::log_ring& ring) {
 }  // namespace
 
 TEST(LogRing, DrainsInWriteOrder) {
-    atp::log_ring ring;
+    atp::runtime::log_ring ring;
     ring.write(atp::log_level::info, "one");
     ring.write(atp::log_level::warning, "two");
 
@@ -37,7 +37,7 @@ TEST(LogRing, DrainsInWriteOrder) {
 }
 
 TEST(LogRing, CarriesTheLevel) {
-    atp::log_ring ring;
+    atp::runtime::log_ring ring;
     ring.write(atp::log_level::error, "boom");
 
     atp::log_level seen = atp::log_level::debug;
@@ -47,7 +47,7 @@ TEST(LogRing, CarriesTheLevel) {
 }
 
 TEST(LogRing, StampsTheMomentOfTheWrite) {
-    atp::log_ring ring;
+    atp::runtime::log_ring ring;
 
     const auto before = std::chrono::system_clock::now();
     ring.write(atp::log_level::info, "now");
@@ -61,8 +61,8 @@ TEST(LogRing, StampsTheMomentOfTheWrite) {
 }
 
 TEST(LogRing, TruncatesAndSaysSo) {
-    atp::log_ring ring;
-    const std::string long_text(atp::log_ring::text_capacity + 10, 'x');
+    atp::runtime::log_ring ring;
+    const std::string long_text(atp::runtime::log_ring::text_capacity + 10, 'x');
     ring.write(atp::log_level::info, long_text);
 
     std::string text;
@@ -71,12 +71,12 @@ TEST(LogRing, TruncatesAndSaysSo) {
         text = t;
         truncated = cut;
     });
-    EXPECT_EQ(text.size(), atp::log_ring::text_capacity);
+    EXPECT_EQ(text.size(), atp::runtime::log_ring::text_capacity);
     EXPECT_TRUE(truncated);
 }
 
 TEST(LogRing, EmptyTextIsAllowed) {
-    atp::log_ring ring;
+    atp::runtime::log_ring ring;
     ring.write(atp::log_level::info, "");
 
     const std::vector<std::string> texts = drain_texts(ring);
@@ -85,25 +85,25 @@ TEST(LogRing, EmptyTextIsAllowed) {
 }
 
 TEST(LogRing, DropsTheNewestWhenFullAndCounts) {
-    atp::log_ring ring;
-    for (std::size_t i = 0; i < atp::log_ring::capacity + 5; ++i) {
+    atp::runtime::log_ring ring;
+    for (std::size_t i = 0; i < atp::runtime::log_ring::capacity + 5; ++i) {
         ring.write(atp::log_level::info, std::to_string(i));
     }
     EXPECT_EQ(ring.dropped(), 5u);
 
     const std::vector<std::string> texts = drain_texts(ring);
-    ASSERT_EQ(texts.size(), atp::log_ring::capacity);
+    ASSERT_EQ(texts.size(), atp::runtime::log_ring::capacity);
     EXPECT_EQ(texts.front(), "0");
-    EXPECT_EQ(texts.back(), std::to_string(atp::log_ring::capacity - 1));
+    EXPECT_EQ(texts.back(), std::to_string(atp::runtime::log_ring::capacity - 1));
 }
 
 TEST(LogRing, SlotsAreReusedAfterDraining) {
-    atp::log_ring ring;
+    atp::runtime::log_ring ring;
     for (std::size_t round = 0; round < 4; ++round) {
-        for (std::size_t i = 0; i < atp::log_ring::capacity; ++i) {
+        for (std::size_t i = 0; i < atp::runtime::log_ring::capacity; ++i) {
             ring.write(atp::log_level::info, "x");
         }
-        EXPECT_EQ(drain_texts(ring).size(), atp::log_ring::capacity);
+        EXPECT_EQ(drain_texts(ring).size(), atp::runtime::log_ring::capacity);
     }
     EXPECT_EQ(ring.dropped(), 0u);
 }
@@ -112,7 +112,7 @@ TEST(LogRing, ManyProducersLoseNothingButWhatItCounts) {
     constexpr int producers = 4;
     constexpr int per_producer = 500;
 
-    atp::log_ring ring;
+    atp::runtime::log_ring ring;
     std::unordered_set<std::string> seen;
     std::atomic<bool> stop{false};
 

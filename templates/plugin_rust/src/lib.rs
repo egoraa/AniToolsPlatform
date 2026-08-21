@@ -37,6 +37,42 @@ struct Averager {
     api: &'static AtpApi,
     ctx: *mut AtpCtx,
     recent: VecDeque<i32>,
+    weights: Vec<f64>,
+}
+
+/// Reads the `weights` list out of the module's config, which is legal here and nowhere else: the
+/// config is readable from `create`, the C path's analogue of a constructor, and this is the channel
+/// for a setting that has to be known before a port is connected.
+///
+/// A list of numbers is what a property cannot be, and it is not edited while the pipeline runs —
+/// `window` stays a property for exactly the opposite reasons. Everything here degrades to an empty
+/// vector: the host may predate the accessors, the node may have named no config, and a probe
+/// instance built to discover this module's ports is handed an empty one.
+fn read_weights(api: &AtpApi, ctx: *mut AtpCtx) -> Vec<f64> {
+    if !api.has_config() {
+        return Vec::new();
+    }
+    let key = b"weights";
+    let root = unsafe { (api.config_root)(ctx) };
+    let node = unsafe { (api.config_find)(ctx, root, key.as_ptr().cast::<c_char>(), key.len()) };
+    if node == ATP_CONFIG_NONE || unsafe { (api.config_kind)(ctx, node) } != ATP_CONFIG_ARRAY {
+        return Vec::new();
+    }
+    let count = unsafe { (api.config_size)(ctx, node) };
+    let mut weights = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        let child = unsafe { (api.config_child_at)(ctx, node, i) };
+        let mut value = AtpValue::empty();
+        if unsafe { (api.config_value_of)(ctx, child, &mut value) } != 1 {
+            continue;
+        }
+        match value.kind {
+            ATP_KIND_I64 => weights.push(unsafe { value.payload.as_i64 } as f64),
+            ATP_KIND_F64 => weights.push(unsafe { value.payload.as_f64 }),
+            _ => {}
+        }
+    }
+    weights
 }
 
 impl Averager {
@@ -100,6 +136,24 @@ impl Averager {
         String::from_utf8_lossy(slice).into_owned()
     }
 
+    /// Weighted over the tail when the config named weights, a plain mean otherwise.
+    fn mean(&self) -> f64 {
+        if self.weights.is_empty() {
+            let sum: f64 = self.recent.iter().copied().map(f64::from).sum();
+            return sum / self.recent.len() as f64;
+        }
+        let taken = self.recent.len().min(self.weights.len());
+        let values = self.recent.iter().rev().take(taken);
+        let weights = self.weights.iter().rev().take(taken);
+        let total: f64 = weights.clone().sum();
+        let sum: f64 = values.zip(weights).map(|(v, w)| f64::from(*v) * w).sum();
+        if total == 0.0 {
+            0.0
+        } else {
+            sum / total
+        }
+    }
+
     fn pass(&mut self) -> c_int {
         if self.property_bool(PROP_PANIC) {
             panic!("the panic property was set");
@@ -113,8 +167,7 @@ impl Averager {
             while self.recent.len() > window {
                 self.recent.pop_front();
             }
-            let sum: f64 = self.recent.iter().copied().map(f64::from).sum();
-            let mean = sum / self.recent.len() as f64;
+            let mean = self.mean();
 
             let report = if verbose {
                 format!("rust_averager: {value} -> mean {mean:.3} over {} of {window}", self.recent.len())
@@ -164,7 +217,9 @@ unsafe fn guarded<F: FnOnce(&mut Averager) -> c_int>(self_: *mut c_void, body: F
 
 unsafe extern "C" fn create(api: *const AtpApi, ctx: *mut AtpCtx, _user_data: *mut c_void) -> *mut c_void {
     let made = catch_unwind(AssertUnwindSafe(|| {
-        Box::into_raw(Box::new(Averager { api: &*api, ctx, recent: VecDeque::new() })).cast::<c_void>()
+        let api = &*api;
+        let weights = read_weights(api, ctx);
+        Box::into_raw(Box::new(Averager { api, ctx, recent: VecDeque::new(), weights })).cast::<c_void>()
     }));
     made.unwrap_or(core::ptr::null_mut())
 }

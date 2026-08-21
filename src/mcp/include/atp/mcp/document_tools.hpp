@@ -12,13 +12,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atp/hosting/module_factory_base.hpp>
 #include <atp/mcp/arguments.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/mcp/workspace.hpp>
-#include <atp/module_factory_base.hpp>
+#include <atp/runtime/config_value_json.hpp>
 #include <atp/studio/layout.hpp>
 #include <atp/studio/port_types.hpp>
-#include <atp/version.hpp>
+#include <atp/support/version.hpp>
 
 namespace atp::mcp {
 
@@ -91,7 +92,7 @@ inline void register_document_tools(tool_registry& tools, workspace& ws) {
                "Returns the whole config as JSON. Cheaper for you to read once than to reassemble "
                "the state from individual queries.",
                no_arguments_schema(), [&ws](const nlohmann::json&) {
-                   return nlohmann::json{{"document", runtime::encode(ws.project().config())}};
+                   return nlohmann::json{{"document", runtime::to_json_value(runtime::encode(ws.project().config()))}};
                }});
 
     tools.add({"add_module", "Adds a module to a group.",

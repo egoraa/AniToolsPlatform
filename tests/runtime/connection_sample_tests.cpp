@@ -3,9 +3,9 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/group.hpp>
 #include <atp/module.hpp>
 #include <atp/runtime/connection_sample.hpp>
+#include <atp/runtime/group.hpp>
 
 namespace {
 
@@ -16,22 +16,22 @@ struct number_inputs : atp::io::inputs {
     atp::io::input<int>& number = make<atp::io::input<int>>("number");
 };
 
-class sample_source : public atp::module<atp::io::ports<atp::io::inputs, number_outputs>, "sample_source"> {
+class sample_source : public atp::module<atp::ports<atp::io::inputs, number_outputs>, "sample_source"> {
    public:
     void send(int value) {
         outputs().number(value);
     }
 };
 
-class sample_sink : public atp::module<atp::io::ports<number_inputs>, "sample_sink"> {};
+class sample_sink : public atp::module<atp::ports<number_inputs>, "sample_sink"> {};
 
 TEST(ConnectionSample, NumbersConnectionsPerGroupAndNamesNestedGroupsByPath) {
-    atp::group root("root");
+    atp::runtime::group root("root");
     sample_source& src = root.make<sample_source>("src");
     root.make<sample_sink>("dst");
     root.connect("src.number", "dst.number");
 
-    atp::group& stage = root.add_group("stage");
+    atp::runtime::group& stage = root.add_group("stage");
     stage.make<sample_source>("inner_src");
     stage.make<sample_sink>("inner_dst");
     stage.connect("inner_src.number", "inner_dst.number");

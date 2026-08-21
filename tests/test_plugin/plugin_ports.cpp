@@ -16,7 +16,7 @@ struct echo_inputs : atp::io::inputs {
 struct echo_outputs : atp::io::outputs {
     atp::io::output<atp_tests::boundary_payload>& out = make<atp::io::output<atp_tests::boundary_payload>>("out");
 };
-using echo_ports = atp::io::ports<echo_inputs, echo_outputs>;
+using echo_ports = atp::ports<echo_inputs, echo_outputs>;
 
 class echo_module : public atp::module<echo_ports, "plugin_echo", atp::ver<"1.0">>, public atp_tests::boundary_service {
    public:

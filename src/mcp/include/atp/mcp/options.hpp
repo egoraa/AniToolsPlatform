@@ -7,7 +7,8 @@
 #include <string_view>
 #include <vector>
 
-#include <atp/log_pump.hpp>
+#include <atp/module/log_level.hpp>
+#include <atp/runtime/log_pump.hpp>
 
 namespace atp::mcp {
 
@@ -42,7 +43,7 @@ inline constexpr std::string_view usage =
         } else if (arg == "--scan-dir" && i + 1 < argc) {
             parsed.scan_dirs.emplace_back(argv[++i]);
         } else if (arg == "--log" && i + 1 < argc) {
-            const std::optional<log_level> level = level_from_name(argv[++i]);
+            const std::optional<log_level> level = runtime::level_from_name(argv[++i]);
             if (!level) {
                 return std::nullopt;
             }

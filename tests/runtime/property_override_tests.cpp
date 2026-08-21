@@ -4,8 +4,8 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/group.hpp>
 #include <atp/module.hpp>
+#include <atp/runtime/group.hpp>
 #include <atp/runtime/property_override.hpp>
 
 namespace {
@@ -29,7 +29,7 @@ struct target_props : atp::io::properties {
     atp::io::property<int>& limit = make<atp::io::property<int>>("limit", 10);
     atp::io::property<trace_level>& trace = make<atp::io::property<trace_level>>("trace");
 };
-class target_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
+class target_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
 
 TEST(PropertyOverride, ParsesPathNameValue) {
     const auto o = atp::runtime::parse_property_override("grp.mod.limit=5");
@@ -54,8 +54,8 @@ TEST(PropertyOverride, MalformedStringsThrow) {
 }
 
 TEST(PropertyOverride, AppliesThroughGroupTree) {
-    atp::group root("root");
-    atp::group& sub = root.add_group("sub");
+    atp::runtime::group root("root");
+    atp::runtime::group& sub = root.add_group("sub");
     auto* m = new target_module();
     sub.add("mod", atp::module_ptr(m, {}));
 
@@ -64,7 +64,7 @@ TEST(PropertyOverride, AppliesThroughGroupTree) {
 }
 
 TEST(PropertyOverride, EnumValueIsTakenByName) {
-    atp::group root("root");
+    atp::runtime::group root("root");
     auto* m = new target_module();
     root.add("mod", atp::module_ptr(m, {}));
 
@@ -79,7 +79,7 @@ TEST(PropertyOverride, EnumValueIsTakenByName) {
 }
 
 TEST(PropertyOverride, BadPathsAndValuesAreConfigErrors) {
-    atp::group root("root");
+    atp::runtime::group root("root");
     auto* m = new target_module();
     root.add("mod", atp::module_ptr(m, {}));
 

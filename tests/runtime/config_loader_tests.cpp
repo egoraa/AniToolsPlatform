@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/config/node.hpp>
 #include <atp/runtime/config_loader.hpp>
 
 namespace {
@@ -30,16 +31,16 @@ TEST_F(LoaderFiles, ExpandsNestedIncludesRelativeToIncludingFile) {
     write("sub/mid.json", R"({"mid": {"$include": "leaf.json"}})");
     const auto root = write("root.json", R"({"version": "3.0", "part": {"$include": "sub/mid.json"}})");
 
-    const nlohmann::json doc = atp::runtime::load_config(root);
-    EXPECT_TRUE(doc.at("part").at("mid").at("leaf").get<bool>());
+    const atp::config::node doc = atp::runtime::load_config(root);
+    EXPECT_TRUE(doc.at("part").at("mid").bool_at("leaf"));
 }
 
 TEST_F(LoaderFiles, IncludeInsideArrayElement) {
     write("child.json", R"({"group": "g", "modules": []})");
     const auto root = write("root.json", R"({"version": "3.0", "modules": [{"$include": "child.json"}]})");
 
-    const nlohmann::json doc = atp::runtime::load_config(root);
-    EXPECT_EQ(doc.at("modules").at(0).at("group"), "g");
+    const atp::config::node doc = atp::runtime::load_config(root);
+    EXPECT_EQ(doc.at("modules")[0].string_at("group"), "g");
 }
 
 TEST_F(LoaderFiles, RejectsIncludeCycle) {

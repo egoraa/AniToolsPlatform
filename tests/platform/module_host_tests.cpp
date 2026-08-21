@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/module_host.hpp>
+#include <atp/module/module_host.hpp>
 
 namespace {
 

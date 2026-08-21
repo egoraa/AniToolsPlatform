@@ -23,9 +23,9 @@ struct doc_inputs : atp::io::inputs {
 struct wrong_inputs : atp::io::inputs {
     atp::io::queued_input<std::string>& text = make<atp::io::queued_input<std::string>>("text");
 };
-class doc_source : public atp::module<atp::io::ports<atp::io::inputs, doc_outputs>, "doc_source"> {};
-class doc_sink : public atp::module<atp::io::ports<doc_inputs>, "doc_sink"> {};
-class doc_wrong : public atp::module<atp::io::ports<wrong_inputs>, "doc_wrong"> {};
+class doc_source : public atp::module<atp::ports<atp::io::inputs, doc_outputs>, "doc_source"> {};
+class doc_sink : public atp::module<atp::ports<doc_inputs>, "doc_sink"> {};
+class doc_wrong : public atp::module<atp::ports<wrong_inputs>, "doc_wrong"> {};
 
 class McpDocumentTools : public ::testing::Test {
    protected:

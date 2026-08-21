@@ -4,9 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/hosting/null_host.hpp>
 #include <atp/module.hpp>
-#include <atp/null_host.hpp>
-#include <atp/service_directory.hpp>
+#include <atp/module/service_directory.hpp>
 
 namespace {
 
@@ -42,7 +42,7 @@ struct both_impl final : greeter, counter {
     int value_ = 0;
 };
 
-class greeter_module : public atp::module<atp::io::ports<>, "greeter">, public greeter {
+class greeter_module : public atp::module<atp::ports<>, "greeter">, public greeter {
    public:
     void initialize(atp::module_context& context) override {
         context_ = &context;
@@ -59,7 +59,7 @@ class greeter_module : public atp::module<atp::io::ports<>, "greeter">, public g
     atp::module_context* context_ = nullptr;
 };
 
-class consumer_module : public atp::module<atp::io::ports<>, "consumer"> {
+class consumer_module : public atp::module<atp::ports<>, "consumer"> {
    public:
     void initialize(atp::module_context& context) override {
         context_ = &context;

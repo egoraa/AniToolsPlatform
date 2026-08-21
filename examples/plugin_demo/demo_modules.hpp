@@ -2,7 +2,7 @@
 #ifndef ATP_EXAMPLES_PLUGIN_DEMO_DEMO_MODULES_HPP
 #define ATP_EXAMPLES_PLUGIN_DEMO_DEMO_MODULES_HPP
 
-#include <atp/module_registry.hpp>
+#include <atp/hosting/module_registrar.hpp>
 
 #include "counter_module.hpp"
 #include "printer_module.hpp"

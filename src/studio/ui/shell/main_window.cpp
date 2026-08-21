@@ -31,9 +31,9 @@
 #include <QVBoxLayout>
 #include <QtVersion>
 
-#include <atp/log_pump.hpp>
 #include <atp/plugin.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/log_pump.hpp>
 #include <atp/studio/property_sync.hpp>
 #include <atp/studio/settings.hpp>
 
@@ -219,8 +219,8 @@ void main_window::detach(const QString& reason) {
 }
 
 void main_window::report(const QString& text, atp::log_level level) {
-    const QString stamp = QString::fromStdString(atp::format_log_time(std::chrono::system_clock::now()));
-    const QString name = QString::fromStdString(std::string(atp::level_name(level)));
+    const QString stamp = QString::fromStdString(atp::runtime::format_log_time(std::chrono::system_clock::now()));
+    const QString name = QString::fromStdString(std::string(atp::runtime::level_name(level)));
     log_->append(stamp + " [" + name + "] " + text, level);
 }
 
@@ -229,8 +229,8 @@ void main_window::report(const std::string& context, const std::exception& e) {
 }
 
 void main_window::drain_logs() {
-    for (const atp::log_line& line : state_.run.collect_logs()) {
-        log_->append(QString::fromStdString(atp::format_log_line(line)), line.level);
+    for (const atp::runtime::log_line& line : state_.run.collect_logs()) {
+        log_->append(QString::fromStdString(atp::runtime::format_log_line(line)), line.level);
     }
 }
 
@@ -502,11 +502,7 @@ void main_window::new_script_module() {
     if (!file) {
         return;
     }
-    if (!open_in_editor(QString::fromStdString(state_.settings.editor_command), *file)) {
-        report(
-            QString("could not open an editor for %1; open it by hand").arg(QString::fromStdWString(file->wstring())),
-            atp::log_level::warning);
-    }
+    open_source(state_, callbacks_, QString::fromStdWString(file->wstring()));
 }
 
 void main_window::save(bool ask_path) {
@@ -522,7 +518,7 @@ void main_window::save(bool ask_path) {
     }
     try {
         if (state_.run.running()) {
-            if (atp::group* root = state_.run.live_root()) {
+            if (atp::runtime::group* root = state_.run.live_root()) {
                 sync_persistent_properties(state_.doc, state_.doc.config(), *root);
             }
         }

@@ -7,10 +7,15 @@
 /// The platform SDK: modules, their ports, factories, the registry and the plugin contract.
 namespace atp {
 
+/// The config data vocabulary: one node of a config tree, its kind, the malformed-config error and
+/// the typed reads with a fallback.
+namespace config {}
+
 /// The io layer: inputs, outputs and properties, their registries and the polling watcher.
 namespace io {}
 
-/// Loading a pipeline from a config: the schema, the validator, the typed model and the builder.
+/// The host runtime: the composite and the pipeline, the runner that owns the threads, the plugin
+/// loader, the log ring and pump, and the config subsystem that builds a pipeline from a document.
 namespace runtime {}
 
 /// The studio core, independent of any GUI toolkit: the editable project, the module manager and

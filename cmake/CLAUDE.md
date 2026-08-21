@@ -6,7 +6,7 @@
 plus the template `cmake/AniToolsPlatformConfig.cmake.in`; `ATP_INSTALL` defaults to
 `PROJECT_IS_TOP_LEVEL`. The package carries `AniToolsPlatform_PLUGIN_ABI` and
 `atp_require_plugin_abi(<n>)`, which turns an ABI mismatch into a **configure** error instead of a
-runtime handshake failure; the number is parsed out of `include/atp/plugin.hpp` at configure time, so
+runtime handshake failure; the number is parsed out of `include/atp/plugin/abi.hpp` at configure time, so
 the header stays the single source of truth. `atp_runtime` is deliberately **not** exported — a plugin
 must not link the host runtime, and it would drag the FetchContent'd nlohmann/json along; the reasons
 are written out in `cmake/Install.cmake` and `docs/architecture.md`.

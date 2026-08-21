@@ -32,6 +32,33 @@ add_executable(atp_tests ${ATP_TESTS_SOURCES})
 target_include_directories(atp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(atp_tests PRIVATE atp_runtime atp_studio_lib atp_mcp_lib atp_warnings GTest::gtest_main ${CMAKE_DL_LIBS})
 
+# One translation unit per SDK and runtime header, each including exactly that header and nothing
+# else. A header that compiles only because something else was included before it is a latent break
+# for whoever includes it first, and the umbrella headers hide the problem by including everything in
+# one go. Generated from the same globs the IDE tree uses, so a header added later is covered without
+# an edit. The two include roots are not interchangeable: `rel` becomes both the text of the #include
+# and the name of the generated file, so measuring a runtime header from the source root would emit
+# `#include <src/runtime/include/atp/...>`, which no include directory resolves.
+set(ATP_HEADER_TU_DIR ${CMAKE_CURRENT_BINARY_DIR}/header_units)
+file(MAKE_DIRECTORY ${ATP_HEADER_TU_DIR})
+set(ATP_HEADER_TUS "")
+foreach (header IN LISTS ATP_PLATFORM_HEADERS ATP_RUNTIME_HEADERS)
+    if (header MATCHES "/src/runtime/include/")
+        file(RELATIVE_PATH rel ${CMAKE_SOURCE_DIR}/src/runtime/include ${header})
+    else ()
+        file(RELATIVE_PATH rel ${CMAKE_SOURCE_DIR}/include ${header})
+    endif ()
+    string(REGEX REPLACE "[/.]" "_" slug ${rel})
+    if (rel MATCHES "\\.h$")
+        set(tu ${ATP_HEADER_TU_DIR}/${slug}.c)
+    else ()
+        set(tu ${ATP_HEADER_TU_DIR}/${slug}.cpp)
+    endif ()
+    file(GENERATE OUTPUT ${tu} CONTENT "#include <${rel}>\n")
+    list(APPEND ATP_HEADER_TUS ${tu})
+endforeach ()
+target_sources(atp_tests PRIVATE ${ATP_HEADER_TUS})
+
 add_dependencies(atp_tests test_plugin test_plugin_ports test_plugin_bad_abi test_plugin_empty
         test_plugin_c test_plugin_c_bad_abi test_plugin_c_bad_desc)
 target_compile_definitions(atp_tests PRIVATE
@@ -62,10 +89,14 @@ if (TARGET atp_lua_bridge)
 endif ()
 
 if (ATP_ASAN_RUNTIME)
-    add_custom_command(TARGET atp_tests POST_BUILD
+    # One staging target rather than a POST_BUILD step per suite: both test executables live in bin/
+    # now, so two commands would write the same file to the same path, concurrently under a parallel
+    # generator. atp_tests is the anchor because it is always defined and the directory is its own.
+    add_custom_target(atp_asan_runtime ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${ATP_ASAN_RUNTIME}" "$<TARGET_FILE_DIR:atp_tests>"
-            COMMENT "AddressSanitizer runtime next to atp_tests")
+            COMMENT "AddressSanitizer runtime beside the test executables")
+    add_dependencies(atp_asan_runtime atp_tests)
 endif ()
 
 include(GoogleTest)
@@ -92,11 +123,11 @@ if (TARGET atp_studio_ui)
     # windeployqt would only bring qwindows, which is not the one being asked for.
     atp_deploy_qt(atp_ui_tests Qt6::QOffscreenIntegrationPlugin)
 
-    if (ATP_ASAN_RUNTIME)
-        add_custom_command(TARGET atp_ui_tests POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${ATP_ASAN_RUNTIME}" "$<TARGET_FILE_DIR:atp_ui_tests>"
-                COMMENT "AddressSanitizer runtime next to atp_ui_tests")
+    # atp_asan_runtime stages the runtime into bin/, which is where this suite runs from as well. A
+    # TARGET test rather than a repeat of the ATP_ASAN_RUNTIME condition, so the two cannot drift
+    # apart; it is false on every platform where that runtime is not a thing to copy.
+    if (TARGET atp_asan_runtime)
+        add_dependencies(atp_ui_tests atp_asan_runtime)
     endif ()
 
     # Labelled, so a run can ask for the widget tests alone. The CI job that has Qt builds this target

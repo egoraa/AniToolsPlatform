@@ -8,14 +8,14 @@
 #include <gtest/gtest.h>
 
 #include <atp/module.hpp>
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/runtime/pipeline.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 
 namespace {
 
 using namespace std::chrono_literals;
 
-class sleeper final : public atp::module<atp::io::ports<>, "sleeper"> {
+class sleeper final : public atp::module<atp::ports<>, "sleeper"> {
    public:
     void initialize(atp::module_context& context) override {
         host = &context.host;
@@ -33,10 +33,10 @@ class sleeper final : public atp::module<atp::io::ports<>, "sleeper"> {
 }  // namespace
 
 TEST(Wake, WakesTheOnDemandThreadWellBeforeTheBackoffCap) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     auto& module = pipe.root().make<sleeper>("sleeper");
-    atp::pipeline_runner runner;
-    runner.add_thread("main", {.mode = atp::thread_mode::on_demand});
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("main", {.mode = atp::runtime::thread_mode::on_demand});
     runner.start(pipe);
 
     std::this_thread::sleep_for(50ms);
@@ -50,18 +50,18 @@ TEST(Wake, WakesTheOnDemandThreadWellBeforeTheBackoffCap) {
     const auto latency = std::chrono::steady_clock::now() - sent;
 
     EXPECT_GT(module.passes.load(std::memory_order_relaxed), before);
-    EXPECT_LT(latency, atp::pipeline_runner::idle_sleep_cap);
+    EXPECT_LT(latency, atp::runtime::pipeline_runner::idle_sleep_cap);
     runner.stop();
 }
 
 TEST(Wake, IsANoOpBeforeStartAndAfterStop) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     auto& module = pipe.root().make<sleeper>("sleeper");
     pipe.root().initialize(pipe.context());
     module.host->wake();
 
-    atp::pipeline_runner runner;
-    runner.add_thread("main", {.mode = atp::thread_mode::on_demand});
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("main", {.mode = atp::runtime::thread_mode::on_demand});
     runner.start(pipe);
     runner.stop();
     module.host->wake();
@@ -70,10 +70,10 @@ TEST(Wake, IsANoOpBeforeStartAndAfterStop) {
 }
 
 TEST(Wake, IsANoOpOnAThrottledThread) {
-    atp::pipeline pipe;
+    atp::runtime::pipeline pipe;
     auto& module = pipe.root().make<sleeper>("sleeper");
-    atp::pipeline_runner runner;
-    runner.add_thread("main", {.mode = atp::thread_mode::throttled, .period = 200ms});
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("main", {.mode = atp::runtime::thread_mode::throttled, .period = 200ms});
     runner.start(pipe);
 
     std::this_thread::sleep_for(50ms);

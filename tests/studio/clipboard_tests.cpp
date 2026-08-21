@@ -62,7 +62,7 @@ TEST(StudioClipboard, CopyKeepsTheGroupOrderWhateverTheNameOrder) {
 
 TEST(StudioClipboard, CopyCarriesSubtreePositionsAndAssignmentsAsRelativePaths) {
     project proj = project::create();
-    proj.add_thread("t", atp::thread_mode::on_demand);
+    proj.add_thread("t", atp::runtime::thread_mode::on_demand);
     proj.add_group("", "box");
     proj.add_module("box", "src", "a");
     proj.set_position("box", {10.0f, 20.0f});
@@ -195,7 +195,7 @@ TEST(StudioClipboard, ContentSurvivesTheRemovalOfItsSource) {
 
 TEST(StudioClipboard, PasteRestoresSubtreePositionsAndAssignmentsUnderTheNewPath) {
     project proj = project::create();
-    proj.add_thread("t", atp::thread_mode::on_demand);
+    proj.add_thread("t", atp::runtime::thread_mode::on_demand);
     proj.add_group("", "box");
     proj.add_module("box", "src", "a");
     proj.set_position("box", {10.0f, 20.0f});
@@ -218,7 +218,7 @@ TEST(StudioClipboard, PasteRestoresSubtreePositionsAndAssignmentsUnderTheNewPath
 
 TEST(StudioClipboard, AssignmentToAnUndeclaredThreadIsSkippedOnPaste) {
     project source = project::create();
-    source.add_thread("t", atp::thread_mode::on_demand);
+    source.add_thread("t", atp::runtime::thread_mode::on_demand);
     source.add_group("", "box");
     source.set_assignment("box", "t");
     const clipboard clip = source.copy_children("", {"box"});

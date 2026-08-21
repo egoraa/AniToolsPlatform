@@ -2,7 +2,6 @@
 #ifndef ATP_MCP_CONTROL_TOOLS_HPP
 #define ATP_MCP_CONTROL_TOOLS_HPP
 
-#include <algorithm>
 #include <concepts>
 #include <exception>
 #include <string>
@@ -11,14 +10,14 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atp/group.hpp>
 #include <atp/io/properties.hpp>
 #include <atp/mcp/arguments.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/mcp/type_name.hpp>
-#include <atp/module_base.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/module/module_base.hpp>
 #include <atp/runtime/connection_sample.hpp>
+#include <atp/runtime/group.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 #include <atp/runtime/property_override.hpp>
 
 namespace atp::mcp {
@@ -34,11 +33,11 @@ template <typename T>
 concept control_target = requires(T& t, const T& ct, bool on, const runtime::property_override& o) {
     { ct.running() } -> std::same_as<bool>;
     { ct.error() } -> std::same_as<std::exception_ptr>;
-    { ct.stats() } -> std::same_as<std::vector<pipeline_runner::thread_stats>>;
-    { ct.live_root() } -> std::same_as<group*>;
+    { ct.stats() } -> std::same_as<std::vector<runtime::pipeline_runner::thread_stats>>;
+    { ct.live_root() } -> std::same_as<runtime::group*>;
     { ct.sample_connections() } -> std::same_as<std::vector<runtime::connection_sample>>;
-    { ct.module_metrics() } -> std::same_as<std::vector<group::module_stats>>;
-    { ct.input_metrics() } -> std::same_as<std::vector<group::port_stats>>;
+    { ct.module_metrics() } -> std::same_as<std::vector<runtime::group::module_stats>>;
+    { ct.input_metrics() } -> std::same_as<std::vector<runtime::group::port_stats>>;
     { ct.metrics_enabled() } -> std::same_as<bool>;
     { t.set_metrics_enabled(on) } -> std::same_as<bool>;
     t.set_property(o);
@@ -78,8 +77,8 @@ namespace detail {
 /// connection holds raw pointers and an alias forgets the path it was made from — so the only way
 /// back to a name is to scan the children's registries.
 /// @return the dotted name, or an empty string if the port belongs to no child of this group
-[[nodiscard]] inline std::string output_path_in(const group& g, const io::output_base* port) {
-    for (const group::child& c : g.children()) {
+[[nodiscard]] inline std::string output_path_in(const runtime::group& g, const io::output_base* port) {
+    for (const runtime::group::child& c : g.children()) {
         for (const auto& [name, p] : c.module->outputs().entries()) {
             if (p == port) {
                 return c.name + "." + name;
@@ -90,8 +89,8 @@ namespace detail {
 }
 
 /// Name of an input as "child.port" within a group; the mirror of output_path_in.
-[[nodiscard]] inline std::string input_path_in(const group& g, const io::input_base* port) {
-    for (const group::child& c : g.children()) {
+[[nodiscard]] inline std::string input_path_in(const runtime::group& g, const io::input_base* port) {
+    for (const runtime::group::child& c : g.children()) {
         for (const auto& [name, p] : c.module->inputs().entries()) {
             if (p == port) {
                 return c.name + "." + name;
@@ -102,16 +101,16 @@ namespace detail {
 }
 
 /// Connections recorded by one group, both ends named.
-[[nodiscard]] inline nlohmann::json connections_to_json(const group& g) {
+[[nodiscard]] inline nlohmann::json connections_to_json(const runtime::group& g) {
     nlohmann::json out = nlohmann::json::array();
-    for (const group::connection& c : g.connections()) {
+    for (const runtime::group::connection& c : g.connections()) {
         out.push_back({{"from", output_path_in(g, c.out)}, {"to", input_path_in(g, c.in)}});
     }
     return out;
 }
 
 /// Aliases a group publishes, each resolved back to the child port behind it.
-[[nodiscard]] inline nlohmann::json expose_to_json(const group& g) {
+[[nodiscard]] inline nlohmann::json expose_to_json(const runtime::group& g) {
     nlohmann::json inputs = nlohmann::json::object();
     for (const auto& [alias, p] : g.inputs().entries()) {
         const std::string target = input_path_in(g, p);
@@ -136,14 +135,15 @@ namespace detail {
     return out;
 }
 
-/// Declared ports of one registry, sorted by name. The registries are hash maps, so an answer whose
-/// order drifts between calls would be useless for comparing two samples.
+/// Declared ports of one registry, in the order the module's author declared them.
+///
+/// That order is the registry's contract, so it is stable between calls and two samples stay
+/// comparable. It used to be sorted by name here instead, because the registry was a hash map and
+/// its order meant nothing; both halves of that reason are gone.
 template <typename TRegistry>
 [[nodiscard]] inline nlohmann::json ports_to_json(const TRegistry& registry) {
-    auto ports = registry.entries();
-    std::ranges::sort(ports, [](const auto& a, const auto& b) { return a.first < b.first; });
     nlohmann::json out = nlohmann::json::array();
-    for (const auto& [name, p] : ports) {
+    for (const auto& [name, p] : registry.entries()) {
         out.push_back({{"name", name}, {"type", type_name(p->type())}, {"thread_safe", p->thread_safe()}});
     }
     return out;
@@ -152,10 +152,8 @@ template <typename TRegistry>
 /// Properties of one module with the value it holds right now, which is what separates this from the
 /// catalog: the catalog describes what a factory would make, this describes what is running.
 [[nodiscard]] inline nlohmann::json live_properties_to_json(const io::properties& props) {
-    auto items = props.entries();
-    std::ranges::sort(items, [](const auto& a, const auto& b) { return a.first < b.first; });
     nlohmann::json out = nlohmann::json::array();
-    for (const auto& [name, p] : items) {
+    for (const auto& [name, p] : props.entries()) {
         out.push_back({{"name", name},
                        {"kind", kind_name(p->kind())},
                        {"value", p->to_string()},
@@ -169,11 +167,11 @@ template <typename TRegistry>
 /// Flattens the tree into dotted paths, a parent before its children. Flat rather than nested,
 /// because every other tool in this vocabulary addresses a module by its dotted path and a reader
 /// should not have to reassemble one.
-inline void describe_group(const group& g, const std::string& path, nlohmann::json& out) {
-    for (const group::child& c : g.children()) {
+inline void describe_group(const runtime::group& g, const std::string& path, nlohmann::json& out) {
+    for (const runtime::group::child& c : g.children()) {
         const std::string child_path = path.empty() ? c.name : path + "." + c.name;
         const module_base& m = *c.module;
-        const group* sub = c.subgroup;
+        const runtime::group* sub = c.subgroup;
         nlohmann::json node{{"path", child_path},
                             {"module", std::string(m.get_name())},
                             {"version", m.get_version().to_string()},
@@ -225,7 +223,7 @@ void register_control_tools(tool_registry& tools, TTarget& target) {
                    nlohmann::json modules = nlohmann::json::array();
                    nlohmann::json connections = nlohmann::json::array();
                    nlohmann::json expose = nlohmann::json::object();
-                   if (const group* root = target.live_root()) {
+                   if (const runtime::group* root = target.live_root()) {
                        detail::describe_group(*root, "", modules);
                        connections = detail::connections_to_json(*root);
                        expose = detail::expose_to_json(*root);

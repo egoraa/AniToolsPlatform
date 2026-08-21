@@ -39,11 +39,34 @@ namespace atp::bridge {
 /// gets a dict and never learns that a tree of numbered nodes was involved. A dict keeps its insertion
 /// order, so the order the host handed the entries over survives — which is as much order as there is,
 /// since a document is read through a JSON object that sorts its keys.
-/// @param api the host's callback table, which must be new enough to carry the config accessors
+///
+/// A host older than the config accessors yields None — the same answer a module whose node named no
+/// config gets. Refusing instead would take every Python module down on such a host, including one
+/// that never looks at its config, which is the opposite of what struct_size is for.
+/// @param api the host's callback table, asked through atp_api_has_config whether it carries them
 /// @param ctx this instance's context
 /// @param node handle of the node to materialise
 /// @return a new reference, or nullptr with a Python error set
 [[nodiscard]] PyObject* config_to_python(const atp_api& api, atp_ctx* ctx, std::uint32_t node);
+
+/// The bytes of the file a config came from, as a str; empty when it came from no file, and empty on a
+/// host that predates the accessor for the same reason config_to_python answers None there.
+///
+/// Decoded as UTF-8 **strictly**, so a file in another encoding fails the creation of the module with a
+/// UnicodeDecodeError naming the position instead of handing the script mojibake that would be found
+/// weeks later. The host promises UTF-8 for everything crossing this boundary; a file that breaks the
+/// promise is the author's mistake, and it has to be reported as one.
+///
+/// **The callback itself is read only after atp_api_has_config_text says it is there**, which is why
+/// this pair does not share one helper taking the callback as an argument: on a host that predates
+/// those fields the table is shorter than this plugin's declaration of it, so loading the member is
+/// already a read past its end, whatever the check inside the helper would have answered.
+/// @return a new reference, or nullptr with a Python error set
+[[nodiscard]] PyObject* config_text_to_python(const atp_api& api, atp_ctx* ctx);
+
+/// Path of that file, as a str; empty when the config came from no file.
+/// @return a new reference, or nullptr with a Python error set
+[[nodiscard]] PyObject* config_origin_to_python(const atp_api& api, atp_ctx* ctx);
 
 }  // namespace atp::bridge
 

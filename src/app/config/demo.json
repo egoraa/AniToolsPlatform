@@ -1,6 +1,12 @@
 {
-    "version": "3.0",
+    "version": "3.3",
     "plugins": ["../plugins/atp_demo_plugin"],
+    "configs": {
+        "printing": {
+            "show": ["value", "measure", "sample"],
+            "names": { "value": "n", "measure": "m" }
+        }
+    },
     "pipeline": {
         "modules": [
             {
@@ -10,12 +16,18 @@
                         "module": "counter",
                         "name": "ticks",
                         "version": "1.0",
-                        "properties": { "start_at": 100, "step": 5 }
+                        "properties": { "start_at": 100, "step": 5 },
+                        "config": {
+                            "milestones": [
+                                { "at": 110, "say": "one hundred and ten" }
+                            ]
+                        }
                     },
                     {
                         "module": "scaler",
                         "name": "scale",
-                        "properties": { "gain": 0.25 }
+                        "properties": { "gain": 0.25 },
+                        "config": "file:rig.ini"
                     }
                 ],
                 "connections": [

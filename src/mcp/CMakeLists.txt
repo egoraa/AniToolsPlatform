@@ -1,6 +1,6 @@
 add_library(atp_mcp_lib INTERFACE)
 target_include_directories(atp_mcp_lib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(atp_mcp_lib INTERFACE atp_studio_lib)
+target_link_libraries(atp_mcp_lib INTERFACE atp_studio_lib nlohmann_json::nlohmann_json)
 
 file(GLOB_RECURSE ATP_MCP_HEADERS CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/include/atp/mcp/*.hpp)

@@ -10,10 +10,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atp/hosting/module_factory_base.hpp>
 #include <atp/mcp/module_json.hpp>
 #include <atp/mcp/resource_registry.hpp>
 #include <atp/mcp/workspace.hpp>
-#include <atp/module_factory_base.hpp>
+#include <atp/runtime/json_codec.hpp>
 
 namespace atp::mcp {
 
@@ -23,7 +24,7 @@ namespace atp::mcp {
 /// @param ws workspace they read; it must outlive the registry
 inline void register_resources(resource_registry& resources, workspace& ws) {
     resources.add({"atp://document", "Current pipeline config", "application/json",
-                   [&ws] { return runtime::encode(ws.project().config()).dump(2); }});
+                   [&ws] { return runtime::json_dump(runtime::encode(ws.project().config()), 2); }});
 
     resources.add({"atp://modules", "Catalog of registered modules", "application/json", [&ws] {
                        nlohmann::json modules = nlohmann::json::array();

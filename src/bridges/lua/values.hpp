@@ -55,6 +55,21 @@ void from_lua(lua_State* state, int index, atp_kind kind, atp_value& out, std::s
 /// @param node handle of the node to push
 void config_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx, std::uint32_t node);
 
+/// Pushes the bytes of the file a config came from, or an empty string when it came from none.
+///
+/// A Lua string is a byte string, so nothing is decoded and nothing can fail here — the encoding
+/// question the Python bridge has to answer does not arise. A config written as "file:rig.yaml" reaches
+/// a module this way and this way only: the host parses .json and hands every other format over as it
+/// found it.
+void config_text_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx);
+
+/// Pushes the path of that file, or an empty string when the config came from none.
+void config_origin_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx);
+
+/// Pushes whether the host left the file unparsed, which is the one thing the pair above cannot say: a
+/// .json holding literally `null` also gives an empty config next to a non-empty text.
+void config_opaque_to_lua(lua_State* state, const atp_api& api, atp_ctx* ctx);
+
 }  // namespace atp::lua_bridge
 
 #endif

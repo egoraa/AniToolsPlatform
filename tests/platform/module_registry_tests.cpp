@@ -9,24 +9,26 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/hosting/module_registrar.hpp>
+#include <atp/hosting/module_registry.hpp>
 #include <atp/module.hpp>
-#include <atp/module_registry.hpp>
 
 namespace {
 
-class alpha_module : public atp::module<atp::io::ports<>, "", atp::version{1, 0}> {};
+class alpha_module : public atp::module<atp::ports<>, "", atp::version{1, 0}> {};
 
 class beta_module : public atp::module<> {};
 
-class alpha_v2_module : public atp::module<atp::io::ports<>, "", atp::version{2, 0}> {};
+class alpha_v2_module : public atp::module<atp::ports<>, "", atp::version{2, 0}> {};
 
 class gamma_module : public atp::module<> {};
 
-class named_module : public atp::module<atp::io::ports<>, "named", atp::version{1, 0}> {};
+class named_module : public atp::module<atp::ports<>, "named", atp::version{1, 0}> {};
 
 class handmade_module : public atp::module_base {
    public:
     static constexpr std::string_view module_name = "handmade";
+
     void initialize(atp::module_context&) override {}
     void start() override {}
     atp::work_status iterate(std::stop_token) override {
@@ -342,4 +344,19 @@ TEST(ModuleRegistry, SameTypeDifferentConfigsUnderAliases) {
     registry.add<configured_module>("fast", 90);
     EXPECT_EQ(dynamic_cast<configured_module&>(*registry.create("slow")).value(), 10);
     EXPECT_EQ(dynamic_cast<configured_module&>(*registry.create("fast")).value(), 90);
+}
+
+TEST(ModuleRegistrar, OffersTheSameAddSpellingsAsTheRegistry) {
+    atp::module_registry registry;
+    atp::module_registrar registrar{registry};
+
+    atp::module_factory_base& by_own_name = registrar.add<named_module>();
+    atp::module_factory_base& by_alias = registrar.add<named_module>("alias");
+
+    EXPECT_EQ(by_own_name.name(), "named");
+    EXPECT_EQ(by_alias.name(), "alias");
+    EXPECT_EQ(registry.list().size(), 2U);
+    ASSERT_EQ(registrar.registered().size(), 2U);
+    EXPECT_EQ(registrar.registered()[0].first, "named");
+    EXPECT_EQ(registrar.registered()[1].first, "alias");
 }

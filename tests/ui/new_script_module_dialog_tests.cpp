@@ -11,8 +11,8 @@
 #include <QLineEdit>
 #include <QPushButton>
 
+#include <atp/hosting/module_registry.hpp>
 #include <atp/module.hpp>
-#include <atp/module_registry.hpp>
 #include <atp/studio/languages.hpp>
 
 #include "shell/new_script_module_dialog.hpp"
@@ -20,7 +20,7 @@
 
 namespace {
 
-class taken_module : public atp::module<atp::io::ports<>, "py_taken"> {};
+class taken_module : public atp::module<atp::ports<>, "py_taken"> {};
 
 struct fixture {
     atp::module_registry registry;

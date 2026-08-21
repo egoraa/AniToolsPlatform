@@ -1,5 +1,5 @@
 {
-    "version": "3.0",
+    "version": "3.2",
     "plugins": ["../plugins/atp_demo_plugin", "../plugins/atp_lua_bridge"],
     "pipeline": {
         "modules": [
@@ -11,7 +11,14 @@
             {
                 "module": "lua_scale",
                 "name": "scale",
-                "properties": { "factor": 5 }
+                "properties": { "factor": 5 },
+                "config": {
+                    "bands": [
+                        { "upto": 20, "name": "small" },
+                        { "upto": 60, "name": "medium" }
+                    ],
+                    "otherwise": "large"
+                }
             },
             {
                 "module": "printer",

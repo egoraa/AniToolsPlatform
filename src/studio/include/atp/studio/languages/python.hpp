@@ -77,6 +77,10 @@ nothing here is compiled and nothing links the SDK.
 
 Heavy imports belong in initialize rather than at module level: an import at module level runs when
 the plugin loads and is paid by every pipeline, including those that never create this module.
+
+A setting arrives by one of two channels. A Property is one scalar with a default, edited while the
+runtime::pipeline runs. The config is a structure the pipeline's author wrote down — a list, a table, a nested
+object — handed over once at creation; it is read in __init__ below.
 """
 
 import atp
@@ -91,6 +95,15 @@ class @CLASS@(atp.Module):
 
     factor = atp.Property(atp.i32, 2)
 
+    def __init__(self):
+        # self.config is a dict, a list, a scalar or None, mirroring the JSON of this module's
+        # "config" in the pipeline. It is bound before __init__ and is None when the node named
+        # none, so read it with a fallback: raising here would make the module unplaceable in
+        # atp_studio, which probes every module with an empty config to learn its ports.
+        # Ports are not reachable yet — that is what initialize is for.
+        config = self.config or {}
+        self.offset = config.get("offset", 0)
+
     def initialize(self):
         self.log("@NAME@ ready")
 
@@ -98,7 +111,7 @@ class @CLASS@(atp.Module):
         value = self.value.take()
         if value is None:
             return atp.IDLE
-        self.result.write(value * self.factor.get())
+        self.result.write(value * self.factor.get() + self.offset)
         return atp.BUSY
 )PY";
     std::string text(skeleton);

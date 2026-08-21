@@ -20,10 +20,35 @@ function(atp_deploy_qt target)
 
     find_program(ATP_WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin")
 
-    if (ATP_WINDEPLOYQT)
+    # One deployment per output directory. atp_studio and atp_ui_tests share bin/, and windeployqt
+    # writes the same files from both — concurrently, under a parallel generator, which costs a
+    # truncated DLL rather than a wasted copy. The first target to ask for a directory owns the
+    # deployment; a later one gets a dependency on the owner instead, which is enough because the
+    # owner's POST_BUILD is what does the work. The extra plugins below are copied by every caller
+    # regardless: they are what this caller needs and not what the owner asked for.
+    #
+    # The key is the directory as it is known at configure time — the property, or the variable
+    # behind it. $<TARGET_FILE_DIR:...> cannot be compared here and does not have to be: two targets
+    # with the same RUNTIME_OUTPUT_DIRECTORY resolve it the same way.
+    get_target_property(target_dir ${target} RUNTIME_OUTPUT_DIRECTORY)
+    if (NOT target_dir)
+        set(target_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    endif ()
+
+    get_property(deployed_dirs GLOBAL PROPERTY ATP_QT_DEPLOYED_DIRS)
+    get_property(deployed_owners GLOBAL PROPERTY ATP_QT_DEPLOYED_OWNERS)
+    list(FIND deployed_dirs "${target_dir}" deployed_at)
+
+    if (deployed_at GREATER_EQUAL 0)
+        list(GET deployed_owners ${deployed_at} owner)
+        add_dependencies(${target} ${owner})
+        message(STATUS "Qt runtime for ${target} is deployed by ${owner} into the same directory")
+    elseif (ATP_WINDEPLOYQT)
         add_custom_command(TARGET ${target} POST_BUILD
                 COMMAND "${ATP_WINDEPLOYQT}" --no-translations --no-compiler-runtime "$<TARGET_FILE:${target}>"
                 COMMENT "windeployqt: Qt runtime and plugins next to ${target}")
+        set_property(GLOBAL APPEND PROPERTY ATP_QT_DEPLOYED_DIRS "${target_dir}")
+        set_property(GLOBAL APPEND PROPERTY ATP_QT_DEPLOYED_OWNERS "${target}")
     else ()
         message(WARNING
                 "windeployqt was not found next to Qt6_DIR — ${target} will have no Qt runtime beside it "

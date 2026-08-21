@@ -7,8 +7,8 @@
 
 #include <QString>
 
+#include <atp/hosting/module_registry.hpp>
 #include <atp/module.hpp>
-#include <atp/module_registry.hpp>
 
 #include "model/property_actions.hpp"
 
@@ -23,26 +23,26 @@ struct gain_props : atp::io::properties {
     atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
     atp::io::property<bool>& loud = make<atp::io::property<bool>>("loud", false);
 };
-class gain_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, gain_props>, "gain"> {};
+class gain_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, gain_props>, "gain"> {};
 
 struct plain_props : atp::io::properties {
     atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
 };
-class plain_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, plain_props>, "plain"> {};
+class plain_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, plain_props>, "plain"> {};
 
 struct wide_props : atp::io::properties {
     atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
     atp::io::property<std::string>& label = make<atp::io::property<std::string>>("label", "x");
     atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
 };
-class wide_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, wide_props>, "wide"> {};
+class wide_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, wide_props>, "wide"> {};
 
 struct narrow_props : atp::io::properties {
     atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 1, atp::io::allowed(1, 2));
     atp::io::property<int>& label = make<atp::io::property<int>>("label", 0);
     atp::io::property<int>& step = make<atp::io::property<int>>("step", 1, atp::io::transient);
 };
-class narrow_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, narrow_props>, "narrow"> {};
+class narrow_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, narrow_props>, "narrow"> {};
 
 struct harness {
     app_state state;

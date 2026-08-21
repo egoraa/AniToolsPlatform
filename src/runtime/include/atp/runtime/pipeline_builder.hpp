@@ -4,22 +4,24 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-
-#include <atp/group.hpp>
-#include <atp/module_loader.hpp>
-#include <atp/module_registry.hpp>
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/config/node.hpp>
+#include <atp/hosting/module_registry.hpp>
+#include <atp/io/property_codec.hpp>
+#include <atp/runtime/config_file.hpp>
 #include <atp/runtime/config_model.hpp>
-#include <atp/runtime/config_value_json.hpp>
+#include <atp/runtime/group.hpp>
+#include <atp/runtime/module_loader.hpp>
+#include <atp/runtime/pipeline.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 
 namespace atp::runtime {
 
@@ -40,14 +42,51 @@ struct application {
 
 namespace detail {
 
-inline std::string scalar_to_string(const nlohmann::json& value) {
-    if (value.is_string()) {
-        return value.get<std::string>();
+/// A real spelled so that it stays a real: with a trailing ".0" whenever the shortest round-trip form
+/// carries neither a point nor an exponent.
+///
+/// That tail is **load-bearing and not decoration**. std::to_chars prints 48000.0 as "48000", and
+/// property_codec<int> parses "48000" happily — so without it a real written in the config would
+/// silently satisfy an integer property, which is the very distinction config::node keeps two forms
+/// for. With it, from_chars stops at the point and the property refuses, as it always did.
+///
+/// It is also exactly what the JSON writer this replaced produced, checked against nlohmann's dump
+/// over 48000.0, 3.0, -0.0, 0.1, 0.5, 1e20, 1e-7, 1/3 and 123456789012345.0. Infinities and NaN need
+/// no case of their own: to_chars writes "inf" and "nan", the tail makes them "inf.0" and "nan.0", and
+/// every property refuses those — which is what the JSON writer's "null" achieved.
+[[nodiscard]] inline std::string real_to_string(double value) {
+    std::string text = io::property_codec<double>::to_string(value);
+    if (text.find_first_of(".eE") == std::string::npos) {
+        text += ".0";
     }
-    if (value.is_boolean()) {
-        return value.get<bool>() ? "true" : "false";
+    return text;
+}
+
+/// The string form of a property value as the config declares it, handed straight to
+/// property_base::from_string.
+///
+/// Formatted here rather than by json_dump, which built a whole document tree to print one number. The
+/// spelling is unchanged, deliberately: it decides which properties accept the value, so this is a
+/// change of layer and not of meaning.
+///
+/// @return nullopt for a value that is not a scalar, which only the caller can report, being the one
+///         that knows the property's name
+[[nodiscard]] inline std::optional<std::string> scalar_to_string(const atp::config::node& value) {
+    switch (value.kind()) {
+        case atp::config::kind::string:
+            return value.as_string();
+        case atp::config::kind::boolean:
+            return io::property_codec<bool>::to_string(value.as_bool());
+        case atp::config::kind::integer:
+            return io::property_codec<std::int64_t>::to_string(value.as_int());
+        case atp::config::kind::real:
+            return real_to_string(value.as_double());
+        case atp::config::kind::null:
+        case atp::config::kind::array:
+        case atp::config::kind::object:
+            break;
     }
-    return value.dump();
+    return std::nullopt;
 }
 
 inline void apply_properties(module_base& m, const module_node& node) {
@@ -56,8 +95,13 @@ inline void apply_properties(module_base& m, const module_node& node) {
         if (prop == nullptr) {
             throw config_error("no property named '" + name + "'");
         }
+        const std::optional<std::string> text = scalar_to_string(value);
+        if (!text) {
+            throw config_error("property '" + name + "' must be a scalar, found " +
+                               std::string(atp::config::node::kind_name(value.kind())));
+        }
         try {
-            prop->from_string(scalar_to_string(value));
+            prop->from_string(*text);
         } catch (const std::invalid_argument& e) {
             throw config_error(e.what());
         }
@@ -73,23 +117,40 @@ inline void apply_properties(module_base& m, const module_node& node) {
 /// validator, which rejects both cases earlier, but the builder is also called from studio, where a
 /// document never passed validate(); on that path these are the only checks there are.
 ///
-/// @throws config_error for an unsupported source prefix or a name absent from the shared block
-[[nodiscard]] inline config_value resolve_config(const module_node& node,
-                                                 const std::vector<std::pair<std::string, nlohmann::json>>& shared) {
+/// A shared entry may itself be a "file:" path, which is how one file serves several modules. It may
+/// not be a bare reference to another entry — the validator refuses that — so this follows at most one
+/// reference and one file, and there is no cycle to detect.
+///
+/// @param base_dir directory of the document, which a relative "file:" path resolves against
+/// @throws config_error for an unsupported source prefix, a name absent from the shared block, or
+///         anything that goes wrong reading a named file
+[[nodiscard]] inline module_config resolve_config(const module_node& node,
+                                                  const std::vector<std::pair<std::string, atp::config::node>>& shared,
+                                                  const std::filesystem::path& base_dir) {
     if (!node.config) {
-        return config_value{};
+        return module_config{};
     }
     if (!node.config->is_string()) {
-        return to_config_value(*node.config);
+        return module_config(*node.config);
     }
-    const std::string text = node.config->get<std::string>();
+    const std::string text = node.config->as_string();
+    if (text.starts_with(config_file_prefix)) {
+        return load_module_config(std::string_view(text).substr(config_file_prefix.size()), base_dir);
+    }
     const std::optional<std::string> ref = parse_config_ref(text);
     if (!ref) {
         throw config_error("unknown config source in '" + text + "'");
     }
     for (const auto& [name, value] : shared) {
         if (name == *ref) {
-            return to_config_value(value);
+            if (value.is_string()) {
+                const std::string shared_text = value.as_string();
+                if (!shared_text.starts_with(config_file_prefix)) {
+                    throw config_error("config '" + *ref + "' in 'configs' must be an object or a 'file:' path");
+                }
+                return load_module_config(std::string_view(shared_text).substr(config_file_prefix.size()), base_dir);
+            }
+            return module_config(value);
         }
     }
     throw config_error("no entry named '" + *ref + "' in 'configs'");
@@ -98,11 +159,12 @@ inline void apply_properties(module_base& m, const module_node& node) {
 inline void build_group(group& g,
                         const group_node& node,
                         module_registry& registry,
-                        const std::vector<std::pair<std::string, nlohmann::json>>& shared) {
+                        const std::vector<std::pair<std::string, atp::config::node>>& shared,
+                        const std::filesystem::path& base_dir) {
     for (const child_node& c : node.modules) {
         if (c.module) {
             try {
-                const config_value cfg = resolve_config(*c.module, shared);
+                const module_config cfg = resolve_config(*c.module, shared, base_dir);
                 module_ptr m = c.module->factory_version
                                    ? registry.create(c.module->factory, *c.module->factory_version, cfg)
                                    : registry.create(c.module->factory, cfg);
@@ -113,7 +175,7 @@ inline void build_group(group& g,
                                    "': " + e.what());
             }
         } else {
-            build_group(g.add_group(c.group->name), *c.group, registry, shared);
+            build_group(g.add_group(c.group->name), *c.group, registry, shared, base_dir);
         }
     }
     for (const auto& [alias, path] : node.expose_inputs) {
@@ -179,9 +241,19 @@ inline group& resolve_group(group& root, const std::string& path) {
 
 /// Builds the tree, the threads and the layout against an already populated registry — studio's
 /// path, where the plugins live at session level and the pipeline is rebuilt for every run.
+///
+/// @param base_dir directory of the document being built, which a module config written as
+///        "file:<path>" resolves against. Optional because most callers have no document on disk at
+///        all — a config assembled in memory, a test, a project that was never saved — and for them a
+///        relative file config is refused by name rather than resolved against whatever the process
+///        happens to have as its current directory.
 /// @throws config_error with the config context of whatever failed to build
-inline void build_pipeline(pipeline& pipe, pipeline_runner& runner, const config& cfg, module_registry& registry) {
-    detail::build_group(pipe.root(), cfg.pipeline, registry, cfg.configs);
+inline void build_pipeline(pipeline& pipe,
+                           pipeline_runner& runner,
+                           const config& cfg,
+                           module_registry& registry,
+                           const std::filesystem::path& base_dir = {}) {
+    detail::build_group(pipe.root(), cfg.pipeline, registry, cfg.configs, base_dir);
     for (const thread_node& t : cfg.threads) {
         runner.add_thread(t.name, {t.mode, t.period});
     }
@@ -194,7 +266,8 @@ inline void build_pipeline(pipeline& pipe, pipeline_runner& runner, const config
 /// layout. The runner is NOT started; starting and stopping stay with the caller.
 /// @param app application to fill in: its registry receives the plugins, its pipeline the tree
 /// @param cfg decoded config to build from
-/// @param base_dir directory of the root config, which plugin paths are resolved against
+/// @param base_dir directory of the root config, which both plugin paths and a module config written
+///        as "file:<path>" are resolved against
 /// @throws config_error with the config context of whatever failed to build
 /// @throws std::runtime_error naming the path if a plugin fails to load
 ///
@@ -212,7 +285,7 @@ inline void build(application& app, const config& cfg, const std::filesystem::pa
         for (const std::filesystem::path& file :
              is_dir ? detail::plugin_files_in(entry) : std::vector<std::filesystem::path>{entry}) {
             const std::filesystem::path canonical =
-                std::filesystem::weakly_canonical(atp::detail::with_plugin_extension(file));
+                std::filesystem::weakly_canonical(detail::with_plugin_extension(file));
             if (std::ranges::find(loaded, canonical) != loaded.end()) {
                 continue;
             }
@@ -227,7 +300,7 @@ inline void build(application& app, const config& cfg, const std::filesystem::pa
             loaded.push_back(canonical);
         }
     }
-    build_pipeline(app.pipe, app.runner, cfg, app.registry);
+    build_pipeline(app.pipe, app.runner, cfg, app.registry, base_dir);
 }
 
 }  // namespace atp::runtime

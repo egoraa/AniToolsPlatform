@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
 #include <atp/mcp/application_control.hpp>
 #include <atp/mcp/control_tools.hpp>
 #include <atp/mcp/resource_registry.hpp>
@@ -17,6 +18,7 @@
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/module.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
 #include <atp/studio/local_runtime.hpp>
 #include <atp/studio/remote_runtime.hpp>
@@ -35,15 +37,14 @@ struct number_inputs : atp::io::inputs {
     atp::io::queued_input<int>& number = make<atp::io::queued_input<int>>("number");
 };
 
-class view_source
-    : public atp::module<atp::io::ports<atp::io::inputs, number_outputs, view_properties>, "view_source"> {
+class view_source : public atp::module<atp::ports<atp::io::inputs, number_outputs, view_properties>, "view_source"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         outputs().number(properties().step.get());
         return atp::work_status::busy;
     }
 };
-class view_sink : public atp::module<atp::io::ports<number_inputs>, "view_sink"> {
+class view_sink : public atp::module<atp::ports<number_inputs>, "view_sink"> {
    public:
     atp::work_status iterate(std::stop_token) override {
         return inputs().number.try_pop() ? atp::work_status::busy : atp::work_status::idle;
@@ -92,7 +93,7 @@ class StudioRuntimeView : public ::testing::Test {
     void SetUp() override {
         app_.registry.add<view_source>();
         app_.registry.add<view_sink>();
-        const atp::runtime::config cfg = atp::runtime::decode(nlohmann::json::parse(view_config));
+        const atp::runtime::config cfg = atp::runtime::decode(atp::runtime::json_parse(view_config));
         atp::runtime::build_pipeline(app_.pipe, app_.runner, cfg, app_.registry);
         app_.runner.start(app_.pipe);
 
@@ -127,7 +128,7 @@ TEST_F(StudioRuntimeView, TheLocalViewAnswersTheSameQuestions) {
     manager.registry().add<view_source>();
     manager.registry().add<view_sink>();
     atp::studio::session run(manager.registry());
-    run.start(atp::runtime::decode(nlohmann::json::parse(view_config)));
+    run.start(atp::runtime::decode(atp::runtime::json_parse(view_config)));
 
     atp::studio::local_runtime view(run);
     check_view(view);

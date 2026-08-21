@@ -7,8 +7,8 @@
 #include <QClipboard>
 #include <QString>
 
+#include <atp/hosting/module_registry.hpp>
 #include <atp/module.hpp>
-#include <atp/module_registry.hpp>
 
 #include "kit/property_grid.hpp"
 #include "model/app_state.hpp"
@@ -24,14 +24,14 @@ struct knob_props : atp::io::properties {
     atp::io::property<int>& step = make<atp::io::property<int>>("step", 1);
     atp::io::property<bool>& loud = make<atp::io::property<bool>>("loud", false);
 };
-class knob_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, knob_props>, "knob"> {};
+class knob_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, knob_props>, "knob"> {};
 
 struct dial_props : atp::io::properties {
     atp::io::property<std::string>& mode =
         make<atp::io::property<std::string>>("mode", "fast", atp::io::allowed("fast", "slow"));
     atp::io::property<int>& gain = make<atp::io::property<int>>("gain", 1);
 };
-class dial_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, dial_props>, "dial"> {};
+class dial_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, dial_props>, "dial"> {};
 
 struct harness {
     app_state state;

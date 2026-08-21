@@ -14,7 +14,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include <atp/console_encoding.hpp>
 #include <atp/mcp/catalog_tools.hpp>
 #include <atp/mcp/document_tools.hpp>
 #include <atp/mcp/execution_tools.hpp>
@@ -26,6 +25,7 @@
 #include <atp/mcp/settings_tools.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/mcp/workspace.hpp>
+#include <atp/runtime/console_encoding.hpp>
 
 namespace {
 
@@ -57,7 +57,7 @@ namespace {
 }  // namespace
 
 int main(int argc, char** argv) {
-    const atp::console_utf8 console;
+    const atp::runtime::console_utf8 console;
     std::optional<atp::mcp::options> args = atp::mcp::parse_options(argc, argv);
     if (!args) {
         std::cerr << atp::mcp::usage;
@@ -67,12 +67,12 @@ int main(int argc, char** argv) {
     try {
         std::FILE* protocol = claim_protocol_stream();
         atp::mcp::workspace ws(args->root, args->plugin_dirs, args->scan_dirs);
-        atp::log_pump logs([&ws] { return ws.run_session().collect_logs(); },
-                           [threshold = args->log_threshold](const atp::log_line& line) {
-                               if (line.level <= threshold) {
-                                   std::cerr << atp::format_log_line(line) << '\n';
-                               }
-                           });
+        atp::runtime::log_pump logs([&ws] { return ws.run_session().collect_logs(); },
+                                    [threshold = args->log_threshold](const atp::runtime::log_line& line) {
+                                        if (line.level <= threshold) {
+                                            std::cerr << atp::runtime::format_log_line(line) << '\n';
+                                        }
+                                    });
         atp::mcp::tool_registry tools;
         atp::mcp::resource_registry resources;
         atp::mcp::register_catalog_tools(tools, ws);

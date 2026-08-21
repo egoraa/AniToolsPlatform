@@ -6,7 +6,7 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/group.hpp>
+#include <atp/runtime/group.hpp>
 
 #include "support/pipeline_test_support.hpp"
 
@@ -34,7 +34,7 @@ class idle_module : public atp::module<> {
 struct sink_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
-using sink_ports = atp::io::ports<sink_inputs, atp::io::outputs, atp::io::properties>;
+using sink_ports = atp::ports<sink_inputs, atp::io::outputs, atp::io::properties>;
 
 class sink_module : public atp::module<sink_ports> {
    public:
@@ -52,27 +52,31 @@ class sink_module : public atp::module<sink_ports> {
     std::string name_;
 };
 
-const atp::group::module_stats* find(const std::vector<atp::group::module_stats>& stats, const std::string& path) {
-    const auto it = std::ranges::find_if(stats, [&](const atp::group::module_stats& s) { return s.path == path; });
+const atp::runtime::group::module_stats* find(const std::vector<atp::runtime::group::module_stats>& stats,
+                                              const std::string& path) {
+    const auto it =
+        std::ranges::find_if(stats, [&](const atp::runtime::group::module_stats& s) { return s.path == path; });
     return it == stats.end() ? nullptr : &*it;
 }
 
-const atp::group::port_stats* find_port(const std::vector<atp::group::port_stats>& ports, const std::string& path) {
-    const auto it = std::ranges::find_if(ports, [&](const atp::group::port_stats& p) { return p.path == path; });
+const atp::runtime::group::port_stats* find_port(const std::vector<atp::runtime::group::port_stats>& ports,
+                                                 const std::string& path) {
+    const auto it =
+        std::ranges::find_if(ports, [&](const atp::runtime::group::port_stats& p) { return p.path == path; });
     return it == ports.end() ? nullptr : &*it;
 }
 
 TEST(GroupMetrics, AreOffByDefaultAndCountNothing) {
     event_log log;
-    atp::group root("root");
+    atp::runtime::group root("root");
     (void)root.make<probe_module>("a", log, "a");
 
     EXPECT_FALSE(root.metrics_enabled());
     (void)root.iterate({});
     (void)root.iterate({});
 
-    const std::vector<atp::group::module_stats> stats = root.metrics();
-    const atp::group::module_stats* a = find(stats, "a");
+    const std::vector<atp::runtime::group::module_stats> stats = root.metrics();
+    const atp::runtime::group::module_stats* a = find(stats, "a");
     ASSERT_NE(a, nullptr);
     EXPECT_EQ(a->calls, 0U);
     EXPECT_EQ(a->total.count(), 0);
@@ -80,7 +84,7 @@ TEST(GroupMetrics, AreOffByDefaultAndCountNothing) {
 
 TEST(GroupMetrics, CountCallsAndBusyPassesSeparately) {
     event_log log;
-    atp::group root("root");
+    atp::runtime::group root("root");
     (void)root.make<probe_module>("busy", log, "busy");
     (void)root.make<idle_module>("lazy", "lazy");
     root.set_metrics_enabled(true);
@@ -89,9 +93,9 @@ TEST(GroupMetrics, CountCallsAndBusyPassesSeparately) {
     (void)root.iterate({});
     (void)root.iterate({});
 
-    const std::vector<atp::group::module_stats> stats = root.metrics();
-    const atp::group::module_stats* busy = find(stats, "busy");
-    const atp::group::module_stats* lazy = find(stats, "lazy");
+    const std::vector<atp::runtime::group::module_stats> stats = root.metrics();
+    const atp::runtime::group::module_stats* busy = find(stats, "busy");
+    const atp::runtime::group::module_stats* lazy = find(stats, "lazy");
     ASSERT_NE(busy, nullptr);
     ASSERT_NE(lazy, nullptr);
     EXPECT_EQ(busy->calls, 3U);
@@ -104,14 +108,14 @@ TEST(GroupMetrics, CountCallsAndBusyPassesSeparately) {
 
 TEST(GroupMetrics, ReportNestedChildrenUnderDottedPaths) {
     event_log log;
-    atp::group root("root");
-    atp::group& stage = root.add_group("stage");
+    atp::runtime::group root("root");
+    atp::runtime::group& stage = root.add_group("stage");
     (void)stage.make<probe_module>("deep", log, "deep");
     root.set_metrics_enabled(true);
 
     (void)root.iterate({});
 
-    const std::vector<atp::group::module_stats> stats = root.metrics();
+    const std::vector<atp::runtime::group::module_stats> stats = root.metrics();
     ASSERT_NE(find(stats, "stage"), nullptr);
     ASSERT_NE(find(stats, "stage.deep"), nullptr);
     EXPECT_EQ(find(stats, "stage")->calls, 1U);
@@ -120,8 +124,8 @@ TEST(GroupMetrics, ReportNestedChildrenUnderDottedPaths) {
 
 TEST(GroupMetrics, ChargeAGroupForItsWholeSubtree) {
     event_log log;
-    atp::group root("root");
-    atp::group& stage = root.add_group("stage");
+    atp::runtime::group root("root");
+    atp::runtime::group& stage = root.add_group("stage");
     (void)stage.make<probe_module>("deep", log, "deep");
     root.set_metrics_enabled(true);
 
@@ -129,29 +133,29 @@ TEST(GroupMetrics, ChargeAGroupForItsWholeSubtree) {
         (void)root.iterate({});
     }
 
-    const std::vector<atp::group::module_stats> stats = root.metrics();
+    const std::vector<atp::runtime::group::module_stats> stats = root.metrics();
     EXPECT_GE(find(stats, "stage")->total.count(), find(stats, "stage.deep")->total.count());
 }
 
 TEST(GroupMetrics, DoNotChargeADetachedChild) {
     event_log log;
-    atp::group root("root");
-    atp::group& stage = root.add_group("stage");
+    atp::runtime::group root("root");
+    atp::runtime::group& stage = root.add_group("stage");
     (void)stage.make<probe_module>("deep", log, "deep");
     root.set_metrics_enabled(true);
     root.set_detached(stage, true);
 
     (void)root.iterate({});
 
-    const std::vector<atp::group::module_stats> stats = root.metrics();
+    const std::vector<atp::runtime::group::module_stats> stats = root.metrics();
     EXPECT_EQ(find(stats, "stage")->calls, 0U);
     EXPECT_EQ(find(stats, "stage.deep")->calls, 0U);
 }
 
 TEST(GroupMetrics, EnablingCascadesIntoSubgroups) {
-    atp::group root("root");
-    atp::group& stage = root.add_group("stage");
-    atp::group& deep = stage.add_group("deep");
+    atp::runtime::group root("root");
+    atp::runtime::group& stage = root.add_group("stage");
+    atp::runtime::group& deep = stage.add_group("deep");
 
     root.set_metrics_enabled(true);
     EXPECT_TRUE(stage.metrics_enabled());
@@ -163,12 +167,12 @@ TEST(GroupMetrics, EnablingCascadesIntoSubgroups) {
 }
 
 TEST(GroupInputMetrics, ReportsEveryPortWithItsDottedPath) {
-    atp::group root("root");
+    atp::runtime::group root("root");
     sink_module& sink = root.make<sink_module>("dst", "dst");
     sink.inputs().get<atp::io::queued_input<int>>("value")(7);
 
-    const std::vector<atp::group::port_stats> ports = root.input_metrics();
-    const atp::group::port_stats* value = find_port(ports, "dst.value");
+    const std::vector<atp::runtime::group::port_stats> ports = root.input_metrics();
+    const atp::runtime::group::port_stats* value = find_port(ports, "dst.value");
     ASSERT_NE(value, nullptr);
     EXPECT_EQ(value->stats.received, 1U);
     EXPECT_EQ(value->stats.pending, 1U);
@@ -176,24 +180,24 @@ TEST(GroupInputMetrics, ReportsEveryPortWithItsDottedPath) {
 }
 
 TEST(GroupInputMetrics, WalksIntoSubgroups) {
-    atp::group root("root");
-    atp::group& stage = root.add_group("stage");
+    atp::runtime::group root("root");
+    atp::runtime::group& stage = root.add_group("stage");
     (void)stage.make<sink_module>("dst", "dst");
 
-    const std::vector<atp::group::port_stats> ports = root.input_metrics();
+    const std::vector<atp::runtime::group::port_stats> ports = root.input_metrics();
     EXPECT_NE(find_port(ports, "stage.dst.value"), nullptr);
 }
 
 TEST(GroupInputMetrics, CountsWhatAPortLostToItsCapacity) {
-    atp::group root("root");
+    atp::runtime::group root("root");
     sink_module& sink = root.make<sink_module>("dst", "dst");
     auto& value = sink.inputs().get<atp::io::queued_input<int>>("value");
     for (int i = 0; i < 40; ++i) {
         value(i);
     }
 
-    const std::vector<atp::group::port_stats> ports = root.input_metrics();
-    const atp::group::port_stats* stats = find_port(ports, "dst.value");
+    const std::vector<atp::runtime::group::port_stats> ports = root.input_metrics();
+    const atp::runtime::group::port_stats* stats = find_port(ports, "dst.value");
     ASSERT_NE(stats, nullptr);
     EXPECT_EQ(stats->stats.received, 40U);
     EXPECT_EQ(stats->stats.discarded, 8U);
@@ -201,15 +205,15 @@ TEST(GroupInputMetrics, CountsWhatAPortLostToItsCapacity) {
 }
 
 TEST(GroupMetrics, CascadeReachesASubgroupAddedThroughTheErasedPath) {
-    atp::group root("root");
-    auto* stage = new atp::group("stage");
+    atp::runtime::group root("root");
+    auto* stage = new atp::runtime::group("stage");
     (void)root.add("stage", atp::module_ptr{stage});
     (void)stage->make<idle_module>("inner", "inner");
 
     root.set_metrics_enabled(true);
 
     EXPECT_TRUE(stage->metrics_enabled());
-    const std::vector<atp::group::module_stats> stats = root.metrics();
+    const std::vector<atp::runtime::group::module_stats> stats = root.metrics();
     EXPECT_NE(find(stats, "stage.inner"), nullptr);
 }
 

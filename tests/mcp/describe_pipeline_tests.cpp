@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/group.hpp>
 #include <atp/mcp/control_tools.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/module.hpp>
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/runtime/group.hpp>
+#include <atp/runtime/pipeline.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 
 #include "support/control_tools_checks.hpp"
 
@@ -26,17 +27,29 @@ struct number_outputs : atp::io::outputs {
 struct number_inputs : atp::io::inputs {
     atp::io::input<int>& number = make<atp::io::input<int>>("number");
 };
+struct reversed_outputs : atp::io::outputs {
+    atp::io::output<int>& zebra = make<atp::io::output<int>>("zebra");
+    atp::io::output<int>& mango = make<atp::io::output<int>>("mango");
+    atp::io::output<int>& apple = make<atp::io::output<int>>("apple");
+};
+struct reversed_properties : atp::io::properties {
+    atp::io::property<int>& width = make<atp::io::property<int>>("width", 1);
+    atp::io::property<int>& height = make<atp::io::property<int>>("height", 2);
+    atp::io::property<int>& depth = make<atp::io::property<int>>("depth", 3);
+};
 
 class described_source
-    : public atp::module<atp::io::ports<atp::io::inputs, number_outputs, mixed_properties>, "described_source"> {};
-class described_sink : public atp::module<atp::io::ports<number_inputs>, "described_sink"> {};
+    : public atp::module<atp::ports<atp::io::inputs, number_outputs, mixed_properties>, "described_source"> {};
+class described_sink : public atp::module<atp::ports<number_inputs>, "described_sink"> {};
+class reversed_module
+    : public atp::module<atp::ports<atp::io::inputs, reversed_outputs, reversed_properties>, "reversed"> {};
 
 class McpDescribePipeline : public ::testing::Test {
    protected:
     void SetUp() override {
-        atp::group& root = pipe_.root();
+        atp::runtime::group& root = pipe_.root();
         root.make<described_source>("src");
-        atp::group& stage = root.add_group("stage");
+        atp::runtime::group& stage = root.add_group("stage");
         stage.make<described_sink>("inner");
         stage.expose_input("in", "inner.number");
         root.connect("src.number", "stage.in");
@@ -52,8 +65,8 @@ class McpDescribePipeline : public ::testing::Test {
         return atp_tests::call_tool(tools_, "describe_pipeline");
     }
 
-    atp::pipeline pipe_;
-    atp::pipeline_runner runner_;
+    atp::runtime::pipeline pipe_;
+    atp::runtime::pipeline_runner runner_;
     atp_tests::pipeline_view view_{pipe_, runner_};
     atp::mcp::tool_registry tools_;
 };
@@ -84,6 +97,42 @@ TEST_F(McpDescribePipeline, ReportsThePropertyKindSoAClientCanPickAnEditor) {
     EXPECT_EQ(properties.at(1).at("kind"), "boolean");
     EXPECT_EQ(properties.at(2).at("name"), "tag");
     EXPECT_EQ(properties.at(2).at("kind"), "text");
+}
+
+class McpDeclarationOrder : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        pipe_.root().make<reversed_module>("rev");
+        runner_.start(pipe_);
+        atp::mcp::register_control_tools(tools_, view_);
+    }
+
+    void TearDown() override {
+        runner_.stop();
+    }
+
+    atp::runtime::pipeline pipe_;
+    atp::runtime::pipeline_runner runner_;
+    atp_tests::pipeline_view view_{pipe_, runner_};
+    atp::mcp::tool_registry tools_;
+};
+
+TEST_F(McpDeclarationOrder, PortsAndPropertiesComeOutAsDeclared) {
+    const nlohmann::json described = atp_tests::call_tool(tools_, "describe_pipeline");
+    ASSERT_EQ(described.at("modules").size(), 1u);
+    const nlohmann::json& node = described.at("modules").at(0);
+
+    std::vector<std::string> outputs;
+    for (const nlohmann::json& p : node.at("outputs")) {
+        outputs.push_back(p.at("name").get<std::string>());
+    }
+    EXPECT_EQ(outputs, (std::vector<std::string>{"zebra", "mango", "apple"}));
+
+    std::vector<std::string> properties;
+    for (const nlohmann::json& p : node.at("properties")) {
+        properties.push_back(p.at("name").get<std::string>());
+    }
+    EXPECT_EQ(properties, (std::vector<std::string>{"width", "height", "depth"}));
 }
 
 }  // namespace

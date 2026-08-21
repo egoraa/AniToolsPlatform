@@ -10,10 +10,10 @@
 
 #include <benchmark/benchmark.h>
 
-#include <atp/group.hpp>
 #include <atp/module.hpp>
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/runtime/group.hpp>
+#include <atp/runtime/pipeline.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 
 namespace {
 
@@ -22,7 +22,7 @@ using clock_type = std::chrono::steady_clock;
 struct source_outputs : atp::io::outputs {
     atp::io::output<std::int64_t>& tick = make<atp::io::output<std::int64_t>>("tick");
 };
-using source_ports = atp::io::ports<atp::io::inputs, source_outputs, atp::io::properties>;
+using source_ports = atp::ports<atp::io::inputs, source_outputs, atp::io::properties>;
 
 class source_module : public atp::module<source_ports, "bench_source", atp::ver<"1.0">> {
    public:
@@ -39,7 +39,7 @@ struct sink_inputs : atp::io::inputs {
     atp::io::queued_input<std::int64_t>& tick =
         make<atp::io::queued_input<std::int64_t>>("tick", atp::io::drop_oldest(1 << 20));
 };
-using sink_ports = atp::io::ports<sink_inputs, atp::io::outputs, atp::io::properties>;
+using sink_ports = atp::ports<sink_inputs, atp::io::outputs, atp::io::properties>;
 
 class sink_module : public atp::module<sink_ports, "bench_sink", atp::ver<"1.0">> {
    public:
@@ -58,7 +58,7 @@ class sink_module : public atp::module<sink_ports, "bench_sink", atp::ver<"1.0">
 struct probe_outputs : atp::io::outputs {
     atp::io::output<std::int64_t>& stamp = make<atp::io::output<std::int64_t>>("stamp");
 };
-using probe_ports = atp::io::ports<atp::io::inputs, probe_outputs, atp::io::properties>;
+using probe_ports = atp::ports<atp::io::inputs, probe_outputs, atp::io::properties>;
 
 class probe_source : public atp::module<probe_ports, "bench_probe_source", atp::ver<"1.0">> {
    public:
@@ -76,7 +76,7 @@ class probe_source : public atp::module<probe_ports, "bench_probe_source", atp::
 struct waker_inputs : atp::io::inputs {
     atp::io::queued_input<std::int64_t>& stamp = make<atp::io::queued_input<std::int64_t>>("stamp");
 };
-using waker_ports = atp::io::ports<waker_inputs, atp::io::outputs, atp::io::properties>;
+using waker_ports = atp::ports<waker_inputs, atp::io::outputs, atp::io::properties>;
 
 class probe_sink : public atp::module<waker_ports, "bench_probe_sink", atp::ver<"1.0">> {
    public:
@@ -98,11 +98,11 @@ void run_throughput(benchmark::State& state, bool split_threads) {
     double seconds = 0.0;
 
     for (auto _ : state) {
-        atp::pipeline pipe;
+        atp::runtime::pipeline pipe;
         sink_module* sink = nullptr;
         if (split_threads) {
-            atp::group& producing = pipe.root().add_group("producing");
-            atp::group& consuming = pipe.root().add_group("consuming");
+            atp::runtime::group& producing = pipe.root().add_group("producing");
+            atp::runtime::group& consuming = pipe.root().add_group("consuming");
             (void)producing.make<source_module>("src");
             sink = &consuming.make<sink_module>("dst");
             producing.expose_output("out", "src.tick");
@@ -114,10 +114,10 @@ void run_throughput(benchmark::State& state, bool split_threads) {
             pipe.root().connect("src.tick", "dst.tick");
         }
 
-        atp::pipeline_runner runner;
-        runner.add_thread("a", {atp::thread_mode::spinning});
+        atp::runtime::pipeline_runner runner;
+        runner.add_thread("a", {atp::runtime::thread_mode::spinning});
         if (split_threads) {
-            runner.add_thread("b", {atp::thread_mode::spinning});
+            runner.add_thread("b", {atp::runtime::thread_mode::spinning});
             runner.assign(*pipe.root().find_group("producing"), "a");
             runner.assign(*pipe.root().find_group("consuming"), "b");
         }
@@ -149,18 +149,18 @@ void pipeline_two_threads(benchmark::State& state) {
 BENCHMARK(pipeline_two_threads)->UseManualTime()->Unit(benchmark::kMillisecond);
 
 void on_demand_wakeup(benchmark::State& state) {
-    atp::pipeline pipe;
-    atp::group& producing = pipe.root().add_group("producing");
-    atp::group& consuming = pipe.root().add_group("consuming");
+    atp::runtime::pipeline pipe;
+    atp::runtime::group& producing = pipe.root().add_group("producing");
+    atp::runtime::group& consuming = pipe.root().add_group("consuming");
     probe_source& src = producing.make<probe_source>("src");
     probe_sink& dst = consuming.make<probe_sink>("dst");
     producing.expose_output("out", "src.stamp");
     consuming.expose_input("in", "dst.stamp");
     pipe.root().connect("producing.out", "consuming.in");
 
-    atp::pipeline_runner runner;
-    runner.add_thread("producing", {atp::thread_mode::spinning});
-    runner.add_thread("consuming", {atp::thread_mode::on_demand});
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("producing", {atp::runtime::thread_mode::spinning});
+    runner.add_thread("consuming", {atp::runtime::thread_mode::on_demand});
     runner.assign(producing, "producing");
     runner.assign(consuming, "consuming");
     runner.start(pipe);

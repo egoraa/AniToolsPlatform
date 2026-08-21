@@ -2,12 +2,12 @@
 #include <iostream>
 #include <stop_token>
 
-#include <atp/module_loader.hpp>
-#include <atp/null_host.hpp>
+#include <atp/hosting/null_host.hpp>
+#include <atp/runtime/module_loader.hpp>
 
 int main() {
     atp::module_registry registry;
-    atp::module_loader plugin{ATP_DEMO_PLUGIN, registry};
+    atp::runtime::module_loader plugin{ATP_DEMO_PLUGIN, registry};
 
     std::cout << "plugin " << plugin.path().string() << " modules:\n";
     for (const auto* factory : registry.list()) {

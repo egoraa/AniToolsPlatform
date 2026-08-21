@@ -4,10 +4,12 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
 #include <atp/mcp/control_tools.hpp>
 #include <atp/mcp/tool_registry.hpp>
 #include <atp/module.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
 #include <atp/studio/project_from_description.hpp>
 
@@ -27,8 +29,8 @@ struct number_inputs : atp::io::inputs {
 };
 
 class mirror_source
-    : public atp::module<atp::io::ports<atp::io::inputs, number_outputs, mirror_properties>, "mirror_source"> {};
-class mirror_sink : public atp::module<atp::io::ports<number_inputs>, "mirror_sink"> {};
+    : public atp::module<atp::ports<atp::io::inputs, number_outputs, mirror_properties>, "mirror_source"> {};
+class mirror_sink : public atp::module<atp::ports<number_inputs>, "mirror_sink"> {};
 
 constexpr const char* mirror_config = R"({
     "version": "3.0",
@@ -50,7 +52,7 @@ class StudioProjectFromDescription : public ::testing::Test {
     void SetUp() override {
         app_.registry.add<mirror_source>();
         app_.registry.add<mirror_sink>();
-        const atp::runtime::config cfg = atp::runtime::decode(nlohmann::json::parse(mirror_config));
+        const atp::runtime::config cfg = atp::runtime::decode(atp::runtime::json_parse(mirror_config));
         atp::runtime::build_pipeline(app_.pipe, app_.runner, cfg, app_.registry);
         app_.runner.start(app_.pipe);
         atp::mcp::register_control_tools(tools_, view_);
@@ -69,9 +71,10 @@ TEST_F(StudioProjectFromDescription, RebuildsTheConfigTheRemoteWasBuiltFrom) {
     const nlohmann::json described = atp_tests::call_tool(tools_, "describe_pipeline");
     const atp::studio::project mirror = atp::studio::project_from_description(described);
 
-    const nlohmann::json rebuilt = atp::runtime::encode(mirror.config());
-    const nlohmann::json original = atp::runtime::encode(atp::runtime::decode(nlohmann::json::parse(mirror_config)));
-    EXPECT_EQ(rebuilt.at("pipeline"), original.at("pipeline"));
+    const atp::config::node rebuilt = atp::runtime::encode(mirror.config());
+    const atp::config::node original =
+        atp::runtime::encode(atp::runtime::decode(atp::runtime::json_parse(mirror_config)));
+    EXPECT_EQ(atp::runtime::json_dump(rebuilt.at("pipeline")), atp::runtime::json_dump(original.at("pipeline")));
 }
 
 TEST_F(StudioProjectFromDescription, GivesEveryNodeAPositionSoTheCanvasCanDrawIt) {

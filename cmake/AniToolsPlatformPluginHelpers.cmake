@@ -44,7 +44,7 @@ function(atp_add_plugin name)
 
     set_target_properties(${name} PROPERTIES
             # Hidden visibility is what forces type identity across the plugin boundary to be decided
-            # by name (include/atp/type_compare.hpp) rather than by the address of a per-library
+            # by name (include/atp/support/type_compare.hpp) rather than by the address of a per-library
             # static — the discipline the io layer is built on. The C setting matters only for a
             # C_ABI plugin, where the handshake symbols carry the export attribute themselves and
             # everything else has no business leaving the file.
@@ -52,12 +52,26 @@ function(atp_add_plugin name)
             C_VISIBILITY_PRESET hidden
             VISIBILITY_INLINES_HIDDEN ON
             # One file name on every toolchain: no "lib" prefix, an explicit output name. A config may
-            # write a plugin path without an extension, and atp::module_loader appends the platform
+            # write a plugin path without an extension, and atp::runtime::module_loader appends the platform
             # one, so the name is part of the format rather than a matter of taste.
             PREFIX ""
             OUTPUT_NAME "${arg_OUTPUT_NAME}")
 
-    # CMake gives a MODULE library the .so suffix on Apple, where atp::plugin_extension says .dylib.
+    # Where the platform's own build puts its plugins: next to the hosts that load them, in the
+    # directory ATP_PLUGIN_DIRNAME names, so nothing has to be copied there afterwards. A MODULE
+    # library is a LIBRARY artifact on every platform, Windows included, so LIBRARY_OUTPUT_DIRECTORY
+    # is the one that governs the file.
+    #
+    # Guarded because this file is installed verbatim and included by the package config: an
+    # out-of-tree author defines nothing here and gets CMake's default, which is their own build
+    # directory and none of our business. A subdirectory that needs its plugins elsewhere overrides
+    # the variable for itself — tests/test_plugin is the one that does.
+    if (DEFINED ATP_PLUGIN_OUTPUT_DIRECTORY)
+        set_target_properties(${name} PROPERTIES
+                LIBRARY_OUTPUT_DIRECTORY "${ATP_PLUGIN_OUTPUT_DIRECTORY}")
+    endif ()
+
+    # CMake gives a MODULE library the .so suffix on Apple, where atp::runtime::plugin_extension says .dylib.
     # Left alone, the file would still load by an explicit path while the extensionless config form
     # and the scan of a plugin directory would both stop finding it — on that platform only.
     if (APPLE)

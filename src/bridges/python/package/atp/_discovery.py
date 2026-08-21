@@ -93,17 +93,21 @@ def _discover(paths):
     return table
 
 
-def _create(index, ctx, config=None):
+def _create(index, ctx, config=None, config_text="", config_origin="", config_opaque=False):
     """Instantiate the class the descriptor at `index` came from and bind its ports.
 
     The ports are bound after __init__ has run, so a constructor cannot reach them; that is what
-    initialize is for, and the class docstring says so. `config` is bound before __init__ for the
-    opposite reason: it is the setting a module is allowed to know while deciding what it is, so the
-    constructor has to be able to read self.config.
+    initialize is for, and the class docstring says so. Everything about the config is bound before
+    __init__ for the opposite reason: it is what a module is allowed to know while deciding what it is,
+    so the constructor has to be able to read self.config and, for a format the host does not parse,
+    self.config_text.
     """
     cls = _REGISTRY[index]
     instance = cls.__new__(cls)
     instance.config = config
+    instance.config_text = config_text
+    instance.config_origin = config_origin
+    instance.config_opaque = config_opaque
     instance.__init__()
     instance._ctx = ctx
     for position, declaration in enumerate(cls._inputs):

@@ -7,8 +7,8 @@
 #include <string>
 #include <string_view>
 
-#include <atp/group.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/group.hpp>
 
 namespace atp::runtime {
 

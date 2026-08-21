@@ -2,13 +2,13 @@
 #include <string>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
+#include <atp/hosting/module_registry.hpp>
 #include <atp/module.hpp>
-#include <atp/module_registry.hpp>
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
+#include <atp/runtime/pipeline.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 #include <atp/studio/project.hpp>
 #include <atp/studio/property_sync.hpp>
 
@@ -21,7 +21,7 @@ struct sync_props : atp::io::properties {
     atp::io::property<bool>& verbose = make<atp::io::property<bool>>("verbose", false);
     atp::io::property<std::string>& scratch = make<atp::io::property<std::string>>("scratch", "", atp::io::transient);
 };
-class sync_module : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, sync_props>, "syncer"> {};
+class sync_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, sync_props>, "syncer"> {};
 
 TEST(StudioPropertySync, PullsPersistentValuesIntoProject) {
     atp::module_registry registry;
@@ -30,8 +30,8 @@ TEST(StudioPropertySync, PullsPersistentValuesIntoProject) {
     proj.add_module("", "syncer");
     proj.set_property("", "syncer", "limit", 999);
 
-    atp::pipeline pipe;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
     atp::runtime::build_pipeline(pipe, runner, proj.config(), registry);
 
     auto* m = pipe.root().find_module("syncer");
@@ -44,8 +44,8 @@ TEST(StudioPropertySync, PullsPersistentValuesIntoProject) {
 
     const auto& props = atp_tests::required(proj.config().pipeline.modules[0].module).properties;
     ASSERT_EQ(props.size(), 2u);
-    EXPECT_EQ(props[0].second, nlohmann::json(42));
-    EXPECT_EQ(props[1].second, nlohmann::json(true));
+    EXPECT_EQ(props[0].second, atp::config::node(42));
+    EXPECT_EQ(props[1].second, atp::config::node(true));
 }
 
 TEST(StudioPropertySync, DefaultValuesAreDroppedFromProject) {
@@ -55,8 +55,8 @@ TEST(StudioPropertySync, DefaultValuesAreDroppedFromProject) {
     proj.add_module("", "syncer");
     proj.set_property("", "syncer", "limit", 42);
 
-    atp::pipeline pipe;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
     atp::runtime::build_pipeline(pipe, runner, proj.config(), registry);
     pipe.root().find_module("syncer")->properties().at("limit").from_string("10");
 

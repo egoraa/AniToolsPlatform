@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -16,18 +17,18 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/hosting/module_registry.hpp>
 #include <atp/io.hpp>
 #include <atp/module.hpp>
-#include <atp/module_base.hpp>
-#include <atp/module_context.hpp>
-#include <atp/module_host.hpp>
-#include <atp/module_loader.hpp>
-#include <atp/module_registry.hpp>
-#include <atp/service_directory.hpp>
+#include <atp/module/module_base.hpp>
+#include <atp/module/module_context.hpp>
+#include <atp/module/module_host.hpp>
+#include <atp/module/service_directory.hpp>
+#include <atp/runtime/module_loader.hpp>
 #include <atp/studio/languages.hpp>
 #include <atp/studio/module_manager.hpp>
 #include <atp/studio/script_modules.hpp>
-#include <atp/version.hpp>
+#include <atp/support/version.hpp>
 
 namespace {
 
@@ -63,7 +64,7 @@ struct probe_outputs : atp::io::outputs {
     atp::io::output<atp::io::blob>& bytes = make<atp::io::output<atp::io::blob>>("bytes");
 };
 
-class probe_module : public atp::module<atp::io::ports<probe_inputs, probe_outputs>, "py_test_host"> {};
+class probe_module : public atp::module<atp::ports<probe_inputs, probe_outputs>, "py_test_host"> {};
 
 class recording_host final : public atp::module_host {
    public:
@@ -102,13 +103,13 @@ class python_bridge_test : public ::testing::Test {
     }
 
     [[nodiscard]] bool registered(const std::string& name, atp::version expected) const {
-        return std::ranges::any_of(loader_->modules(), [&name, expected](const atp::registered_module& m) {
+        return std::ranges::any_of(loader_->modules(), [&name, expected](const atp::runtime::registered_module& m) {
             return m.name == name && m.ver == expected;
         });
     }
 
     [[nodiscard]] std::string source_of(const std::string& name) const {
-        for (const atp::registered_module& m : loader_->modules()) {
+        for (const atp::runtime::registered_module& m : loader_->modules()) {
             if (m.name == name) {
                 return m.source;
             }
@@ -116,12 +117,26 @@ class python_bridge_test : public ::testing::Test {
         return {};
     }
 
+    [[nodiscard]] static std::filesystem::path own_scripts_dir() {
+        return std::filesystem::path(ATP_PYTHON_BRIDGE).parent_path() / "python";
+    }
+
+    [[nodiscard]] std::size_t registered_from(const std::filesystem::path& dir) const {
+        std::error_code ec;
+        const std::filesystem::path root = std::filesystem::weakly_canonical(dir, ec);
+        return static_cast<std::size_t>(
+            std::ranges::count_if(loader_->modules(), [&root](const atp::runtime::registered_module& m) {
+                std::error_code inner;
+                return std::filesystem::weakly_canonical(std::filesystem::path(m.source).parent_path(), inner) == root;
+            }));
+    }
+
     void create(const std::string& name) {
         module_ = registry_.create(name);
         ASSERT_NE(module_, nullptr);
     }
 
-    void create(const std::string& name, const atp::config_value& cfg) {
+    void create(const std::string& name, const atp::module_config& cfg) {
         module_ = registry_.create(name, cfg);
         ASSERT_NE(module_, nullptr);
     }
@@ -144,7 +159,7 @@ class python_bridge_test : public ::testing::Test {
     }
 
     atp::module_registry registry_;
-    std::optional<atp::module_loader> loader_;
+    std::optional<atp::runtime::module_loader> loader_;
     probe_module host_;
     atp::module_ptr module_;
     atp::service_directory services_;
@@ -163,7 +178,10 @@ std::string unique_module_name(std::string_view stem) {
 TEST_F(python_bridge_test, LoadsWithNoModulesWhenNothingIsScanned) {
     scan("");
     load();
-    EXPECT_TRUE(loader_->modules().empty());
+    EXPECT_EQ(loader_->modules().size(), registered_from(own_scripts_dir()))
+        << "an empty ATP_PYTHON_PATH must add no directory of its own; everything registered has to come "
+           "from python/ beside the bridge, which in a build tree and in an installation alike also holds "
+           "the sample pipeline's scripts";
 }
 
 TEST_F(python_bridge_test, RegistersAModuleDeclaredByAScript) {
@@ -327,7 +345,9 @@ TEST_F(python_bridge_test, ReachesTheStudioPaletteThroughAScannedDirectory) {
 TEST_F(python_bridge_test, SkipsABrokenScriptAndKeepsItsNeighbour) {
     scan(ATP_PYTHON_BRIDGE_SCRIPTS_BROKEN);
     load();
-    EXPECT_EQ(loader_->modules().size(), 1u);
+    EXPECT_EQ(registered_from(ATP_PYTHON_BRIDGE_SCRIPTS_BROKEN), 1u)
+        << "one unimportable script must not take the directory down with it, and the count is of that "
+           "directory alone: python/ beside the bridge carries the sample scripts too";
     EXPECT_NE(registry_.find("py_neighbour"), nullptr);
 }
 
@@ -439,8 +459,14 @@ TEST(PythonBridgeReload, ASecondBridgeInOneProcessRegistersButCannotCreate) {
     ASSERT_NE(copy.registry().find(module_name), nullptr);
 
     const atp::studio::module_info info = atp::studio::module_manager::describe(copy.registry().at(module_name));
-    EXPECT_TRUE(info.broken) << "a second bridge copy sharing one interpreter is expected to fail at creation";
-    EXPECT_TRUE(info.error.contains("create refused")) << info.error;
+    EXPECT_FALSE(info.broken) << "the descriptor is the losing copy's own, so what the module declares is "
+                                 "answerable without an interpreter behind it";
+    try {
+        (void)copy.registry().create(module_name);
+        FAIL() << "a second bridge copy sharing one interpreter is expected to fail at creation";
+    } catch (const std::exception& e) {
+        EXPECT_NE(std::string(e.what()).find("create refused"), std::string::npos) << e.what();
+    }
 
     std::error_code ignored;
     std::filesystem::remove(done.scripts_dir / (module_name + ".py"), ignored);
@@ -620,14 +646,14 @@ class Probe(atp.Module):
 #endif
 
     atp::module_registry registry;
-    const atp::module_loader loader(ATP_PYTHON_BRIDGE, registry);
+    const atp::runtime::module_loader loader(ATP_PYTHON_BRIDGE, registry);
 
     ASSERT_NE(registry.find("py_non_ascii"), nullptr)
         << "a narrow read of the scan variable replaces what the code page cannot represent, and the "
            "directory is then silently not there";
 
     std::string reported;
-    for (const atp::registered_module& m : loader.modules()) {
+    for (const atp::runtime::registered_module& m : loader.modules()) {
         if (m.name == "py_non_ascii") {
             reported = m.source;
         }
@@ -645,11 +671,11 @@ class Probe(atp.Module):
 TEST_F(python_bridge_test, ConfigReachesAScriptAsADict) {
     scan(ATP_PYTHON_BRIDGE_SCRIPTS);
     load();
-    create("py_config", atp::config_value::object({
-                            {"channels", atp::config_value::array({1, 2, 6})},
+    create("py_config", atp::module_config(atp::config::node::object({
+                            {"channels", atp::config::node::array({1, 2, 6})},
                             {"name", "rig"},
-                            {"nested", atp::config_value::object({{"deep", true}})},
-                        }));
+                            {"nested", atp::config::node::object({{"deep", true}})},
+                        })));
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -666,4 +692,41 @@ TEST_F(python_bridge_test, AScriptWithNoConfigSeesNone) {
 
     EXPECT_EQ(pass(), atp::work_status::busy);
     EXPECT_EQ(host_.inputs().text.get(), "config=None");
+}
+
+TEST_F(python_bridge_test, AnOpaqueConfigReachesAScriptAsTextAndOrigin) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    create("py_config_text", atp::module_config::opaque("rate = 48000\n", "rig.ini"));
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text-len=13 origin=rig.ini opaque=True rate=none");
+}
+
+TEST_F(python_bridge_test, AParsedConfigLeavesTheTextEmptyAndTheTreeReadable) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    create("py_config_text",
+           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}})));
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text-len=0 origin=none opaque=False rate=48000");
+}
+
+TEST_F(python_bridge_test, AConfigFileThatIsNotUtf8FailsCreationNamingIt) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    try {
+        module_ =
+            registry_.create("py_config_text", atp::module_config::opaque(std::string("\xff\xfe rate", 7), "rig.ini"));
+        FAIL() << "text that is not UTF-8 must not reach a script as if it were";
+    } catch (const std::runtime_error& e) {
+        const std::string message = e.what();
+        EXPECT_NE(message.find("rig.ini"), std::string::npos) << message;
+        EXPECT_NE(message.find("UnicodeDecodeError"), std::string::npos) << message;
+    }
 }

@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <array>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <latch>
+#include <memory>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
+#include <atp/config/read.hpp>
 #include <atp/module.hpp>
+#include <atp/runtime/config_loader.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
 
 namespace {
@@ -25,13 +31,13 @@ struct feed_outputs : atp::io::outputs {
 struct drain_inputs : atp::io::inputs {
     atp::io::queued_input<int>& value = make<atp::io::queued_input<int>>("value");
 };
-using feed_ports = atp::io::ports<atp::io::inputs, feed_outputs>;
-using drain_ports = atp::io::ports<drain_inputs>;
+using feed_ports = atp::ports<atp::io::inputs, feed_outputs>;
+using drain_ports = atp::ports<drain_inputs>;
 
 struct sink_props : atp::io::properties {
     atp::io::property<std::string>& tag = make<atp::io::property<std::string>>("tag");
 };
-using sink_ports = atp::io::ports<drain_inputs, atp::io::outputs, sink_props>;
+using sink_ports = atp::ports<drain_inputs, atp::io::outputs, sink_props>;
 
 class one_shot_source : public atp::module<feed_ports, "one_shot"> {
    public:
@@ -82,12 +88,14 @@ struct limiter_props : atp::io::properties {
     atp::io::property<sink_overflow>& on_overflow =
         make<atp::io::property<sink_overflow>>("on_overflow", sink_overflow::drop);
     atp::io::property<int>& channels = make<atp::io::property<int>>("channels", 2, atp::io::allowed(1, 2, 6));
+    atp::io::property<double>& gain = make("gain", 1.0);
 };
-class limit_sink : public atp::module<atp::io::ports<atp::io::inputs, atp::io::outputs, limiter_props>, "limiter"> {};
+class limit_sink : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, limiter_props>, "limiter"> {};
 
-class config_reading_module : public atp::module<atp::io::ports<>, "config_reader"> {
+class config_reading_module : public atp::module<atp::ports<>, "config_reader"> {
    public:
-    explicit config_reading_module(const atp::config_value& cfg) : channels_(cfg.int_at("channels", 0)) {}
+    explicit config_reading_module(const atp::module_config& cfg)
+        : channels_(atp::config::int_or(cfg.find("channels"), 0)) {}
 
     [[nodiscard]] std::int64_t channels() const {
         return channels_;
@@ -97,9 +105,9 @@ class config_reading_module : public atp::module<atp::io::ports<>, "config_reade
     std::int64_t channels_;
 };
 
-class config_probing_module : public atp::module<atp::io::ports<>, "config_probe"> {
+class config_probing_module : public atp::module<atp::ports<>, "config_probe"> {
    public:
-    explicit config_probing_module(const atp::config_value& cfg) : saw_null_(cfg.is_null()) {}
+    explicit config_probing_module(const atp::module_config& cfg) : saw_null_(cfg.root().is_null()) {}
 
     [[nodiscard]] bool saw_null() const {
         return saw_null_;
@@ -109,11 +117,64 @@ class config_probing_module : public atp::module<atp::io::ports<>, "config_probe
     bool saw_null_;
 };
 
+class config_text_module : public atp::module<atp::ports<>, "config_text"> {
+   public:
+    explicit config_text_module(const atp::module_config& cfg)
+        : text_(cfg.text()), origin_(cfg.origin()), opaque_(cfg.is_opaque()) {}
+
+    [[nodiscard]] const std::string& text() const {
+        return text_;
+    }
+
+    [[nodiscard]] const std::string& origin() const {
+        return origin_;
+    }
+
+    [[nodiscard]] bool opaque() const {
+        return opaque_;
+    }
+
+   private:
+    std::string text_;
+    std::string origin_;
+    bool opaque_;
+};
+
 atp::runtime::config make_config(const char* text) {
-    const nlohmann::json doc = nlohmann::json::parse(text);
-    const auto errors = atp::runtime::validate(doc);
+    const atp::config::node doc = atp::runtime::json_parse(text);
+    const auto errors = atp::runtime::validate((doc));
     EXPECT_TRUE(errors.empty());
     return atp::runtime::decode(doc);
+}
+
+std::filesystem::path make_temp_dir(const std::string& tag) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("atp_cfg_" + tag);
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+void write_text(const std::filesystem::path& file, std::string_view body) {
+    std::ofstream out(file, std::ios::binary);
+    out.write(body.data(), static_cast<std::streamsize>(body.size()));
+}
+
+void register_config_modules(atp::module_registry& registry) {
+    registry.add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
+    registry.add(std::make_unique<atp::module_factory<config_text_module>>("config_text"));
+}
+
+std::string build_error(const atp::runtime::config& cfg, const std::filesystem::path& base_dir) {
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::module_registry registry;
+    register_config_modules(registry);
+    try {
+        atp::runtime::build_pipeline(pipe, runner, cfg, registry, base_dir);
+    } catch (const atp::runtime::config_error& e) {
+        return e.what();
+    }
+    return {};
 }
 
 TEST(PipelineBuilder, BuildsTreePropertiesAndRuns) {
@@ -211,6 +272,51 @@ TEST(PipelineBuilder, UnknownEnumNameListsOptions) {
     } catch (const atp::runtime::config_error& e) {
         EXPECT_NE(std::string(e.what()).find("explode"), std::string::npos);
         EXPECT_NE(std::string(e.what()).find("drop, block"), std::string::npos);
+    }
+}
+
+TEST(PipelineBuilder, AWholeValuedRealReachesARealProperty) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.0",
+        "pipeline": {"modules": [{"module": "limiter", "properties": {"gain": 48000.0}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    atp::runtime::build(app, cfg, ".");
+    auto* m = app.pipe.root().find_module("limiter");
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->properties().at("gain").to_string(), "48000");
+}
+
+TEST(PipelineBuilder, AWholeValuedRealDoesNotSatisfyAnIntegerProperty) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.0",
+        "pipeline": {"modules": [{"module": "limiter", "properties": {"limit": 5.0}}]}
+    })");
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    try {
+        atp::runtime::build(app, cfg, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        EXPECT_NE(std::string(e.what()).find("5.0"), std::string::npos);
+    }
+}
+
+TEST(PipelineBuilder, ANonScalarPropertyValueNamesThePropertyAndTheForm) {
+    const atp::runtime::config cfg = atp::runtime::decode(atp::runtime::json_parse(R"({
+        "version": "3.0",
+        "pipeline": {"modules": [{"module": "limiter", "properties": {"limit": [1, 2]}}]}
+    })"));
+    atp::runtime::application app;
+    app.registry.add<limit_sink>();
+    try {
+        atp::runtime::build(app, cfg, ".");
+        FAIL() << "expected config_error";
+    } catch (const atp::runtime::config_error& e) {
+        const std::string text = e.what();
+        EXPECT_NE(text.find("limit"), std::string::npos);
+        EXPECT_NE(text.find("array"), std::string::npos);
     }
 }
 
@@ -352,8 +458,8 @@ TEST(PipelineBuilder, BuildsIntoPrefilledRegistry) {
 
     atp::module_registry registry;
     registry.add<one_shot_source>();
-    atp::pipeline pipe;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
     atp::runtime::build_pipeline(pipe, runner, cfg, registry);
 
     EXPECT_NE(pipe.root().find_module("one_shot"), nullptr);
@@ -369,8 +475,8 @@ TEST(PipelineBuilder, InlineConfigReachesTheModule) {
 
     atp::module_registry registry;
     registry.add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
-    atp::pipeline pipe;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
     atp::runtime::build_pipeline(pipe, runner, cfg, registry);
 
     EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
@@ -385,8 +491,8 @@ TEST(PipelineBuilder, ReferencedConfigReachesTheModule) {
 
     atp::module_registry registry;
     registry.add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
-    atp::pipeline pipe;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
     atp::runtime::build_pipeline(pipe, runner, cfg, registry);
 
     EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
@@ -400,11 +506,200 @@ TEST(PipelineBuilder, AbsentConfigIsNullNotAnEmptyObject) {
 
     atp::module_registry registry;
     registry.add(std::make_unique<atp::module_factory<config_probing_module>>("config_probe"));
-    atp::pipeline pipe;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
     atp::runtime::build_pipeline(pipe, runner, cfg, registry);
 
     EXPECT_TRUE(dynamic_cast<config_probing_module*>(pipe.root().find_module("config_probe"))->saw_null());
+}
+
+TEST(PipelineBuilderFileConfig, ParsesAJsonFile) {
+    const std::filesystem::path dir = make_temp_dir("json");
+    write_text(dir / "rig.json", R"({"channels": 6})");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
+    })");
+
+    atp::module_registry registry;
+    register_config_modules(registry);
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, cfg, registry, dir);
+
+    const auto* m = dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"));
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->channels(), 6);
+}
+
+TEST(PipelineBuilderFileConfig, HandsAnUnknownFormatOverAsText) {
+    const std::filesystem::path dir = make_temp_dir("opaque");
+    write_text(dir / "rig.ini", "rate = 48000\n");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_text", "config": "file:rig.ini"}]}
+    })");
+
+    atp::module_registry registry;
+    register_config_modules(registry);
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, cfg, registry, dir);
+
+    const auto* m = dynamic_cast<config_text_module*>(pipe.root().find_module("config_text"));
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->text(), "rate = 48000\n");
+    EXPECT_TRUE(m->opaque());
+    EXPECT_NE(m->origin().find("rig.ini"), std::string::npos);
+}
+
+TEST(PipelineBuilderFileConfig, AParsedJsonFileIsNotOpaqueAndStillCarriesItsText) {
+    const std::filesystem::path dir = make_temp_dir("both");
+    write_text(dir / "rig.json", R"({"channels": 6})");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_text", "config": "file:rig.json"}]}
+    })");
+
+    atp::module_registry registry;
+    register_config_modules(registry);
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, cfg, registry, dir);
+
+    const auto* m = dynamic_cast<config_text_module*>(pipe.root().find_module("config_text"));
+    ASSERT_NE(m, nullptr);
+    EXPECT_FALSE(m->opaque());
+    EXPECT_EQ(m->text(), R"({"channels": 6})");
+}
+
+TEST(PipelineBuilderFileConfig, MissingFileIsConfigError) {
+    const std::filesystem::path dir = make_temp_dir("missing");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:absent.json"}]}
+    })");
+    const std::string message = build_error(cfg, dir);
+    EXPECT_NE(message.find("cannot open config file"), std::string::npos);
+    EXPECT_NE(message.find("absent.json"), std::string::npos);
+}
+
+TEST(PipelineBuilderFileConfig, ADirectoryIsConfigError) {
+    const std::filesystem::path dir = make_temp_dir("dir");
+    std::filesystem::create_directories(dir / "rig.json");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
+    })");
+    EXPECT_NE(build_error(cfg, dir).find("is a directory"), std::string::npos);
+}
+
+TEST(PipelineBuilderFileConfig, BrokenJsonIsConfigErrorNamingThePosition) {
+    const std::filesystem::path dir = make_temp_dir("broken");
+    write_text(dir / "rig.json", R"({"channels": 6,})");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
+    })");
+    const std::string message = build_error(cfg, dir);
+    EXPECT_NE(message.find("cannot parse config file"), std::string::npos);
+    EXPECT_NE(message.find("at line 1"), std::string::npos);
+}
+
+TEST(PipelineBuilderFileConfig, AJsonRootThatIsNotAnObjectIsConfigError) {
+    const std::filesystem::path dir = make_temp_dir("array");
+    write_text(dir / "rig.json", "[1, 2, 3]");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
+    })");
+    EXPECT_NE(build_error(cfg, dir).find("root of a config must be an object"), std::string::npos);
+}
+
+TEST(PipelineBuilderFileConfig, ARelativePathWithoutABaseDirSaysSo) {
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
+    })");
+    EXPECT_NE(build_error(cfg, {}).find("needs the document's directory"), std::string::npos);
+}
+
+TEST(PipelineBuilderFileConfig, AnAbsolutePathNeedsNoBaseDir) {
+    const std::filesystem::path dir = make_temp_dir("absolute");
+    write_text(dir / "rig.json", R"({"channels": 6})");
+    atp::config::node doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": ""}]}
+    })");
+    doc["pipeline"]["modules"][0]["config"] = "file:" + atp::runtime::path_to_utf8(dir / "rig.json");
+    ASSERT_TRUE(atp::runtime::validate((doc)).empty());
+
+    atp::module_registry registry;
+    register_config_modules(registry);
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, atp::runtime::decode(doc), registry);
+
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
+}
+
+TEST(PipelineBuilderFileConfig, ASharedFileEntryFeedsTwoModules) {
+    const std::filesystem::path dir = make_temp_dir("shared");
+    write_text(dir / "rig.json", R"({"channels": 6})");
+    const atp::runtime::config cfg = make_config(R"({
+        "version": "3.3",
+        "configs": {"rig": "file:rig.json"},
+        "pipeline": {"modules": [{"module": "config_reader", "name": "a", "config": "rig"},
+                                 {"module": "config_reader", "name": "b", "config": "rig"}]}
+    })");
+
+    atp::module_registry registry;
+    register_config_modules(registry);
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, cfg, registry, dir);
+
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("a"))->channels(), 6);
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("b"))->channels(), 6);
+}
+
+TEST(PipelineBuilderFileConfig, ACyrillicFileNameIsRead) {
+    const std::string utf8_name = "\xd0\xba\xd0\xbe\xd0\xbd\xd1\x84\xd0\xb8\xd0\xb3.json";
+    const std::filesystem::path dir = make_temp_dir("cyrillic");
+    write_text(dir / atp::runtime::path_from_utf8(utf8_name), R"({"channels": 6})");
+    atp::config::node doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "pipeline": {"modules": [{"module": "config_reader", "config": ""}]}
+    })");
+    doc["pipeline"]["modules"][0]["config"] = "file:" + utf8_name;
+    ASSERT_TRUE(atp::runtime::validate((doc)).empty());
+
+    atp::module_registry registry;
+    register_config_modules(registry);
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, atp::runtime::decode(doc), registry, dir);
+
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
+}
+
+TEST(PipelineBuilderFileConfig, AFileConfigInsideAnIncludedDocument) {
+    const std::filesystem::path dir = make_temp_dir("include");
+    write_text(dir / "rig.json", R"({"channels": 6})");
+    write_text(dir / "modules.json", R"({"modules": [{"module": "config_reader", "config": "file:rig.json"}]})");
+    write_text(dir / "top.json", R"({"version": "3.3", "pipeline": {"$include": "modules.json"}})");
+
+    const atp::config::node doc = atp::runtime::load_config(dir / "top.json");
+    ASSERT_TRUE(atp::runtime::validate((doc)).empty());
+    EXPECT_EQ(doc.at("pipeline").at("modules")[0].string_at("config"), "file:rig.json");
+
+    atp::module_registry registry;
+    register_config_modules(registry);
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
+    atp::runtime::build_pipeline(pipe, runner, atp::runtime::decode(doc), registry, dir);
+
+    EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
 }
 
 TEST(PipelineBuilder, DanglingConfigReferenceIsConfigError) {
@@ -417,9 +712,17 @@ TEST(PipelineBuilder, DanglingConfigReferenceIsConfigError) {
 
     atp::module_registry registry;
     registry.add(std::make_unique<atp::module_factory<config_reading_module>>("config_reader"));
-    atp::pipeline pipe;
-    atp::pipeline_runner runner;
+    atp::runtime::pipeline pipe;
+    atp::runtime::pipeline_runner runner;
     EXPECT_THROW(atp::runtime::build_pipeline(pipe, runner, cfg, registry), atp::runtime::config_error);
+}
+
+TEST(PipelineBuilder, ARealPropertyValueKeepsItsPrecisionThroughScalarToString) {
+    EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node(0.1)), "0.1");
+    EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node(48000.0)), "48000.0");
+    EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node(std::int64_t{48000})), "48000");
+    EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node("rig")), "rig");
+    EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node(true)), "true");
 }
 
 }  // namespace

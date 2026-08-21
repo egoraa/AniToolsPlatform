@@ -2,6 +2,8 @@
 #include "kit/property_grid.hpp"
 
 #include <exception>
+#include <optional>
+#include <string>
 
 #include <QAction>
 #include <QApplication>
@@ -13,6 +15,8 @@
 #include <QSignalBlocker>
 #include <QStringList>
 
+#include <atp/config/node.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/runtime/property_override.hpp>
 #include <atp/studio/node_ref.hpp>
 
@@ -20,21 +24,18 @@ namespace atp::studio::ui {
 
 namespace {
 
-nlohmann::json editor_to_json(const property_editor& e) {
+atp::config::node editor_to_value(const property_editor& e) {
     std::string text = e.text();
     switch (e.kind) {
-        case io::property_kind::number:
-            try {
-                nlohmann::json parsed = nlohmann::json::parse(text);
-                if (!parsed.is_number()) {
-                    throw runtime::config_error("'" + text + "' is not a number");
-                }
-                return parsed;
-            } catch (const nlohmann::json::parse_error&) {
+        case io::property_kind::number: {
+            const std::optional<atp::config::node> parsed = runtime::try_json_parse(text);
+            if (!parsed || !(parsed->is_int() || parsed->is_double())) {
                 throw runtime::config_error("'" + text + "' is not a number");
             }
+            return *parsed;
+        }
         case io::property_kind::boolean:
-            return text == "true";
+            return atp::config::node(text == "true");
         case io::property_kind::text:
             break;
     }
@@ -237,7 +238,9 @@ std::string property_grid::current_value(const property_row& row) const {
             if (c.module && c.module->name == child_) {
                 for (const auto& [name, node] : c.module->properties) {
                     if (name == row.info.name) {
-                        value = runtime::detail::scalar_to_string(node);
+                        if (const std::optional<std::string> text = runtime::detail::scalar_to_string(node)) {
+                            value = *text;
+                        }
                     }
                 }
             }
@@ -260,7 +263,7 @@ void property_grid::apply(property_row& row) {
             state_.view->set_property({node_ref{group_path_, child_}.full(), row.info.name, value});
         }
         if (row.info.persistent) {
-            state_.doc.set_property(group_path_, child_, row.info.name, editor_to_json(*row.editor));
+            state_.doc.set_property(group_path_, child_, row.info.name, editor_to_value(*row.editor));
         }
     } catch (const std::exception& e) {
         style::mark_error(row.editor->widget, QString::fromStdString(e.what()));

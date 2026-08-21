@@ -26,26 +26,26 @@ constexpr int groups_column = 3;
 constexpr int passes_column = 4;
 constexpr int busy_column = 5;
 
-const char* mode_name(thread_mode mode) {
+const char* mode_name(runtime::thread_mode mode) {
     switch (mode) {
-        case thread_mode::on_demand:
+        case runtime::thread_mode::on_demand:
             return "on_demand";
-        case thread_mode::throttled:
+        case runtime::thread_mode::throttled:
             return "throttled";
-        case thread_mode::spinning:
+        case runtime::thread_mode::spinning:
             return "spinning";
     }
     return "on_demand";
 }
 
-thread_mode mode_at(int index) {
+runtime::thread_mode mode_at(int index) {
     if (index == 1) {
-        return thread_mode::throttled;
+        return runtime::thread_mode::throttled;
     }
     if (index == 2) {
-        return thread_mode::spinning;
+        return runtime::thread_mode::spinning;
     }
-    return thread_mode::on_demand;
+    return runtime::thread_mode::on_demand;
 }
 
 }  // namespace
@@ -93,7 +93,7 @@ void thread_table::refresh() {
             continue;
         }
         mode->setEnabled(!running);
-        period->setEnabled(!running && mode_at(mode->currentIndex()) == thread_mode::throttled);
+        period->setEnabled(!running && mode_at(mode->currentIndex()) == runtime::thread_mode::throttled);
     }
 }
 
@@ -133,7 +133,7 @@ void thread_table::rebuild() {
         period->setRange(1, 60000);
         period->setSuffix(" ms");
         period->setValue(t.period.count() > 0 ? static_cast<int>(t.period.count()) : 10);
-        period->setEnabled(t.mode == thread_mode::throttled);
+        period->setEnabled(t.mode == runtime::thread_mode::throttled);
         table_->setCellWidget(row, period_column, period);
 
         const std::string name_copy = t.name;
@@ -141,12 +141,12 @@ void thread_table::rebuild() {
             if (filling_) {
                 return;
             }
-            const thread_mode m = mode_at(mode->currentIndex());
-            period->setEnabled(m == thread_mode::throttled);
+            const runtime::thread_mode m = mode_at(mode->currentIndex());
+            period->setEnabled(m == runtime::thread_mode::throttled);
             try {
                 state_.doc.set_thread(name_copy, m,
-                                      m == thread_mode::throttled ? std::chrono::milliseconds(period->value())
-                                                                  : std::chrono::milliseconds{});
+                                      m == runtime::thread_mode::throttled ? std::chrono::milliseconds(period->value())
+                                                                           : std::chrono::milliseconds{});
             } catch (const std::exception& e) {
                 callbacks_.error(QString::fromStdString(std::string("thread: ") + e.what()));
                 return;
@@ -206,7 +206,7 @@ void thread_table::add_thread() {
         return;
     }
     try {
-        state_.doc.add_thread(name.toStdString(), thread_mode::on_demand);
+        state_.doc.add_thread(name.toStdString(), runtime::thread_mode::on_demand);
     } catch (const std::exception& e) {
         callbacks_.error(QString::fromStdString(std::string("thread: ") + e.what()));
         return;

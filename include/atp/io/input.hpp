@@ -18,7 +18,7 @@
 
 #include <atp/io/input_base.hpp>
 #include <atp/io/threading.hpp>
-#include <atp/type_compare.hpp>
+#include <atp/support/type_compare.hpp>
 
 namespace atp::io {
 

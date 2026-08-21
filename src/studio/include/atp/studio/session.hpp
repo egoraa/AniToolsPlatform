@@ -3,17 +3,18 @@
 #define ATP_STUDIO_SESSION_HPP
 
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-#include <atp/group.hpp>
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/connection_sample.hpp>
+#include <atp/runtime/group.hpp>
+#include <atp/runtime/pipeline.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 #include <atp/runtime/property_override.hpp>
 
 namespace atp::studio {
@@ -28,15 +29,20 @@ class session {
 
     /// Builds a pipeline from the config and starts it. On failure the session stays clean and fit
     /// for another run.
+    /// @param cfg the project's config model
+    /// @param base_dir directory of the project's file, which a module config written as "file:<path>"
+    ///        resolves against. Empty for a project that was never saved, and then a relative path is
+    ///        refused by name rather than resolved against the process's current directory — which is
+    ///        wherever studio happens to have been launched from and has nothing to do with the project.
     /// @throws std::logic_error if a run is already in progress; runtime::config_error and anything
     ///         the start cascade throws propagate as well
-    void start(const runtime::config& cfg) {
+    void start(const runtime::config& cfg, const std::filesystem::path& base_dir = {}) {
         if (running()) {
             throw std::logic_error("session is already running");
         }
-        auto pipe = std::make_unique<pipeline>();
-        auto runner = std::make_unique<pipeline_runner>();
-        runtime::build_pipeline(*pipe, *runner, cfg, *registry_);
+        auto pipe = std::make_unique<runtime::pipeline>();
+        auto runner = std::make_unique<runtime::pipeline_runner>();
+        runtime::build_pipeline(*pipe, *runner, cfg, *registry_, base_dir);
         runner->start(*pipe);
         pipe_ = std::move(pipe);
         runner_ = std::move(runner);
@@ -69,7 +75,7 @@ class session {
     /// values and by sync_persistent_properties when saving on the fly. The check is running()
     /// rather than the presence of a pipeline: a stopped one is still alive until the next start,
     /// but no longer counts as a live tree.
-    [[nodiscard]] group* live_root() const {
+    [[nodiscard]] runtime::group* live_root() const {
         return running() ? &pipe_->root() : nullptr;
     }
 
@@ -79,8 +85,8 @@ class session {
     }
 
     /// Pass counters per thread; empty if nothing has been started yet.
-    [[nodiscard]] std::vector<pipeline_runner::thread_stats> stats() const {
-        return runner_ ? runner_->stats() : std::vector<pipeline_runner::thread_stats>{};
+    [[nodiscard]] std::vector<runtime::pipeline_runner::thread_stats> stats() const {
+        return runner_ ? runner_->stats() : std::vector<runtime::pipeline_runner::thread_stats>{};
     }
 
     /// Turns per-module timing on or off for the whole running pipeline; does nothing when nothing
@@ -92,7 +98,7 @@ class session {
     /// leaves on.
     /// @return false if there is nothing running to enable it on
     bool set_metrics_enabled(bool on) {
-        if (group* root = live_root()) {
+        if (runtime::group* root = live_root()) {
             root->set_metrics_enabled(on);
             return true;
         }
@@ -101,23 +107,23 @@ class session {
 
     /// Whether the running pipeline is timing its modules; false when nothing runs.
     [[nodiscard]] bool metrics_enabled() const {
-        const group* root = live_root();
+        const runtime::group* root = live_root();
         return root != nullptr && root->metrics_enabled();
     }
 
     /// Per-module cost of the running pipeline; empty if nothing has been started or metrics were
     /// never enabled. The counters accumulate from the moment they are switched on, so a reader
     /// comparing two samples sees the interval between them.
-    [[nodiscard]] std::vector<group::module_stats> module_metrics() const {
-        const group* root = live_root();
-        return root ? root->metrics() : std::vector<group::module_stats>{};
+    [[nodiscard]] std::vector<runtime::group::module_stats> module_metrics() const {
+        const runtime::group* root = live_root();
+        return root ? root->metrics() : std::vector<runtime::group::module_stats>{};
     }
 
     /// What every input of the running pipeline received and lost; empty if nothing runs. Needs
     /// nothing switched on, unlike the module timing.
-    [[nodiscard]] std::vector<group::port_stats> input_metrics() const {
-        const group* root = live_root();
-        return root ? root->input_metrics() : std::vector<group::port_stats>{};
+    [[nodiscard]] std::vector<runtime::group::port_stats> input_metrics() const {
+        const runtime::group* root = live_root();
+        return root ? root->input_metrics() : std::vector<runtime::group::port_stats>{};
     }
 
     /// Monitoring sample of one connection. The type lives in the runtime, since the headless host
@@ -135,14 +141,14 @@ class session {
     /// of the log and neither would see it whole. Empty before the first run, and after a stop the
     /// buffers of the pipeline that is still alive are drained as usual.
     /// @return the lines, oldest first within one module
-    [[nodiscard]] std::vector<log_line> collect_logs() {
-        return pipe_ ? pipe_->collect_logs() : std::vector<log_line>{};
+    [[nodiscard]] std::vector<runtime::log_line> collect_logs() {
+        return pipe_ ? pipe_->collect_logs() : std::vector<runtime::log_line>{};
     }
 
    private:
     module_registry* registry_;
-    std::unique_ptr<pipeline> pipe_;
-    std::unique_ptr<pipeline_runner> runner_;
+    std::unique_ptr<runtime::pipeline> pipe_;
+    std::unique_ptr<runtime::pipeline_runner> runner_;
 };
 
 }  // namespace atp::studio

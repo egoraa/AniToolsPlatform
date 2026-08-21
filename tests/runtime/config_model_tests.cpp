@@ -4,17 +4,18 @@
 #include <utility>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/json_codec.hpp>
 
 #include "support/required.hpp"
 
 namespace {
 
 TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "plugins": ["p.dll"],
         "pipeline": {
@@ -42,9 +43,9 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).factory_version, (atp::version{1, 0}));
     ASSERT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties.size(), 3u);
     EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[0].first, "file");
-    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[0].second, nlohmann::json("a.txt"));
-    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[1].second, nlohmann::json(10));
-    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[2].second, nlohmann::json(true));
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[0].second, atp::config::node("a.txt"));
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[1].second, atp::config::node(10));
+    EXPECT_EQ(atp_tests::required(cfg.pipeline.modules[0].module).properties[2].second, atp::config::node(true));
 
     ASSERT_TRUE(cfg.pipeline.modules[1].group != nullptr);
     EXPECT_EQ(cfg.pipeline.modules[1].group->name, "sub");
@@ -56,7 +57,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     EXPECT_EQ(cfg.pipeline.connections[0].to, "sub.in");
 
     ASSERT_EQ(cfg.threads.size(), 1u);
-    EXPECT_EQ(cfg.threads[0].mode, atp::thread_mode::throttled);
+    EXPECT_EQ(cfg.threads[0].mode, atp::runtime::thread_mode::throttled);
     EXPECT_EQ(cfg.threads[0].period, std::chrono::milliseconds(5));
 
     ASSERT_EQ(cfg.assignments.size(), 1u);
@@ -64,7 +65,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
 }
 
 TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "pipeline": {"modules": [{"module": "counter"}]}
     })");
@@ -80,7 +81,7 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
 }
 
 TEST(ConfigEncode, RoundTripsCanonicalDocument) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "plugins": ["p.dll"],
         "pipeline": {
@@ -96,11 +97,18 @@ TEST(ConfigEncode, RoundTripsCanonicalDocument) {
         "assign": {"sub": "t"}
     })");
     ASSERT_TRUE(atp::runtime::validate(doc).empty());
-    EXPECT_EQ(atp::runtime::encode(atp::runtime::decode(doc)), doc);
+    EXPECT_EQ(atp::runtime::json_dump(atp::runtime::encode(atp::runtime::decode(doc))), atp::runtime::json_dump(doc));
+}
+
+TEST(ConfigEncode, RoundTripIsPinnedOnTheTextNotTheTree) {
+    const atp::config::node doc = atp::runtime::json_parse(R"({"version":"3.3","pipeline":{}})");
+    const atp::config::node back = atp::runtime::encode(atp::runtime::decode(doc));
+    EXPECT_EQ(atp::runtime::json_dump(back), atp::runtime::json_dump(doc));
+    EXPECT_EQ(back.key_at(0), "version");
 }
 
 TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.0",
         "pipeline": {
             "modules": [
@@ -112,40 +120,57 @@ TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
     })");
     ASSERT_TRUE(atp::runtime::validate(doc).empty());
 
-    const nlohmann::json out = atp::runtime::encode(atp::runtime::decode(doc));
-    EXPECT_FALSE(out.at("pipeline").at("modules").at(0).contains("name"));
-    EXPECT_FALSE(out.at("pipeline").at("modules").at(1).contains("modules"));
-    EXPECT_FALSE(out.at("pipeline").at("modules").at(1).contains("connections"));
-    EXPECT_EQ(out.at("threads").at(0).at("mode"), "on_demand");
+    const atp::config::node out = atp::runtime::encode(atp::runtime::decode(doc));
+    EXPECT_EQ(out.at("pipeline").at("modules")[0].find("name"), nullptr);
+    EXPECT_EQ(out.at("pipeline").at("modules")[1].find("modules"), nullptr);
+    EXPECT_EQ(out.at("pipeline").at("modules")[1].find("connections"), nullptr);
+    EXPECT_EQ(out.at("threads")[0].string_at("mode"), "on_demand");
     EXPECT_TRUE(atp::runtime::validate(out).empty());
 }
 
 TEST(ConfigModel, InlineConfigSurvivesRoundTrip) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "pipeline": {"modules": [{"module": "resampler", "config": {"channels": [1, 2]}}]}
     })");
-    EXPECT_EQ(atp::runtime::encode(atp::runtime::decode(doc)), doc);
+    EXPECT_EQ(atp::runtime::json_dump(atp::runtime::encode(atp::runtime::decode(doc))), atp::runtime::json_dump(doc));
 }
 
 TEST(ConfigModel, ConfigReferenceSurvivesRoundTripUnexpanded) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "configs": {"rig": {"channels": [1, 2]}},
         "pipeline": {"modules": [{"module": "resampler", "config": "rig"}]}
     })");
-    const nlohmann::json back = atp::runtime::encode(atp::runtime::decode(doc));
-    EXPECT_EQ(back, doc);
-    EXPECT_TRUE(back["pipeline"]["modules"][0]["config"].is_string());
+    const atp::config::node back = atp::runtime::encode(atp::runtime::decode(doc));
+    EXPECT_EQ(atp::runtime::json_dump(back), atp::runtime::json_dump(doc));
+    EXPECT_TRUE(back.at("pipeline").at("modules")[0].at("config").is_string());
+}
+
+TEST(ConfigModel, SchemaIsThreeThree) {
+    EXPECT_EQ(atp::runtime::config_schema_version.parts[0], 3U);
+    EXPECT_EQ(atp::runtime::config_schema_version.parts[1], 3U);
+}
+
+TEST(ConfigModel, AFileConfigSurvivesARoundTripUnexpanded) {
+    const atp::config::node doc = atp::runtime::json_parse(R"({
+        "version": "3.3",
+        "configs": {"shared": "file:shared.json"},
+        "pipeline": {"modules": [{"module": "resampler", "config": "file:rig.yaml"}]}
+    })");
+    const atp::config::node back = atp::runtime::encode(atp::runtime::decode(doc));
+    EXPECT_EQ(atp::runtime::json_dump(back), atp::runtime::json_dump(doc));
+    EXPECT_EQ(back.at("pipeline").at("modules")[0].string_at("config"), "file:rig.yaml");
+    EXPECT_EQ(back.at("configs").string_at("shared"), "file:shared.json");
 }
 
 TEST(ConfigModel, AbsentConfigIsNotWrittenBack) {
-    const nlohmann::json doc = nlohmann::json::parse(R"({
+    const atp::config::node doc = atp::runtime::json_parse(R"({
         "version": "3.2",
         "pipeline": {"modules": [{"module": "resampler"}]}
     })");
-    const nlohmann::json back = atp::runtime::encode(atp::runtime::decode(doc));
-    EXPECT_FALSE(back["pipeline"]["modules"][0].contains("config"));
+    const atp::config::node back = atp::runtime::encode(atp::runtime::decode(doc));
+    EXPECT_EQ(back.at("pipeline").at("modules")[0].find("config"), nullptr);
 }
 
 }  // namespace

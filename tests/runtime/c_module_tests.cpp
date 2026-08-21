@@ -11,14 +11,14 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/c_module.hpp>
+#include <atp/hosting/null_host.hpp>
 #include <atp/io.hpp>
 #include <atp/module.hpp>
-#include <atp/module_base.hpp>
-#include <atp/module_context.hpp>
-#include <atp/module_loader.hpp>
-#include <atp/null_host.hpp>
-#include <atp/service_directory.hpp>
+#include <atp/module/module_base.hpp>
+#include <atp/module/module_context.hpp>
+#include <atp/module/service_directory.hpp>
+#include <atp/runtime/c_module.hpp>
+#include <atp/runtime/module_loader.hpp>
 
 namespace {
 
@@ -37,7 +37,7 @@ struct host_outputs : atp::io::outputs {
     atp::io::output<atp::io::blob>& bytes = make<atp::io::output<atp::io::blob>>("bytes");
 };
 
-class host_module : public atp::module<atp::io::ports<host_inputs, host_outputs>, "c_test_host"> {};
+class host_module : public atp::module<atp::ports<host_inputs, host_outputs>, "c_test_host"> {};
 
 class recording_host final : public atp::module_host {
    public:
@@ -75,7 +75,7 @@ class c_module_test : public ::testing::Test {
         ASSERT_NE(module_, nullptr);
     }
 
-    void create(const std::string& name, const atp::config_value& cfg) {
+    void create(const std::string& name, const atp::module_config& cfg) {
         module_ = registry_.create(name, cfg);
         ASSERT_NE(module_, nullptr);
     }
@@ -98,7 +98,7 @@ class c_module_test : public ::testing::Test {
     }
 
     atp::module_registry registry_;
-    std::optional<atp::module_loader> loader_;
+    std::optional<atp::runtime::module_loader> loader_;
     host_module host_;
     atp::module_ptr module_;
     atp::service_directory services_;
@@ -111,11 +111,14 @@ class c_module_test : public ::testing::Test {
 
 TEST_F(c_module_test, RegistersEveryDescribedModule) {
     load(ATP_TEST_PLUGIN_C);
-    EXPECT_EQ(loader_->modules(),
-              (std::vector<atp::registered_module>{{"c_probe", atp::version(2, 1), "c_probe_declared_here.txt"},
-                                                   {"c_bare", atp::version(1), ""},
-                                                   {"c_grown", atp::version(3), ""},
-                                                   {"c_config", atp::version(1), ""}}));
+    EXPECT_EQ(loader_->modules(), (std::vector<atp::runtime::registered_module>{
+                                      {"c_probe", atp::version(2, 1), "c_probe_declared_here.txt"},
+                                      {"c_bare", atp::version(1), ""},
+                                      {"c_grown", atp::version(3), ""},
+                                      {"c_config", atp::version(1), ""},
+                                      {"c_config_text", atp::version(1), ""},
+                                      {"c_config_bad_path", atp::version(1), ""},
+                                      {"c_destroys_taken", atp::version(1), ""}}));
     EXPECT_EQ(registry_.at("c_probe").get_version(), atp::version(2, 1));
 }
 
@@ -138,7 +141,7 @@ TEST_F(c_module_test, RefusesADescriptorShorterThanTheHostExpects) {
     desc.struct_size = static_cast<std::uint32_t>(ATP_MODULE_DESC_SIZE_V1 - 1);
     desc.name = "c_short";
     try {
-        atp::c_module_factory factory{desc};
+        atp::runtime::c_module_factory factory{desc};
         FAIL() << "a descriptor missing a field the host reads must not be accepted";
     } catch (const std::runtime_error& e) {
         EXPECT_NE(std::string(e.what()).find("struct_size"), std::string::npos);
@@ -365,10 +368,10 @@ TEST_F(c_module_test, MalformedDescriptorWithdrawsTheSoundOnes) {
 
 TEST_F(c_module_test, ConfigIsReadableThroughTheAccessors) {
     load(ATP_TEST_PLUGIN_C);
-    create("c_config", atp::config_value::object({
-                           {"channels", atp::config_value::array({1, 2, 6})},
+    create("c_config", atp::module_config(atp::config::node::object({
+                           {"channels", atp::config::node::array({1, 2, 6})},
                            {"name", "rig"},
-                       }));
+                       })));
     collect("report", host_.inputs().text);
     run_lifecycle();
 
@@ -390,4 +393,166 @@ TEST_F(c_module_test, ConfigRootIsNullWhenNoneWasGiven) {
     EXPECT_NE(report.find("kind=other"), std::string::npos);
     EXPECT_NE(report.find("size=0"), std::string::npos);
     EXPECT_NE(report.find("object-read=no"), std::string::npos);
+}
+
+TEST_F(c_module_test, OpaqueConfigTextAndOriginReachAForeignModule) {
+    load(ATP_TEST_PLUGIN_C);
+    create("c_config_text", atp::module_config::opaque("rate = 48000\n", "rig.ini"));
+    collect("report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text-len=13 origin=rig.ini opaque=1 rate=none");
+}
+
+TEST_F(c_module_test, APathFindsANodeAndAConfigWithoutAFileHasNoText) {
+    load(ATP_TEST_PLUGIN_C);
+    create("c_config_text",
+           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}})));
+    collect("report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text=none origin=none opaque=0 rate=48000");
+}
+
+TEST_F(c_module_test, AHostErrorRaisedInsideCreateSurfacesFromCreate) {
+    load(ATP_TEST_PLUGIN_C);
+    try {
+        module_ = registry_.create("c_config_bad_path");
+        FAIL() << "a malformed path from inside create must not be swallowed";
+    } catch (const atp::config::access_error& e) {
+        EXPECT_NE(std::string(e.what()).find("bad path"), std::string::npos);
+    }
+}
+
+TEST_F(c_module_test, AFailedCreateStillDestroysWhatThePluginBuilt) {
+    load(ATP_TEST_PLUGIN_C);
+    module_ = registry_.create("c_destroys_taken");
+    EXPECT_THROW(module_ = registry_.create("c_config_bad_path"), atp::config::access_error);
+
+    create("c_destroys_taken");
+    collect("report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "destroys=1");
+}
+
+TEST_F(c_module_test, AParsedFileCarriesTextAndTreeAtOnce) {
+    load(ATP_TEST_PLUGIN_C);
+    create("c_config_text",
+           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}}),
+                              "{\"audio\":{\"rate\":48000}}", "rig.json"));
+    collect("report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text-len=24 origin=rig.json opaque=0 rate=48000");
+}
+
+TEST_F(c_module_test, DeclarationAnswersFromDescriptorsWithoutCreating) {
+    load(ATP_TEST_PLUGIN_C);
+    const atp::module_declaration decl = registry_.at("c_probe").declaration();
+
+    EXPECT_FALSE(decl.inputs.empty());
+    EXPECT_FALSE(decl.outputs.empty());
+    const atp::module_ptr probe = registry_.create("c_probe");
+    ASSERT_EQ(decl.inputs.size(), probe->inputs().owned().size());
+    for (std::size_t i = 0; i < decl.inputs.size(); ++i) {
+        EXPECT_EQ(decl.inputs[i].name, probe->inputs().owned()[i]->name());
+        EXPECT_EQ(decl.inputs[i].type, probe->inputs().owned()[i]->type());
+    }
+    ASSERT_EQ(decl.outputs.size(), probe->outputs().owned().size());
+    for (std::size_t i = 0; i < decl.outputs.size(); ++i) {
+        EXPECT_EQ(decl.outputs[i].name, probe->outputs().owned()[i]->name());
+        EXPECT_EQ(decl.outputs[i].type, probe->outputs().owned()[i]->type());
+    }
+    ASSERT_EQ(decl.properties.size(), probe->properties().owned().size());
+    for (std::size_t i = 0; i < decl.properties.size(); ++i) {
+        EXPECT_EQ(decl.properties[i].name, probe->properties().owned()[i]->name());
+        EXPECT_EQ(decl.properties[i].default_value, probe->properties().owned()[i]->default_string());
+        EXPECT_EQ(decl.properties[i].options, probe->properties().owned()[i]->options());
+        EXPECT_EQ(decl.properties[i].persistent, probe->properties().owned()[i]->persistent());
+    }
+}
+
+namespace {
+
+bool c_create_was_called = false;
+
+void* counting_create(const atp_api*, atp_ctx*, void*) {
+    c_create_was_called = true;
+    return nullptr;
+}
+void counting_destroy(void*) {}
+atp_work counting_iterate(void*) {
+    return ATP_WORK_IDLE;
+}
+
+void fill_callbacks(atp_module_desc& desc) {
+    desc.create = &counting_create;
+    desc.destroy = &counting_destroy;
+    desc.iterate = &counting_iterate;
+}
+
+}  // namespace
+
+TEST_F(c_module_test, DeclarationNeverReachesForTheCreateCallback) {
+    const atp_input_desc inputs[] = {{"step", ATP_KIND_I32, ATP_STATE, 0, ATP_DROP_OLDEST}};
+    const atp_output_desc outputs[] = {{"count", ATP_KIND_I32}};
+    atp_module_desc desc{};
+    desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc));
+    desc.name = "c_never_created";
+    desc.inputs = inputs;
+    desc.input_count = 1;
+    desc.outputs = outputs;
+    desc.output_count = 1;
+    fill_callbacks(desc);
+    c_create_was_called = false;
+
+    const atp::runtime::c_module_factory factory{desc};
+    const atp::module_declaration decl = factory.declaration();
+
+    ASSERT_EQ(decl.inputs.size(), 1u);
+    EXPECT_EQ(decl.inputs[0].name, "step");
+    EXPECT_EQ(decl.inputs[0].type, std::type_index(typeid(std::int32_t)));
+    ASSERT_EQ(decl.outputs.size(), 1u);
+    EXPECT_EQ(decl.outputs[0].name, "count");
+    EXPECT_FALSE(c_create_was_called);
+}
+
+TEST_F(c_module_test, ABlobPropertyIsRefusedBeforeAFactoryForItExists) {
+    const atp_property_desc properties[] = {{"payload", ATP_KIND_BLOB, "", nullptr, 0, 1}};
+    atp_module_desc desc{};
+    desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc));
+    desc.name = "c_blob_property";
+    fill_callbacks(desc);
+    desc.properties = properties;
+    desc.property_count = 1;
+
+    try {
+        const atp::runtime::c_module_factory factory{desc};
+        FAIL() << "a blob property has no codec, so the descriptor is refused rather than described";
+    } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("is a blob"), std::string::npos);
+    }
+}
+
+TEST_F(c_module_test, DeclarationRefusesAnUnparsableDefaultTheSameWayCreationDoes) {
+    const atp_property_desc properties[] = {{"limit", ATP_KIND_I32, "not a number", nullptr, 0, 1}};
+    atp_module_desc desc{};
+    desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc));
+    desc.name = "c_bad_default";
+    fill_callbacks(desc);
+    desc.properties = properties;
+    desc.property_count = 1;
+
+    const atp::runtime::c_module_factory factory{desc};
+    try {
+        (void)factory.declaration();
+        FAIL() << "a default that cannot be parsed makes the module unusable and must not describe as healthy";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("unparsable default"), std::string::npos);
+    }
 }

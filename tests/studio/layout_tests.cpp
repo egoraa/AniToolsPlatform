@@ -2,15 +2,17 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atp/config/node.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/config_validator.hpp>
+#include <atp/runtime/json_codec.hpp>
 #include <atp/studio/layout.hpp>
 
 namespace {
 
 atp::runtime::group_node make_group(const char* text) {
-    const nlohmann::json proj = nlohmann::json::parse(text);
-    EXPECT_TRUE(atp::runtime::validate(proj).empty());
+    const atp::config::node proj = atp::runtime::json_parse(text);
+    EXPECT_TRUE(atp::runtime::validate((proj)).empty());
     return atp::runtime::decode(proj).pipeline;
 }
 

@@ -7,9 +7,9 @@
 
 #include <gtest/gtest.h>
 
-#include <atp/group.hpp>
+#include <atp/hosting/null_host.hpp>
 #include <atp/module.hpp>
-#include <atp/null_host.hpp>
+#include <atp/runtime/group.hpp>
 
 #include "support/pipeline_test_support.hpp"
 
@@ -18,7 +18,7 @@ namespace {
 using atp_tests::event_log;
 using atp_tests::probe_module;
 
-class named_module : public atp::module<atp::io::ports<>, "named"> {};
+class named_module : public atp::module<atp::ports<>, "named"> {};
 class plain_module : public atp::module<> {};
 
 struct number_inputs : atp::io::inputs {
@@ -27,20 +27,20 @@ struct number_inputs : atp::io::inputs {
 struct number_outputs : atp::io::outputs {
     atp::io::output<int>& number = make<atp::io::output<int>>("number");
 };
-using source_ports = atp::io::ports<atp::io::inputs, number_outputs>;
-using sink_ports = atp::io::ports<number_inputs>;
+using source_ports = atp::ports<atp::io::inputs, number_outputs>;
+using sink_ports = atp::ports<number_inputs>;
 class source_module : public atp::module<source_ports> {};
 class sink_module : public atp::module<sink_ports> {};
 
 struct rig {
-    atp::group root{"root"};
+    atp::runtime::group root{"root"};
     event_log log;
     probe_module* a;
     probe_module* b;
     probe_module* c;
     probe_module* d;
-    atp::group* stage;
-    atp::group* deep;
+    atp::runtime::group* stage;
+    atp::runtime::group* deep;
     atp::service_directory services;
     atp::null_host host;
     atp::module_context ctx{services, host};
@@ -56,9 +56,9 @@ struct rig {
 };
 
 TEST(Group, OwnsChildrenInInsertionOrder) {
-    atp::group g("root");
+    atp::runtime::group g("root");
     g.make<named_module>();
-    atp::group& sub = g.add_group("sub");
+    atp::runtime::group& sub = g.add_group("sub");
     g.make<plain_module>("tail");
 
     ASSERT_EQ(g.children().size(), 3u);
@@ -71,16 +71,16 @@ TEST(Group, OwnsChildrenInInsertionOrder) {
 }
 
 TEST(Group, AddAcceptsPrebuiltModule) {
-    atp::group g("root");
+    atp::runtime::group g("root");
     atp::module_base& m = g.add("ready", atp::module_ptr{new plain_module});
     EXPECT_EQ(g.find_module("ready"), &m);
     EXPECT_EQ(g.find_module("missing"), nullptr);
 }
 
 TEST(Group, RecordsASubgroupWhicheverWayItArrives) {
-    atp::group g("root");
-    atp::group& made = g.add_group("made");
-    auto* prebuilt = new atp::group("prebuilt");
+    atp::runtime::group g("root");
+    atp::runtime::group& made = g.add_group("made");
+    auto* prebuilt = new atp::runtime::group("prebuilt");
     (void)g.add("prebuilt", atp::module_ptr{prebuilt});
     g.make<plain_module>("leaf");
 
@@ -94,7 +94,7 @@ TEST(Group, RecordsASubgroupWhicheverWayItArrives) {
 }
 
 TEST(Group, RejectsDuplicateAndEmptyNames) {
-    atp::group g("root");
+    atp::runtime::group g("root");
     g.make<plain_module>("one");
     EXPECT_THROW(g.make<plain_module>("one"), std::runtime_error);
     EXPECT_THROW(g.add_group("one"), std::runtime_error);
@@ -141,19 +141,19 @@ TEST(Group, IterateSkipsDetachedAndAggregatesStatus) {
     std::vector<std::string> without_stage{"a", "d"};
     EXPECT_EQ(r.log.order_of("iterate"), without_stage);
 
-    atp::group idle_group("idle");
+    atp::runtime::group idle_group("idle");
     idle_group.make<plain_module>("silent");
     EXPECT_EQ(idle_group.iterate(std::stop_token{}), atp::work_status::idle);
 }
 
 TEST(Group, SetDetachedUnknownChildThrows) {
-    atp::group g("root");
-    atp::group stranger("stranger");
+    atp::runtime::group g("root");
+    atp::runtime::group stranger("stranger");
     EXPECT_THROW(g.set_detached(stranger, true), std::invalid_argument);
 }
 
 TEST(Group, ExposesChildPortsAsOwnAliases) {
-    atp::group g("root");
+    atp::runtime::group g("root");
     sink_module& sink = g.make<sink_module>("sink");
     source_module& src = g.make<source_module>("src");
     g.expose_input("in", "sink.number");
@@ -165,7 +165,7 @@ TEST(Group, ExposesChildPortsAsOwnAliases) {
 }
 
 TEST(Group, PortsVisibleThroughModuleBase) {
-    atp::group g("stage");
+    atp::runtime::group g("stage");
     g.make<sink_module>("sink");
     g.expose_input("in", "sink.number");
     atp::module_base& as_module = g;
@@ -173,8 +173,8 @@ TEST(Group, PortsVisibleThroughModuleBase) {
 }
 
 TEST(Group, ReexportResolvesToRealPortImmediately) {
-    atp::group root("root");
-    atp::group& inner = root.add_group("inner");
+    atp::runtime::group root("root");
+    atp::runtime::group& inner = root.add_group("inner");
     sink_module& sink = inner.make<sink_module>("sink");
     inner.expose_input("in", "sink.number");
     root.expose_input("outer_in", "inner.in");
@@ -183,7 +183,7 @@ TEST(Group, ReexportResolvesToRealPortImmediately) {
 }
 
 TEST(Group, ExposeErrors) {
-    atp::group g("root");
+    atp::runtime::group g("root");
     g.make<sink_module>("sink");
     g.expose_input("in", "sink.number");
     EXPECT_THROW(g.expose_input("in", "sink.number"), std::runtime_error);
@@ -194,9 +194,9 @@ TEST(Group, ExposeErrors) {
 }
 
 TEST(Group, ConnectsByPathsAcrossSubgroupBoundary) {
-    atp::group root("root");
+    atp::runtime::group root("root");
     source_module& src = root.make<source_module>("src");
-    atp::group& inner = root.add_group("inner");
+    atp::runtime::group& inner = root.add_group("inner");
     sink_module& sink = inner.make<sink_module>("sink");
     inner.expose_input("in", "sink.number");
 
@@ -210,7 +210,7 @@ TEST(Group, ConnectsByPathsAcrossSubgroupBoundary) {
 }
 
 TEST(Group, ConnectErrors) {
-    atp::group g("root");
+    atp::runtime::group g("root");
     g.make<source_module>("src");
     g.make<sink_module>("sink");
     EXPECT_THROW(g.connect("src.missing", "sink.number"), std::runtime_error);
@@ -220,7 +220,7 @@ TEST(Group, ConnectErrors) {
 TEST(Group, DestructorDisconnectsItsConnections) {
     source_module src;
     {
-        atp::group g("root");
+        atp::runtime::group g("root");
         sink_module& sink = g.make<sink_module>("sink");
         src.outputs().number.connect(sink.inputs().number);
         src.outputs().number.disconnect(sink.inputs().number);

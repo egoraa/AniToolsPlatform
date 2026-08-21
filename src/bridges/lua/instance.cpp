@@ -96,8 +96,11 @@ extern "C" void* instance_create(const atp_api* api, atp_ctx* ctx, void* user_da
     lua_pushinteger(self->state, static_cast<lua_Integer>(slot->inputs.size()));
     lua_pushinteger(self->state, static_cast<lua_Integer>(slot->outputs.size()));
     lua_pushinteger(self->state, static_cast<lua_Integer>(slot->properties.size()));
-    config_to_lua(self->state, *api, ctx, api->struct_size < sizeof(atp_api) ? 0u : api->config_root(ctx));
-    if (lua_pcall(self->state, 6, 1, 0) != LUA_OK) {
+    config_to_lua(self->state, *api, ctx, atp_api_has_config(api) ? api->config_root(ctx) : 0u);
+    config_text_to_lua(self->state, *api, ctx);
+    config_origin_to_lua(self->state, *api, ctx);
+    config_opaque_to_lua(self->state, *api, ctx);
+    if (lua_pcall(self->state, 9, 1, 0) != LUA_OK) {
         const char* said = lua_tostring(self->state, -1);
         std::fprintf(stderr, "atp: %s cannot be created: %s\n", slot->name.c_str(), said == nullptr ? "?" : said);
         lua_close(self->state);

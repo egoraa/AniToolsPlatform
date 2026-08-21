@@ -14,7 +14,7 @@ cmake --build build-plugin
 ```
 
 `CMakeLists.txt` comes down to three substantive lines: `find_package(AniToolsPlatform)`,
-`atp_require_plugin_abi(11)` and `atp_add_plugin()`. The second one is not a formality: when the
+`atp_require_plugin_abi(14)` and `atp_add_plugin()`. The second one is not a formality: when the
 platform raises `plugin_abi`, configuration here has to fail until the plugin has been revisited.
 Everything else — hidden visibility, the file name, the target type, linking `atp::platform` alone —
 is set by `atp_add_plugin`, and those properties are not meant to be written out by hand.
@@ -28,11 +28,41 @@ library agrees about in advance; the output hands over a `std::string`, and that
 the real thing: recognising a type by name across the boundary, and freeing a buffer on the side that
 did not allocate it.
 
+## The three ways a setting reaches the module
+
+`doubler` declares all of them, and which one a setting belongs in is decided by the setting, not by
+taste:
+
+- a **property** — `factor`, one scalar with a default, editable while the pipeline runs and read
+  pull-only from `iterate`;
+- a **config** — the `bands` list, a structure no property could hold, handed to the constructor
+  before `connect` and `initialize` and never edited afterwards. A module joins that channel purely
+  by declaring a constructor that takes `const atp::module_config&`; one without such a constructor is
+  created exactly as it was before the channel existed;
+- an **input** — `value`, the data itself.
+
+The config here is **declared**, not parsed: `doubler_config` derives `atp::config::fields` and names
+its fields as members — `list<band_config>("bands")` for the table, `field("otherwise", "large")` for
+the scalar — and the module names the type as `using config_type = doubler_config;`. Three things come
+with that declaration. The fields are filled before the constructor body runs, so there is no loop and
+no per-key fallback to write. The document is checked against the schema **before** the module is
+built, and every problem is reported at once, naming the file and the path (`bands[1].upto`) instead of
+stopping at the first. And the host can read the shape without building anything, which is how an
+editor draws a form for a config instead of a box of JSON.
+
+Declaring is optional and not the only path. A key deeper in the tree is reachable in one call — `config.find("audio.rate")`, or
+`config.find("channels[2].rate")` for an element of an array — and a path with a mistake in it throws
+rather than answering "nothing there", because it was written here rather than by whoever wrote the
+document. And when the pipeline attaches the config as a file the platform does not parse
+(`"config": "file:rig.ini"`), `config.is_opaque()` is true and the bytes are in `config.text()` with the
+file's name in `config.origin()`: the module parses its own format, and the platform learns none.
+
 Running it (the plugin goes into `plugins/` next to `atp_app`, the config into `config/` beside it —
 which is what `"../plugins/atp_template_plugin"` in `pipeline.json` resolves against):
 
 ```bash
 atp_app config/pipeline.json      # prints lines reading "doubler: N -> M"
+                                  # and reports "N x 3 = M (small|medium|large)" downstream
 ```
 
 That is exactly what the `out-of-tree plugin` CI job does.

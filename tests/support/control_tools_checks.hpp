@@ -11,12 +11,12 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include <atp/group.hpp>
 #include <atp/mcp/tool_registry.hpp>
-#include <atp/pipeline.hpp>
-#include <atp/pipeline_runner.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/connection_sample.hpp>
+#include <atp/runtime/group.hpp>
+#include <atp/runtime/pipeline.hpp>
+#include <atp/runtime/pipeline_runner.hpp>
 #include <atp/runtime/property_override.hpp>
 
 namespace atp_tests {
@@ -25,7 +25,8 @@ namespace atp_tests {
 /// or a module registry, so a test can build a tree by hand and still ask the tools about it.
 class pipeline_view {
    public:
-    pipeline_view(atp::pipeline& pipe, atp::pipeline_runner& runner) : pipe_(&pipe), runner_(&runner) {}
+    pipeline_view(atp::runtime::pipeline& pipe, atp::runtime::pipeline_runner& runner)
+        : pipe_(&pipe), runner_(&runner) {}
 
     [[nodiscard]] bool running() const {
         return runner_->running();
@@ -35,11 +36,11 @@ class pipeline_view {
         return runner_->error();
     }
 
-    [[nodiscard]] std::vector<atp::pipeline_runner::thread_stats> stats() const {
+    [[nodiscard]] std::vector<atp::runtime::pipeline_runner::thread_stats> stats() const {
         return runner_->stats();
     }
 
-    [[nodiscard]] atp::group* live_root() const {
+    [[nodiscard]] atp::runtime::group* live_root() const {
         return running() ? &pipe_->root() : nullptr;
     }
 
@@ -47,23 +48,23 @@ class pipeline_view {
         return atp::runtime::sample_connections(pipe_->root());
     }
 
-    [[nodiscard]] std::vector<atp::group::module_stats> module_metrics() const {
-        const atp::group* root = live_root();
-        return root ? root->metrics() : std::vector<atp::group::module_stats>{};
+    [[nodiscard]] std::vector<atp::runtime::group::module_stats> module_metrics() const {
+        const atp::runtime::group* root = live_root();
+        return root ? root->metrics() : std::vector<atp::runtime::group::module_stats>{};
     }
 
-    [[nodiscard]] std::vector<atp::group::port_stats> input_metrics() const {
-        const atp::group* root = live_root();
-        return root ? root->input_metrics() : std::vector<atp::group::port_stats>{};
+    [[nodiscard]] std::vector<atp::runtime::group::port_stats> input_metrics() const {
+        const atp::runtime::group* root = live_root();
+        return root ? root->input_metrics() : std::vector<atp::runtime::group::port_stats>{};
     }
 
     [[nodiscard]] bool metrics_enabled() const {
-        const atp::group* root = live_root();
+        const atp::runtime::group* root = live_root();
         return root != nullptr && root->metrics_enabled();
     }
 
     bool set_metrics_enabled(bool on) {
-        if (atp::group* root = live_root()) {
+        if (atp::runtime::group* root = live_root()) {
             root->set_metrics_enabled(on);
             return true;
         }
@@ -75,8 +76,8 @@ class pipeline_view {
     }
 
    private:
-    atp::pipeline* pipe_;
-    atp::pipeline_runner* runner_;
+    atp::runtime::pipeline* pipe_;
+    atp::runtime::pipeline_runner* runner_;
 };
 
 /// The config both control targets are built from: two modules on the implicit main thread, one

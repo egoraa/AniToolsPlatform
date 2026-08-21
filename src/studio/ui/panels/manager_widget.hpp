@@ -23,11 +23,18 @@ namespace atp::studio::ui {
 /// appear twice and
 /// the two lists would drift apart the moment either was edited.
 ///
-/// The context menu follows what a row actually has a path to. A plugin row has its file, and offers
-/// to copy it; a module row has one only when the plugin said where the module is declared, which in
-/// practice means a script module and the file it was read from — those rows also offer to open it. A module
-/// compiled into its plugin is declared in no file a person could open, so its row has no menu at
-/// all rather than a menu that would have to lie about what it points at.
+/// The directory list carries the same three actions in a context menu as in the button bar under
+/// it, because a path is what a person right-clicks. Dropping acts on the row under the cursor,
+/// which the click makes current first so the button and the menu can never disagree about which
+/// one they meant, and is disabled where there is no row — on the empty space of an empty list
+/// adding is the only thing left to do.
+///
+/// The context menu of the plugin list follows what a row actually has a path to. A plugin row has
+/// its file, and offers to copy it; a module row has one only when the plugin said where the module
+/// is declared, which in practice means a script module and the file it was read from — those rows
+/// also offer to open it. A module compiled into its plugin is declared in no file a person could
+/// open, so its row has no menu at all rather than a menu that would have to lie about what it
+/// points at.
 ///
 /// The rescan button re-reads the plugins already loaded before it looks for new files. A person
 /// pressing it has just edited a script or rebuilt a library and means the modules, not the directory
@@ -46,6 +53,12 @@ class manager_widget final : public QWidget {
     void sync_settings();
 
     void scan();
+
+    void add_dir();
+
+    void drop_dir(int row);
+
+    void show_dirs_menu(const QPoint& pos, const QPoint& global);
 
     void show_plugin_menu(const QPoint& pos, const QPoint& global);
 

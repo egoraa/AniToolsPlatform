@@ -2,14 +2,13 @@
 #ifndef ATP_STUDIO_LOCAL_RUNTIME_HPP
 #define ATP_STUDIO_LOCAL_RUNTIME_HPP
 
-#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <string>
 #include <vector>
 
-#include <atp/group.hpp>
-#include <atp/module_base.hpp>
+#include <atp/module/module_base.hpp>
+#include <atp/runtime/group.hpp>
 #include <atp/studio/runtime_view_base.hpp>
 #include <atp/studio/session.hpp>
 
@@ -20,8 +19,8 @@ namespace detail {
 /// The module a dotted path names, or nullptr. Every segment but the last names a group — the same
 /// descent runtime::find_property does, without its exceptions, because a view answers with an empty
 /// list rather than by throwing.
-[[nodiscard]] inline module_base* find_module_at(group& root, const std::string& path) {
-    group* current = &root;
+[[nodiscard]] inline module_base* find_module_at(runtime::group& root, const std::string& path) {
+    runtime::group* current = &root;
     std::size_t begin = 0;
     while (true) {
         const std::size_t dot = path.find('.', begin);
@@ -64,7 +63,7 @@ class local_runtime final : public runtime_view_base {
         }
     }
 
-    [[nodiscard]] std::vector<pipeline_runner::thread_stats> stats() const override {
+    [[nodiscard]] std::vector<runtime::pipeline_runner::thread_stats> stats() const override {
         return run_->stats();
     }
 
@@ -72,11 +71,11 @@ class local_runtime final : public runtime_view_base {
         return run_->sample_connections();
     }
 
-    [[nodiscard]] std::vector<group::module_stats> module_metrics() const override {
+    [[nodiscard]] std::vector<runtime::group::module_stats> module_metrics() const override {
         return run_->module_metrics();
     }
 
-    [[nodiscard]] std::vector<group::port_stats> input_metrics() const override {
+    [[nodiscard]] std::vector<runtime::group::port_stats> input_metrics() const override {
         return run_->input_metrics();
     }
 
@@ -90,7 +89,7 @@ class local_runtime final : public runtime_view_base {
 
     [[nodiscard]] std::vector<live_property> live_properties(const std::string& module_path) const override {
         std::vector<live_property> out;
-        group* root = run_->live_root();
+        runtime::group* root = run_->live_root();
         if (root == nullptr) {
             return out;
         }
@@ -101,8 +100,6 @@ class local_runtime final : public runtime_view_base {
         for (const auto& [name, p] : m->properties().entries()) {
             out.push_back({{name, p->kind(), p->default_string(), p->options(), p->persistent()}, p->to_string()});
         }
-        std::ranges::sort(out,
-                          [](const live_property& a, const live_property& b) { return a.info.name < b.info.name; });
         return out;
     }
 

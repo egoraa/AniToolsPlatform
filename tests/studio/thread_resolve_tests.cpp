@@ -12,8 +12,8 @@ namespace {
 
 atp::runtime::config make_config() {
     atp::runtime::config cfg;
-    cfg.threads.push_back({"producing", atp::thread_mode::throttled, std::chrono::milliseconds{500}});
-    cfg.threads.push_back({"consuming", atp::thread_mode::on_demand, {}});
+    cfg.threads.push_back({"producing", atp::runtime::thread_mode::throttled, std::chrono::milliseconds{500}});
+    cfg.threads.push_back({"consuming", atp::runtime::thread_mode::on_demand, {}});
     return cfg;
 }
 

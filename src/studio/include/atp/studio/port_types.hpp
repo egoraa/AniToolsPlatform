@@ -13,8 +13,8 @@
 
 #include <atp/studio/module_manager.hpp>
 #include <atp/studio/project.hpp>
-#include <atp/type_compare.hpp>
-#include <atp/version.hpp>
+#include <atp/support/type_compare.hpp>
+#include <atp/support/version.hpp>
 
 namespace atp::studio {
 

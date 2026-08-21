@@ -183,6 +183,7 @@ static const atp_module_desc bare_module = {
     NULL,
     probe_iterate,
     NULL,
+    NULL,
 };
 
 typedef struct config_state {
@@ -221,7 +222,7 @@ static void* config_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
     }
     state->api = api;
     state->ctx = ctx;
-    if (api->struct_size < sizeof(atp_api)) {
+    if (!atp_api_has_config(api)) {
         config_append(state, "api-too-old");
         return state;
     }
@@ -289,7 +290,161 @@ static const atp_output_desc config_outputs[] = {{"report", ATP_KIND_TEXT}};
 
 static const atp_module_desc config_module = {
     sizeof(atp_module_desc), "c_config",     {1, 0, 0, 0}, 1,    NULL,           0,    config_outputs, 1, NULL, 0, NULL,
-    config_create,           config_destroy, NULL,         NULL, config_iterate, NULL,
+    config_create,           config_destroy, NULL,         NULL, config_iterate, NULL, NULL,
+};
+
+static void* config_text_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
+    config_state* state = (config_state*)calloc(1, sizeof(config_state));
+    const char* text = NULL;
+    const char* origin = NULL;
+    size_t len = 0;
+    size_t take = 0;
+    uint32_t node;
+    atp_value value;
+    char number[64];
+    char buffer[64];
+
+    (void)user_data;
+    if (state == NULL) {
+        return NULL;
+    }
+    state->api = api;
+    state->ctx = ctx;
+    if (!atp_api_has_config_text(api)) {
+        config_append(state, "api-too-old");
+        return state;
+    }
+
+    if (api->config_text(ctx, &text, &len)) {
+        snprintf(number, sizeof(number), "text-len=%u ", (unsigned)len);
+        config_append(state, number);
+    } else {
+        config_append(state, "text=none ");
+    }
+
+    if (api->config_origin(ctx, &origin, &len)) {
+        take = len < sizeof(buffer) - 1 ? len : sizeof(buffer) - 1;
+        memcpy(buffer, origin, take);
+        buffer[take] = '\0';
+        config_append(state, "origin=");
+        config_append(state, buffer);
+        config_append(state, " ");
+    } else {
+        config_append(state, "origin=none ");
+    }
+
+    snprintf(number, sizeof(number), "opaque=%d ", api->config_is_opaque(ctx));
+    config_append(state, number);
+
+    node = api->config_find_path(ctx, api->config_root(ctx), "audio.rate", 10);
+    if (api->config_value_of(ctx, node, &value) && value.kind == ATP_KIND_I64) {
+        snprintf(number, sizeof(number), "rate=%d", (int)value.as.i64);
+        config_append(state, number);
+    } else {
+        config_append(state, "rate=none");
+    }
+    return state;
+}
+
+static const atp_module_desc config_text_module = {
+    sizeof(atp_module_desc),
+    "c_config_text",
+    {1, 0, 0, 0},
+    1,
+    NULL,
+    0,
+    config_outputs,
+    1,
+    NULL,
+    0,
+    NULL,
+    config_text_create,
+    config_destroy,
+    NULL,
+    NULL,
+    config_iterate,
+    NULL,
+    NULL,
+};
+
+static int config_bad_path_destroys = 0;
+
+static void config_bad_path_destroy(void* self) {
+    ++config_bad_path_destroys;
+    free(self);
+}
+
+static void* config_bad_path_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
+    config_state* state = (config_state*)calloc(1, sizeof(config_state));
+
+    (void)user_data;
+    if (state == NULL) {
+        return NULL;
+    }
+    state->api = api;
+    state->ctx = ctx;
+    if (atp_api_has_config_text(api)) {
+        api->config_find_path(ctx, api->config_root(ctx), "audio[rate", 10);
+    }
+    return state;
+}
+
+static void* destroys_taken_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
+    config_state* state = (config_state*)calloc(1, sizeof(config_state));
+    char number[32];
+
+    (void)user_data;
+    if (state == NULL) {
+        return NULL;
+    }
+    state->api = api;
+    state->ctx = ctx;
+    snprintf(number, sizeof(number), "destroys=%d", config_bad_path_destroys);
+    config_bad_path_destroys = 0;
+    config_append(state, number);
+    return state;
+}
+
+static const atp_module_desc config_bad_path_module = {
+    sizeof(atp_module_desc),
+    "c_config_bad_path",
+    {1, 0, 0, 0},
+    1,
+    NULL,
+    0,
+    config_outputs,
+    1,
+    NULL,
+    0,
+    NULL,
+    config_bad_path_create,
+    config_bad_path_destroy,
+    NULL,
+    NULL,
+    config_iterate,
+    NULL,
+    NULL,
+};
+
+static const atp_module_desc destroys_taken_module = {
+    sizeof(atp_module_desc),
+    "c_destroys_taken",
+    {1, 0, 0, 0},
+    1,
+    NULL,
+    0,
+    config_outputs,
+    1,
+    NULL,
+    0,
+    NULL,
+    destroys_taken_create,
+    config_destroy,
+    NULL,
+    NULL,
+    config_iterate,
+    NULL,
+    NULL,
 };
 
 typedef struct grown_desc {
@@ -316,6 +471,7 @@ static const grown_desc grown_module = {
         NULL,
         probe_iterate,
         NULL,
+        NULL,
     },
     0xfeedfaceu,
 };
@@ -325,7 +481,7 @@ ATP_C_EXPORT unsigned atp_c_abi_version(void) {
 }
 
 ATP_C_EXPORT unsigned atp_module_count(void) {
-    return 4;
+    return 7;
 }
 
 ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index) {
@@ -340,6 +496,15 @@ ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index) {
     }
     if (index == 3) {
         return &config_module;
+    }
+    if (index == 4) {
+        return &config_text_module;
+    }
+    if (index == 5) {
+        return &config_bad_path_module;
+    }
+    if (index == 6) {
+        return &destroys_taken_module;
     }
     return NULL;
 }

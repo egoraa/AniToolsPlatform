@@ -6,6 +6,64 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void scaler_copy_text(char* out, size_t cap, const atp_value* value) {
+    const size_t room = cap - 1;
+    const size_t take = value->as.bytes.size < room ? value->as.bytes.size : room;
+    memcpy(out, value->as.bytes.data, take);
+    out[take] = '\0';
+}
+
+static void scaler_read_config(scaler_state* state) {
+    uint32_t root;
+    uint32_t bands;
+    uint32_t count;
+    uint32_t i;
+    atp_value value;
+
+    memcpy(state->otherwise, "large", 6);
+    if (!atp_api_has_config(state->api)) {
+        return;
+    }
+
+    root = state->api->config_root(state->ctx);
+    if (state->api->config_value_of(state->ctx, state->api->config_find(state->ctx, root, "otherwise", 9), &value) &&
+        value.kind == ATP_KIND_TEXT) {
+        scaler_copy_text(state->otherwise, sizeof(state->otherwise), &value);
+    }
+
+    bands = state->api->config_find(state->ctx, root, "bands", 5);
+    if (state->api->config_kind(state->ctx, bands) != ATP_CONFIG_ARRAY) {
+        return;
+    }
+    count = state->api->config_size(state->ctx, bands);
+    for (i = 0; i < count && state->band_count < scaler_max_bands; ++i) {
+        const uint32_t band = state->api->config_child_at(state->ctx, bands, i);
+        scaler_band* out = &state->bands[state->band_count];
+
+        if (!state->api->config_value_of(state->ctx, state->api->config_find(state->ctx, band, "upto", 4), &value) ||
+            value.kind != ATP_KIND_I64) {
+            continue;
+        }
+        out->upto = (long long)value.as.i64;
+        if (!state->api->config_value_of(state->ctx, state->api->config_find(state->ctx, band, "name", 4), &value) ||
+            value.kind != ATP_KIND_TEXT) {
+            continue;
+        }
+        scaler_copy_text(out->name, sizeof(out->name), &value);
+        ++state->band_count;
+    }
+}
+
+static const char* scaler_band_of(const scaler_state* state, long long value) {
+    unsigned i;
+    for (i = 0; i < state->band_count; ++i) {
+        if (value <= state->bands[i].upto) {
+            return state->bands[i].name;
+        }
+    }
+    return state->otherwise;
+}
+
 void* scaler_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
     scaler_state* state = (scaler_state*)calloc(1, sizeof(scaler_state));
     (void)user_data;
@@ -14,6 +72,7 @@ void* scaler_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
     }
     state->api = api;
     state->ctx = ctx;
+    scaler_read_config(state);
     return state;
 }
 
@@ -80,10 +139,12 @@ atp_work scaler_iterate(void* self) {
 
         state->total += (long long)in.as.i32 * factor;
         if (scaler_verbose(state)) {
-            written = snprintf(text, sizeof(text), "%d x %d = %d (total %lld)", (int)in.as.i32, (int)factor,
-                               (int)(in.as.i32 * factor), state->total);
+            written =
+                snprintf(text, sizeof(text), "%d x %d = %d [%s] (total %lld)", (int)in.as.i32, (int)factor,
+                         (int)(in.as.i32 * factor), scaler_band_of(state, (long long)in.as.i32 * factor), state->total);
         } else {
-            written = snprintf(text, sizeof(text), "%d", (int)(in.as.i32 * factor));
+            written = snprintf(text, sizeof(text), "%d [%s]", (int)(in.as.i32 * factor),
+                               scaler_band_of(state, (long long)in.as.i32 * factor));
         }
 
         out.kind = ATP_KIND_TEXT;
@@ -135,6 +196,7 @@ static const atp_module_desc scaler_module = {
     NULL,
     scaler_start,
     scaler_iterate,
+    NULL,
     NULL,
 };
 

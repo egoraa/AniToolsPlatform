@@ -1097,3 +1097,75 @@ TEST(InputStats, CountsThroughAnHeirThatKeepsNoStorage) {
     EXPECT_EQ(s.received, 2u);
     EXPECT_EQ(in.first, 7);
 }
+
+TEST(InputsRegistry, KeepsDeclarationOrder) {
+    struct six : atp::io::inputs {
+        atp::io::input<int>& zulu = make<atp::io::input<int>>("zulu");
+        atp::io::input<int>& yankee = make<atp::io::input<int>>("yankee");
+        atp::io::input<int>& xray = make<atp::io::input<int>>("xray");
+        atp::io::input<int>& whiskey = make<atp::io::input<int>>("whiskey");
+        atp::io::input<int>& victor = make<atp::io::input<int>>("victor");
+        atp::io::input<int>& uniform = make<atp::io::input<int>>("uniform");
+    };
+    const six ins;
+    const std::vector<std::string> expected = {"zulu", "yankee", "xray", "whiskey", "victor", "uniform"};
+
+    std::vector<std::string> from_entries;
+    for (const auto& e : ins.entries()) {
+        from_entries.push_back(e.first);
+    }
+    EXPECT_EQ(from_entries, expected);
+
+    std::vector<std::string> from_list;
+    for (const atp::io::input_base* port : ins.list()) {
+        from_list.emplace_back(port->name());
+    }
+    EXPECT_EQ(from_list, expected);
+
+    std::vector<std::string> from_owned;
+    for (const atp::io::input_base* port : ins.owned()) {
+        from_owned.emplace_back(port->name());
+    }
+    EXPECT_EQ(from_owned, expected);
+}
+
+TEST(InputsRegistry, RemoveKeepsTheOrderOfTheRest) {
+    struct three : atp::io::inputs {
+        atp::io::input<int>& gamma = make<atp::io::input<int>>("gamma");
+        atp::io::input<int>& beta = make<atp::io::input<int>>("beta");
+        atp::io::input<int>& alpha = make<atp::io::input<int>>("alpha");
+    };
+    three ins;
+    ASSERT_TRUE(ins.remove("beta"));
+
+    std::vector<std::string> names;
+    for (const auto& e : ins.entries()) {
+        names.push_back(e.first);
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"gamma", "alpha"}));
+}
+
+TEST(InputsRegistry, ShortAndExplicitMakeAgree) {
+    struct both : atp::io::inputs {
+        atp::io::input<int>& plain = make<int>("plain");
+        atp::io::queued_input<int>& queued = make<atp::io::queued_input<int>>("queued", atp::io::drop_oldest(8));
+        atp::io::input<int>& spelled_out = make<atp::io::input<int>>("spelled_out");
+    };
+    both ins;
+    EXPECT_EQ(ins.plain.type(), std::type_index(typeid(int)));
+    EXPECT_EQ(ins.queued.type(), std::type_index(typeid(int)));
+    EXPECT_EQ(ins.spelled_out.type(), std::type_index(typeid(int)));
+    EXPECT_EQ(ins.list().size(), 3u);
+}
+
+TEST(PropertiesRegistry, DeducesTypeFromTheDefault) {
+    struct deduced : atp::io::properties {
+        atp::io::property<double>& gain = make("gain", 0.5);
+        atp::io::property<int>& limit = make<int>("limit", 10);
+        atp::io::property<std::string>& file = make<std::string>("file", "");
+    };
+    deduced props;
+    EXPECT_EQ(props.gain.get(), 0.5);
+    EXPECT_EQ(props.limit.get(), 10);
+    EXPECT_EQ(props.file.get(), "");
+}

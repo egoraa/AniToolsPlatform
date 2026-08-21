@@ -2,7 +2,7 @@
 #ifndef ATP_STUDIO_UI_LOG_WIDGET_HPP
 #define ATP_STUDIO_UI_LOG_WIDGET_HPP
 
-#include <atp/module_host.hpp>
+#include <atp/module/log_level.hpp>
 
 #include <QListWidget>
 #include <QPoint>

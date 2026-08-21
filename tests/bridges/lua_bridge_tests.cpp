@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -14,18 +15,18 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/hosting/module_registry.hpp>
+#include <atp/hosting/null_host.hpp>
 #include <atp/io.hpp>
 #include <atp/module.hpp>
-#include <atp/module_base.hpp>
-#include <atp/module_context.hpp>
-#include <atp/module_loader.hpp>
-#include <atp/module_registry.hpp>
-#include <atp/null_host.hpp>
-#include <atp/service_directory.hpp>
+#include <atp/module/module_base.hpp>
+#include <atp/module/module_context.hpp>
+#include <atp/module/service_directory.hpp>
+#include <atp/runtime/module_loader.hpp>
 #include <atp/studio/languages.hpp>
 #include <atp/studio/module_manager.hpp>
 #include <atp/studio/script_modules.hpp>
-#include <atp/version.hpp>
+#include <atp/support/version.hpp>
 
 namespace {
 
@@ -95,7 +96,7 @@ struct probe_outputs : atp::io::outputs {
     atp::io::output<atp::io::blob>& bytes = make<atp::io::output<atp::io::blob>>("bytes");
 };
 
-class probe_module : public atp::module<atp::io::ports<probe_inputs, probe_outputs>, "lua_test_host"> {};
+class probe_module : public atp::module<atp::ports<probe_inputs, probe_outputs>, "lua_test_host"> {};
 
 class lua_bridge_test : public ::testing::Test {
    protected:
@@ -119,13 +120,13 @@ class lua_bridge_test : public ::testing::Test {
     }
 
     [[nodiscard]] bool registered(const std::string& name, atp::version expected) const {
-        return std::ranges::any_of(loader_->modules(), [&name, expected](const atp::registered_module& m) {
+        return std::ranges::any_of(loader_->modules(), [&name, expected](const atp::runtime::registered_module& m) {
             return m.name == name && m.ver == expected;
         });
     }
 
     [[nodiscard]] std::string source_of(const std::string& name) const {
-        for (const atp::registered_module& m : loader_->modules()) {
+        for (const atp::runtime::registered_module& m : loader_->modules()) {
             if (m.name == name) {
                 return m.source;
             }
@@ -133,12 +134,26 @@ class lua_bridge_test : public ::testing::Test {
         return {};
     }
 
+    [[nodiscard]] static std::filesystem::path own_scripts_dir() {
+        return std::filesystem::path(ATP_LUA_BRIDGE).parent_path() / "lua";
+    }
+
+    [[nodiscard]] std::size_t registered_from(const std::filesystem::path& dir) const {
+        std::error_code ec;
+        const std::filesystem::path root = std::filesystem::weakly_canonical(dir, ec);
+        return static_cast<std::size_t>(
+            std::ranges::count_if(loader_->modules(), [&root](const atp::runtime::registered_module& m) {
+                std::error_code inner;
+                return std::filesystem::weakly_canonical(std::filesystem::path(m.source).parent_path(), inner) == root;
+            }));
+    }
+
     void create(const std::string& name) {
         module_ = registry_.create(name);
         ASSERT_NE(module_, nullptr);
     }
 
-    void create(const std::string& name, const atp::config_value& cfg) {
+    void create(const std::string& name, const atp::module_config& cfg) {
         module_ = registry_.create(name, cfg);
         ASSERT_NE(module_, nullptr);
     }
@@ -161,7 +176,7 @@ class lua_bridge_test : public ::testing::Test {
     }
 
     atp::module_registry registry_;
-    std::optional<atp::module_loader> loader_;
+    std::optional<atp::runtime::module_loader> loader_;
     probe_module host_;
     atp::module_ptr module_;
     atp::service_directory services_;
@@ -175,7 +190,10 @@ class lua_bridge_test : public ::testing::Test {
 TEST_F(lua_bridge_test, LoadsWithNoModulesWhenNothingIsScanned) {
     scan("");
     load();
-    EXPECT_TRUE(loader_->modules().empty());
+    EXPECT_EQ(loader_->modules().size(), registered_from(own_scripts_dir()))
+        << "an empty ATP_LUA_PATH must add no directory of its own; everything registered has to come from "
+           "lua/ beside the bridge, which in a build tree and in an installation alike also holds the "
+           "sample pipeline's scripts";
 }
 
 TEST_F(lua_bridge_test, RegistersAModuleDeclaredByAScript) {
@@ -336,7 +354,9 @@ TEST_F(lua_bridge_test, ReportsAScriptErrorAsAModuleError) {
 TEST_F(lua_bridge_test, SkipsABrokenScriptAndKeepsItsNeighbour) {
     scan(ATP_LUA_BRIDGE_SCRIPTS_BROKEN);
     load();
-    EXPECT_EQ(loader_->modules().size(), 1u) << "one unreadable script must not take the directory down with it";
+    EXPECT_EQ(registered_from(ATP_LUA_BRIDGE_SCRIPTS_BROKEN), 1u)
+        << "one unreadable script must not take the directory down with it, and the count is of that "
+           "directory alone: lua/ beside the bridge carries the sample scripts too";
     EXPECT_NE(registry_.find("lua_neighbour"), nullptr);
 }
 
@@ -388,7 +408,7 @@ TEST(LuaBridgeReload, AScriptDirectoryNamedTwiceIsWalkedOnce) {
 
     atp::module_registry registry;
     EXPECT_NO_THROW({
-        const atp::module_loader loader(ATP_LUA_BRIDGE, registry);
+        const atp::runtime::module_loader loader(ATP_LUA_BRIDGE, registry);
         EXPECT_NE(registry.find("lua_declares"), nullptr);
     }) << "walking a directory twice registers every name twice and the whole plugin is refused";
     set_scan_path("");
@@ -437,14 +457,14 @@ TEST(LuaBridgeReload, ANonAsciiFolderAndScriptNameAreReadAndReported) {
     set_scan_path_wide(root);
 
     atp::module_registry registry;
-    const atp::module_loader loader(ATP_LUA_BRIDGE, registry);
+    const atp::runtime::module_loader loader(ATP_LUA_BRIDGE, registry);
 
     ASSERT_NE(registry.find("lua_non_ascii"), nullptr)
         << "a narrow path converts through the process code page: the directory used to be silently "
            "absent, and the script name used to throw out of an extern \"C\" entry point";
 
     std::string reported;
-    for (const atp::registered_module& m : loader.modules()) {
+    for (const atp::runtime::registered_module& m : loader.modules()) {
         if (m.name == "lua_non_ascii") {
             reported = m.source;
         }
@@ -465,11 +485,11 @@ TEST(LuaBridgeReload, ANonAsciiFolderAndScriptNameAreReadAndReported) {
 TEST_F(lua_bridge_test, ConfigReachesAScriptAsATable) {
     scan(ATP_LUA_BRIDGE_SCRIPTS);
     load();
-    create("lua_config", atp::config_value::object({
-                             {"channels", atp::config_value::array({1, 2, 6})},
+    create("lua_config", atp::module_config(atp::config::node::object({
+                             {"channels", atp::config::node::array({1, 2, 6})},
                              {"name", "rig"},
-                             {"nested", atp::config_value::object({{"deep", true}})},
-                         }));
+                             {"nested", atp::config::node::object({{"deep", true}})},
+                         })));
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -486,4 +506,38 @@ TEST_F(lua_bridge_test, AScriptWithNoConfigSeesNil) {
 
     EXPECT_EQ(pass(), atp::work_status::busy);
     EXPECT_EQ(host_.inputs().text.get(), "config=nil");
+}
+
+TEST_F(lua_bridge_test, AnOpaqueConfigReachesAScriptAsTextAndOrigin) {
+    scan(ATP_LUA_BRIDGE_SCRIPTS);
+    load();
+    create("lua_config_text", atp::module_config::opaque("rate = 48000\n", "rig.ini"));
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text-len=13 origin=rig.ini opaque=true rate=none");
+}
+
+TEST_F(lua_bridge_test, AParsedConfigLeavesTheTextEmptyAndTheTableReadable) {
+    scan(ATP_LUA_BRIDGE_SCRIPTS);
+    load();
+    create("lua_config_text",
+           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}})));
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text-len=0 origin=none opaque=false rate=48000");
+}
+
+TEST_F(lua_bridge_test, TextThatIsNotUtf8ReachesAScriptAsBytes) {
+    scan(ATP_LUA_BRIDGE_SCRIPTS);
+    load();
+    create("lua_config_text", atp::module_config::opaque(std::string("\xff\xfe rate", 7), "rig.ini"));
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "text-len=7 origin=rig.ini opaque=true rate=none");
 }

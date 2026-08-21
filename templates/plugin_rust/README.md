@@ -47,6 +47,38 @@ lets the host see a structure **shorter** than the expected one, so a forgotten 
 error at load. A reordered or retyped field is caught by nothing, so when `ATP_C_ABI` changes, check
 against the header rather than against this file.
 
+## Reading the config
+
+The config is the second channel beside properties: a structure — a list, a table, a nested object —
+that the module is given at creation and that nobody edits while it runs. `rust_averager` takes a
+`weights` list that way, while `window` stays a property:
+
+```json
+{
+    "module": "rust_averager",
+    "name": "mean",
+    "properties": { "window": 4, "mode": "verbose" },
+    "config": { "weights": [1, 2, 3, 4] }
+}
+```
+
+`read_weights` in `src/lib.rs` is called from `create`, which is where a config may be read: it is
+the C path's analogue of a constructor, and the channel exists for what has to be known before a port
+is connected. Nothing is allocated across the boundary — the tree is walked through handles
+(`config_root`, `config_find`, `config_child_at`, `config_value_of`) and copied into a `Vec` here.
+
+Two rules the function shows. The accessors were **appended** to `AtpApi` after `ATP_C_ABI` 1, so
+`api.has_config()` is asked before any of them is called — see the comment on that method for why its
+threshold is not `size_of::<AtpApi>()`. And every read degrades to an empty vector rather than
+failing: the node may have named no config at all, and a module that fell over on that would be a
+module nobody could place without first giving it something it refuses to run without.
+
+Four more accessors were appended later still, and they have a detector of their own for exactly that
+reason — `api.has_config_text()`, never `has_config()`, which a host carrying only the first seven
+answers yes to. They are `config_find_path` (a whole dotted path in one call, followed only from the
+root), and `config_text` / `config_origin` / `config_is_opaque` for a config the pipeline attached as a
+file in a format the host does not parse: the bytes arrive verbatim and the module parses them itself.
+
 ## A panic is not "just an error"
 
 A panic unwinding into a C++ frame is undefined behaviour, and it is the main thing to take away from

@@ -3,12 +3,15 @@
 #define ATP_STUDIO_UI_EDITOR_HPP
 
 #include <filesystem>
+#include <string>
 
 #include <QDesktopServices>
 #include <QProcess>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
+
+#include "model/app_state.hpp"
 
 namespace atp::studio::ui {
 
@@ -50,6 +53,48 @@ namespace atp::studio::ui {
     }
     const QString program = parts.takeFirst();
     return QProcess::startDetached(program, parts);
+}
+
+/// Opens a file in the configured editor, saying so in the Log when nothing could be started.
+///
+/// The wording of that one failure lives here rather than at each gesture: File > New module, the
+/// plugins dock, the canvas and the project tree all open the same kind of file and owe the same
+/// answer when no editor starts. Whatever the editor itself then makes of the file is its own
+/// business and not ours to report.
+/// @param file path as text, already decoded — see module_source() for why that matters
+inline void open_source(app_state& state, ui_callbacks& callbacks, const QString& file) {
+    if (!open_in_editor(QString::fromStdString(state.settings.editor_command),
+                        std::filesystem::path(file.toStdWString()))) {
+        callbacks.report(QString("could not open an editor for %1; open it by hand").arg(file),
+                         atp::log_level::warning);
+    }
+}
+
+/// The file the module `child` of `group` was declared in — the script behind a script module.
+///
+/// What the gesture is offered on: a module has something to open only when its plugin named a file,
+/// which a bridge does for every script it registers and a compiled plugin does for nothing. So an
+/// empty answer is the ordinary case and means "no such item in the menu", not an error.
+///
+/// The path is decoded through QString because it arrives as UTF-8 — what plugin_c.h promises of
+/// every string crossing that boundary — while std::filesystem::path's narrow constructor reads the
+/// process code page on Windows and would mangle a script folder named outside it.
+/// @param group group holding the module ("" is the root)
+/// @param child module name within that group
+/// @return the file, empty for a group, for a factory the manager does not know, and for a module
+///         whose plugin named no file
+[[nodiscard]] inline QString module_source(app_state& state, const std::string& group, const std::string& child) {
+    const runtime::group_node* g = state.doc.group_at(group);
+    if (g == nullptr) {
+        return {};
+    }
+    for (const runtime::child_node& c : g->modules) {
+        if (c.module && c.module->name == child) {
+            const module_info* info = state.describe_cached(c.module->factory, c.module->factory_version);
+            return info == nullptr ? QString() : QString::fromStdString(info->source);
+        }
+    }
+    return {};
 }
 
 }  // namespace atp::studio::ui

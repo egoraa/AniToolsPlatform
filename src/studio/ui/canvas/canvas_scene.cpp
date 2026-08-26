@@ -8,23 +8,30 @@
 #include "model/property_actions.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <ranges>
 #include <set>
 #include <tuple>
 #include <typeindex>
+#include <utility>
 
 #include <QAction>
+#include <QApplication>
 #include <QBrush>
 #include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneDragDropEvent>
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsView>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QMenu>
 #include <QMimeData>
+#include <QPainter>
 #include <QPen>
+#include <QRectF>
 #include <QStringList>
 #include <QTimer>
 
@@ -35,6 +42,36 @@ namespace atp::studio::ui {
 namespace {
 
 constexpr float paste_offset = 30.0f;
+constexpr double drag_line_width = 1.5;
+
+/// Spacing of the background grid, and how many of its lines make one stronger one. Twenty is half a
+/// port row, so a node's ports land on the grid rather than between its lines.
+constexpr double grid_step = 20.0;
+constexpr int grid_major_every = 5;
+
+/// Below this scale the grid is not drawn at all: at a distant zoom its lines fall closer together
+/// than the pixels that would carry them, and what reaches the screen is a grey wash over the
+/// canvas rather than a measure of anything.
+constexpr double grid_min_scale = 0.4;
+
+[[nodiscard]] std::int64_t grid_line_at(double scene_coordinate) {
+    return static_cast<std::int64_t>(std::floor(scene_coordinate / grid_step));
+}
+
+/// Inset of a node's text from its left edge, and therefore twice over from its width.
+constexpr double node_text_inset = 8.0;
+
+/// Sets a node's line of text, shortened to fit the node and carrying the whole of it in a tooltip.
+/// A QGraphicsSimpleTextItem clips nothing of its own, so a long factory name simply ran out past
+/// the node and over whatever was beside it.
+/// @param item the text item
+/// @param text what it should say
+void set_node_text(QGraphicsSimpleTextItem* item, const QString& text) {
+    const QFontMetricsF metrics(item->font());
+    const double room = node_width - (2 * node_text_inset);
+    item->setText(metrics.elidedText(text, Qt::ElideRight, room));
+    item->setToolTip(text);
+}
 
 bool drop_allowed(const pin_item& from, const pin_item& to) {
     const pin_item& out = from.is_output() ? from : to;
@@ -48,7 +85,7 @@ bool drop_allowed(const pin_item& from, const pin_item& to) {
 }  // namespace
 
 canvas_scene::canvas_scene(app_state& state, ui_callbacks& callbacks, QObject* parent)
-    : QGraphicsScene(parent), state_(state), callbacks_(callbacks) {
+    : QGraphicsScene(parent), state_(state), callbacks_(callbacks), colors_(canvas_colors(QApplication::palette())) {
     QObject::connect(this, &QGraphicsScene::selectionChanged, this, [this] {
         if (rebuilding_) {
             return;
@@ -73,7 +110,14 @@ canvas_scene::~canvas_scene() {
     disconnect(this, &QGraphicsScene::selectionChanged, this, nullptr);
 }
 
+void canvas_scene::set_colors(const canvas_palette& colors) {
+    colors_ = colors;
+}
+
 void canvas_scene::rebuild() {
+    if (select_after_rebuild_.empty()) {
+        select_after_rebuild_ = selected_node_names();
+    }
     rebuilding_ = true;
     clear();
     links_.clear();
@@ -146,6 +190,28 @@ void canvas_scene::update_samples() {
     }
 }
 
+void canvas_scene::drawBackground(QPainter* painter, const QRectF& rect) {
+    QGraphicsScene::drawBackground(painter, rect);
+    const auto views_of = views();
+    const double scale = views_of.isEmpty() ? 1.0 : views_of.front()->transform().m11();
+    if (scale < grid_min_scale) {
+        return;
+    }
+
+    const QPen minor(colors_.grid_line, 0.0);
+    const QPen major(colors_.grid_line_major, 0.0);
+    for (std::int64_t i = grid_line_at(rect.left()); static_cast<double>(i) * grid_step <= rect.right(); ++i) {
+        const double x = static_cast<double>(i) * grid_step;
+        painter->setPen(i % grid_major_every == 0 ? major : minor);
+        painter->drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()));
+    }
+    for (std::int64_t i = grid_line_at(rect.top()); static_cast<double>(i) * grid_step <= rect.bottom(); ++i) {
+        const double y = static_cast<double>(i) * grid_step;
+        painter->setPen(i % grid_major_every == 0 ? major : minor);
+        painter->drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y));
+    }
+}
+
 void canvas_scene::dragEnterEvent(QGraphicsSceneDragDropEvent* event) {
     accept_palette_drag(event);
 }
@@ -197,8 +263,8 @@ void canvas_scene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
     if (!state_.view->running() && event->button() == Qt::LeftButton) {
         if (auto* pin = pin_at(event->scenePos())) {
             drag_from_ = pin;
-            temp_link_ =
-                addLine(QLineF(pin->scenePos(), event->scenePos()), QPen(QColor(200, 200, 120), 1.5, Qt::DashLine));
+            temp_link_ = addLine(QLineF(pin->scenePos(), event->scenePos()),
+                                 QPen(colors_.drag_line, drag_line_width, Qt::DashLine));
             mark_eligible_pins(*pin);
             event->accept();
             return;
@@ -567,9 +633,41 @@ void canvas_scene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
     QGraphicsScene::mouseDoubleClickEvent(event);
 }
 
+std::pair<QAction*, QAction*> canvas_scene::add_view_actions(QMenu& menu) {
+    if (!on_fit_to_window && !on_actual_size) {
+        return {nullptr, nullptr};
+    }
+    if (!menu.isEmpty()) {
+        menu.addSeparator();
+    }
+    QAction* fit = nullptr;
+    QAction* actual = nullptr;
+    if (on_fit_to_window) {
+        fit = menu.addAction(QStringLiteral("Fit to Window"));
+        fit->setShortcut(QKeySequence("Ctrl+Shift+F"));
+    }
+    if (on_actual_size) {
+        actual = menu.addAction(QStringLiteral("Actual Size"));
+        actual->setShortcut(QKeySequence("Ctrl+0"));
+    }
+    return {fit, actual};
+}
+
 void canvas_scene::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
     if (state_.view->running()) {
-        QGraphicsScene::contextMenuEvent(event);
+        QMenu running;
+        const auto [fit, actual] = add_view_actions(running);
+        if (running.isEmpty()) {
+            QGraphicsScene::contextMenuEvent(event);
+            return;
+        }
+        QAction* picked = running.exec(event->screenPos());
+        if (picked != nullptr && picked == fit) {
+            on_fit_to_window();
+        } else if (picked != nullptr && picked == actual) {
+            on_actual_size();
+        }
+        event->accept();
         return;
     }
     if (pin_item* pin = pin_at(event->scenePos())) {
@@ -606,11 +704,16 @@ void canvas_scene::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
     QAction* paste = menu.addAction(QStringLiteral("Paste"));
     paste->setShortcut(QKeySequence::Paste);
     paste->setEnabled(!state_.clip.empty());
+    const auto [fit, actual] = add_view_actions(menu);
     QAction* chosen = menu.exec(event->screenPos());
     if (chosen == group) {
         create_group(state_, callbacks_, where);
     } else if (chosen == paste) {
         paste_at(where);
+    } else if (chosen != nullptr && chosen == fit) {
+        on_fit_to_window();
+    } else if (chosen != nullptr && chosen == actual) {
+        on_actual_size();
     }
     event->accept();
 }
@@ -781,31 +884,32 @@ void canvas_scene::build_node(const runtime::child_node& c,
     }
 
     const double height = node_header + (pin_row * static_cast<double>(ports.size())) + 6.0;
-    auto* node = new node_item(name, !c.module, height);
+    auto* node = new node_item(name, !c.module, height, colors_);
     addItem(node);
 
     auto* title = new QGraphicsSimpleTextItem(node);
-    title->setBrush(QBrush(Qt::white));
-    title->setText(QString::fromStdString(c.module ? name : "[" + name + "]"));
-    title->setPos(8, 4);
+    title->setBrush(QBrush(colors_.node_title));
+    set_node_text(title, QString::fromStdString(c.module ? name : "[" + name + "]"));
+    title->setPos(node_text_inset, 4);
     if (c.module) {
         auto* subtitle = new QGraphicsSimpleTextItem(node);
-        subtitle->setBrush(QBrush(QColor(160, 160, 170)));
-        subtitle->setText(QString::fromStdString(c.module->factory));
-        subtitle->setPos(8, 18);
+        subtitle->setBrush(QBrush(colors_.node_subtitle));
+        QString said = QString::fromStdString(c.module->factory);
         if (state_.describe_cached(c.module->factory, c.module->factory_version) == nullptr) {
-            subtitle->setText(subtitle->text() + "  (no factory)");
-            subtitle->setBrush(QBrush(QColor(230, 120, 120)));
+            said += QStringLiteral("  (no factory)");
+            subtitle->setBrush(QBrush(colors_.node_alert));
         }
+        set_node_text(subtitle, said);
+        subtitle->setPos(node_text_inset, 18);
     }
 
     double y = node_header;
     for (const auto& [port, is_output, port_type] : ports) {
         auto* label = new QGraphicsSimpleTextItem(node);
-        label->setBrush(QBrush(QColor(200, 200, 210)));
+        label->setBrush(QBrush(colors_.port_label));
         label->setText(QString::fromStdString(port));
         label->setPos(is_output ? node_width - 14.0 - label->boundingRect().width() : 14.0, y);
-        auto* pin = new pin_item(node, name + "." + port, is_output, port_type);
+        auto* pin = new pin_item(node, name + "." + port, is_output, port_type, colors_);
         pin->setToolTip(pin_tooltip(port, port_type, is_output));
         pin->setPos(is_output ? node_width : 0.0, y + 7.0);
         pins_[pin_key(name + "." + port, is_output)] = pin;
@@ -827,7 +931,7 @@ void canvas_scene::build_node(const runtime::child_node& c,
 
 void canvas_scene::rebuild_links(const runtime::group_node& g) {
     for (std::size_t i = 0; i < g.connections.size(); ++i) {
-        auto* link = new link_item(i);
+        auto* link = new link_item(i, colors_);
         addItem(link);
         links_.push_back(link);
     }
@@ -853,7 +957,7 @@ void canvas_scene::add_stub(const runtime::group_node& g,
         return;
     }
     const std::optional<std::type_index> port_type = resolve_port_type(g, path, is_output, describer());
-    auto* stub = new stub_item(is_output, alias, port_type);
+    auto* stub = new stub_item(is_output, alias, port_type, colors_);
     addItem(stub);
     stubs_.push_back(stub);
 }

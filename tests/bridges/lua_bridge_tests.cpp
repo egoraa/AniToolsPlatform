@@ -22,6 +22,7 @@
 #include <atp/module/module_base.hpp>
 #include <atp/module/module_context.hpp>
 #include <atp/module/service_directory.hpp>
+#include <atp/runtime/config_binding.hpp>
 #include <atp/runtime/module_loader.hpp>
 #include <atp/studio/languages.hpp>
 #include <atp/studio/module_manager.hpp>
@@ -153,9 +154,15 @@ class lua_bridge_test : public ::testing::Test {
         ASSERT_NE(module_, nullptr);
     }
 
-    void create(const std::string& name, const atp::module_config& cfg) {
-        module_ = registry_.create(name, cfg);
+    void create(const std::string& name, const atp::runtime::config_source& source) {
+        module_ = registry_.create(name, filled(name, source));
         ASSERT_NE(module_, nullptr);
+    }
+
+    [[nodiscard]] atp::config_ptr filled(const std::string& name, const atp::runtime::config_source& source) {
+        atp::config_ptr cfg = registry_.at(name).make_config();
+        atp::runtime::load_fields_or_throw(*cfg, source);
+        return cfg;
     }
 
     void feed(atp::io::output_base& source, const std::string& port) {
@@ -485,11 +492,14 @@ TEST(LuaBridgeReload, ANonAsciiFolderAndScriptNameAreReadAndReported) {
 TEST_F(lua_bridge_test, ConfigReachesAScriptAsATable) {
     scan(ATP_LUA_BRIDGE_SCRIPTS);
     load();
-    create("lua_config", atp::module_config(atp::config::node::object({
-                             {"channels", atp::config::node::array({1, 2, 6})},
-                             {"name", "rig"},
-                             {"nested", atp::config::node::object({{"deep", true}})},
-                         })));
+    create("lua_config", {atp::config::node::object({
+                              {"channels", atp::config::node::array({1, 2, 6})},
+                              {"name", "rig"},
+                              {"nested", atp::config::node::object({{"deep", true}})},
+                          }),
+                          {},
+                          {},
+                          false});
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -511,7 +521,7 @@ TEST_F(lua_bridge_test, AScriptWithNoConfigSeesNil) {
 TEST_F(lua_bridge_test, AnOpaqueConfigReachesAScriptAsTextAndOrigin) {
     scan(ATP_LUA_BRIDGE_SCRIPTS);
     load();
-    create("lua_config_text", atp::module_config::opaque("rate = 48000\n", "rig.ini"));
+    create("lua_config_text", {{}, "rate = 48000\n", "rig.ini", true});
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -523,7 +533,7 @@ TEST_F(lua_bridge_test, AParsedConfigLeavesTheTextEmptyAndTheTableReadable) {
     scan(ATP_LUA_BRIDGE_SCRIPTS);
     load();
     create("lua_config_text",
-           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}})));
+           {atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}}), {}, {}, false});
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -534,10 +544,39 @@ TEST_F(lua_bridge_test, AParsedConfigLeavesTheTextEmptyAndTheTableReadable) {
 TEST_F(lua_bridge_test, TextThatIsNotUtf8ReachesAScriptAsBytes) {
     scan(ATP_LUA_BRIDGE_SCRIPTS);
     load();
-    create("lua_config_text", atp::module_config::opaque(std::string("\xff\xfe rate", 7), "rig.ini"));
+    create("lua_config_text", {{}, std::string("\xff\xfe rate", 7), "rig.ini", true});
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
     EXPECT_EQ(pass(), atp::work_status::busy);
     EXPECT_EQ(host_.inputs().text.get(), "text-len=7 origin=rig.ini opaque=true rate=none");
+}
+
+TEST_F(lua_bridge_test, ADeclaredConfigReachesAScriptFilledWithItsDefaults) {
+    scan(ATP_LUA_BRIDGE_SCRIPTS);
+    load();
+    create("lua_declared", {atp::config::node::object({{"rate", 48000}}), {}, {}, false});
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(), "rate=48000 engine=fm note=60 voices=0 taps=0")
+        << "only rate was written; every other key is the declaration's own default";
+}
+
+TEST_F(lua_bridge_test, ADeclaringScriptDescribesItsConfigWithoutBeingBuilt) {
+    scan(ATP_LUA_BRIDGE_SCRIPTS);
+    load();
+    const atp::config_ptr cfg = registry_.at("lua_declared").make_config();
+
+    ASSERT_NE(cfg, nullptr);
+    ASSERT_EQ(cfg->entries().size(), 5U);
+    EXPECT_EQ(cfg->entries()[0].name(), "rate") << "a Lua table has no order, so the proxy is what keeps it";
+    EXPECT_EQ(cfg->entries()[1].name(), "engine");
+    EXPECT_EQ(cfg->entries()[2].name(), "master");
+    EXPECT_EQ(cfg->entries()[3].name(), "voices");
+    EXPECT_EQ(cfg->entries()[4].name(), "taps");
+    EXPECT_TRUE(cfg->find("rate")->required());
+    EXPECT_EQ(cfg->find("engine")->options(), (std::vector<std::string>{"fm", "additive"}));
+    EXPECT_EQ(cfg->find("voices")->element_shape().entries()[0].name(), "note");
 }

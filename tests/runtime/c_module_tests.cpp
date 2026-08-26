@@ -17,8 +17,11 @@
 #include <atp/module/module_base.hpp>
 #include <atp/module/module_context.hpp>
 #include <atp/module/service_directory.hpp>
+#include <atp/runtime/c_config.hpp>
 #include <atp/runtime/c_module.hpp>
+#include <atp/runtime/config_binding.hpp>
 #include <atp/runtime/module_loader.hpp>
+#include <atp/runtime/raw_config.hpp>
 
 namespace {
 
@@ -75,8 +78,11 @@ class c_module_test : public ::testing::Test {
         ASSERT_NE(module_, nullptr);
     }
 
-    void create(const std::string& name, const atp::module_config& cfg) {
-        module_ = registry_.create(name, cfg);
+    void create(const std::string& name, const atp::runtime::config_source& source) {
+        atp::config_ptr cfg = registry_.at(name).make_config();
+        ASSERT_NE(cfg, nullptr);
+        atp::runtime::load_fields_or_throw(*cfg, source);
+        module_ = registry_.create(name, std::move(cfg));
         ASSERT_NE(module_, nullptr);
     }
 
@@ -118,7 +124,8 @@ TEST_F(c_module_test, RegistersEveryDescribedModule) {
                                       {"c_config", atp::version(1), ""},
                                       {"c_config_text", atp::version(1), ""},
                                       {"c_config_bad_path", atp::version(1), ""},
-                                      {"c_destroys_taken", atp::version(1), ""}}));
+                                      {"c_destroys_taken", atp::version(1), ""},
+                                      {"c_declared", atp::version(1), ""}}));
     EXPECT_EQ(registry_.at("c_probe").get_version(), atp::version(2, 1));
 }
 
@@ -368,10 +375,13 @@ TEST_F(c_module_test, MalformedDescriptorWithdrawsTheSoundOnes) {
 
 TEST_F(c_module_test, ConfigIsReadableThroughTheAccessors) {
     load(ATP_TEST_PLUGIN_C);
-    create("c_config", atp::module_config(atp::config::node::object({
-                           {"channels", atp::config::node::array({1, 2, 6})},
-                           {"name", "rig"},
-                       })));
+    create("c_config", {atp::config::node::object({
+                            {"channels", atp::config::node::array({1, 2, 6})},
+                            {"name", "rig"},
+                        }),
+                        {},
+                        {},
+                        false});
     collect("report", host_.inputs().text);
     run_lifecycle();
 
@@ -397,7 +407,7 @@ TEST_F(c_module_test, ConfigRootIsNullWhenNoneWasGiven) {
 
 TEST_F(c_module_test, OpaqueConfigTextAndOriginReachAForeignModule) {
     load(ATP_TEST_PLUGIN_C);
-    create("c_config_text", atp::module_config::opaque("rate = 48000\n", "rig.ini"));
+    create("c_config_text", {{}, "rate = 48000\n", "rig.ini", true});
     collect("report", host_.inputs().text);
     run_lifecycle();
 
@@ -408,7 +418,7 @@ TEST_F(c_module_test, OpaqueConfigTextAndOriginReachAForeignModule) {
 TEST_F(c_module_test, APathFindsANodeAndAConfigWithoutAFileHasNoText) {
     load(ATP_TEST_PLUGIN_C);
     create("c_config_text",
-           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}})));
+           {atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}}), {}, {}, false});
     collect("report", host_.inputs().text);
     run_lifecycle();
 
@@ -441,9 +451,8 @@ TEST_F(c_module_test, AFailedCreateStillDestroysWhatThePluginBuilt) {
 
 TEST_F(c_module_test, AParsedFileCarriesTextAndTreeAtOnce) {
     load(ATP_TEST_PLUGIN_C);
-    create("c_config_text",
-           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}}),
-                              "{\"audio\":{\"rate\":48000}}", "rig.json"));
+    create("c_config_text", {atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}}),
+                             "{\"audio\":{\"rate\":48000}}", "rig.json", false});
     collect("report", host_.inputs().text);
     run_lifecycle();
 
@@ -555,4 +564,66 @@ TEST_F(c_module_test, DeclarationRefusesAnUnparsableDefaultTheSameWayCreationDoe
     } catch (const std::invalid_argument& e) {
         EXPECT_NE(std::string(e.what()).find("unparsable default"), std::string::npos);
     }
+}
+
+TEST_F(c_module_test, AModuleDeclaringFieldsGetsAConfigThatCarriesThem) {
+    load(ATP_TEST_PLUGIN_C);
+    const atp::config_ptr cfg = registry_.at("c_declared").make_config();
+
+    ASSERT_NE(cfg, nullptr);
+    EXPECT_EQ(dynamic_cast<const atp::runtime::raw_config*>(cfg.get()), nullptr);
+    ASSERT_EQ(cfg->entries().size(), 5U);
+    EXPECT_EQ(cfg->entries()[0].name(), "rate");
+    EXPECT_TRUE(cfg->entries()[0].required());
+    EXPECT_EQ(cfg->find("engine")->options(), (std::vector<std::string>{"fm", "additive"}));
+    EXPECT_EQ(cfg->find("master")->group().find("gain")->value<double>(), 1.0);
+    EXPECT_EQ(cfg->find("voices")->element_shape().entries()[0].name(), "note");
+}
+
+TEST_F(c_module_test, AModuleDeclaringNoFieldsStillGetsTheDocumentWhole) {
+    load(ATP_TEST_PLUGIN_C);
+    const atp::config_ptr cfg = registry_.at("c_config").make_config();
+
+    EXPECT_NE(dynamic_cast<const atp::runtime::raw_config*>(cfg.get()), nullptr);
+    EXPECT_TRUE(cfg->entries().empty());
+}
+
+TEST_F(c_module_test, TheModuleReadsDefaultsForKeysTheDocumentDidNotWrite) {
+    load(ATP_TEST_PLUGIN_C);
+    create("c_declared", {atp::config::node::object({{"rate", 48000}}), {}, {}, false});
+    collect("report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    const std::string report = host_.inputs().text.get();
+    EXPECT_NE(report.find("rate=yes"), std::string::npos);
+    EXPECT_NE(report.find("engine=yes"), std::string::npos) << "a default the document never wrote";
+    EXPECT_NE(report.find("gain=yes"), std::string::npos) << "a default inside a nested object";
+    EXPECT_NE(report.find("taps=yes"), std::string::npos) << "an array nobody grew is still an array";
+    EXPECT_NE(report.find("absent=no"), std::string::npos) << "an undeclared key is nowhere to be found";
+}
+
+TEST_F(c_module_test, ARequiredFieldTheDocumentOmitsIsAProblemNamingTheFile) {
+    load(ATP_TEST_PLUGIN_C);
+    const atp::config_ptr cfg = registry_.at("c_declared").make_config();
+
+    try {
+        atp::runtime::load_fields_or_throw(*cfg, {atp::config::node::object({}), {}, "rig.json", false});
+        FAIL() << "expected a config_error";
+    } catch (const std::exception& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("rig.json"), std::string::npos);
+        EXPECT_NE(what.find("rate"), std::string::npos);
+    }
+}
+
+TEST_F(c_module_test, AnOpaqueFileLeavesEveryFieldAtItsDefaultAndStillDeliversTheText) {
+    load(ATP_TEST_PLUGIN_C);
+    const atp::config_ptr cfg = registry_.at("c_declared").make_config();
+    (void)atp::runtime::load_fields(*cfg, {atp::config::node(), "rate = 3", "rig.ini", true});
+
+    EXPECT_EQ(cfg->text(), "rate = 3");
+    EXPECT_EQ(cfg->origin(), "rig.ini");
+    EXPECT_TRUE(cfg->is_opaque());
+    EXPECT_EQ(cfg->find("engine")->value<std::string>(), "fm");
 }

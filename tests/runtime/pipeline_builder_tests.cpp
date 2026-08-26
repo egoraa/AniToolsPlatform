@@ -92,10 +92,16 @@ struct limiter_props : atp::io::properties {
 };
 class limit_sink : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, limiter_props>, "limiter"> {};
 
+struct channels_config : atp::module_config {
+    using module_config::module_config;
+    std::int64_t& channels = field("channels", std::int64_t{0});
+};
+
 class config_reading_module : public atp::module<atp::ports<>, "config_reader"> {
    public:
-    explicit config_reading_module(const atp::module_config& cfg)
-        : channels_(atp::config::int_or(cfg.find("channels"), 0)) {}
+    using config_type = channels_config;
+
+    explicit config_reading_module(std::unique_ptr<channels_config> cfg) : channels_(cfg->channels) {}
 
     [[nodiscard]] std::int64_t channels() const {
         return channels_;
@@ -107,20 +113,25 @@ class config_reading_module : public atp::module<atp::ports<>, "config_reader"> 
 
 class config_probing_module : public atp::module<atp::ports<>, "config_probe"> {
    public:
-    explicit config_probing_module(const atp::module_config& cfg) : saw_null_(cfg.root().is_null()) {}
+    using config_type = channels_config;
 
-    [[nodiscard]] bool saw_null() const {
-        return saw_null_;
+    explicit config_probing_module(std::unique_ptr<channels_config> cfg)
+        : saw_nothing_(!cfg->find("channels")->is_set()) {}
+
+    [[nodiscard]] bool saw_nothing() const {
+        return saw_nothing_;
     }
 
    private:
-    bool saw_null_;
+    bool saw_nothing_;
 };
 
 class config_text_module : public atp::module<atp::ports<>, "config_text"> {
    public:
-    explicit config_text_module(const atp::module_config& cfg)
-        : text_(cfg.text()), origin_(cfg.origin()), opaque_(cfg.is_opaque()) {}
+    using config_type = channels_config;
+
+    explicit config_text_module(std::unique_ptr<channels_config> cfg)
+        : text_(cfg->text()), origin_(cfg->origin()), opaque_(cfg->is_opaque()) {}
 
     [[nodiscard]] const std::string& text() const {
         return text_;
@@ -498,7 +509,7 @@ TEST(PipelineBuilder, ReferencedConfigReachesTheModule) {
     EXPECT_EQ(dynamic_cast<config_reading_module*>(pipe.root().find_module("config_reader"))->channels(), 6);
 }
 
-TEST(PipelineBuilder, AbsentConfigIsNullNotAnEmptyObject) {
+TEST(PipelineBuilder, AnAbsentConfigLeavesEveryFieldUnwritten) {
     const atp::runtime::config cfg = make_config(R"({
         "version": "3.2",
         "pipeline": {"modules": [{"module": "config_probe"}]}
@@ -510,7 +521,31 @@ TEST(PipelineBuilder, AbsentConfigIsNullNotAnEmptyObject) {
     atp::runtime::pipeline_runner runner;
     atp::runtime::build_pipeline(pipe, runner, cfg, registry);
 
-    EXPECT_TRUE(dynamic_cast<config_probing_module*>(pipe.root().find_module("config_probe"))->saw_null());
+    EXPECT_TRUE(dynamic_cast<config_probing_module*>(pipe.root().find_module("config_probe"))->saw_nothing());
+}
+
+TEST(ConfigSource, AJsonFileYieldsATreeAndItsBytes) {
+    const std::filesystem::path dir = make_temp_dir("source_json");
+    write_text(dir / "rig.json", R"({"gain":3})");
+
+    const atp::runtime::config_source src = atp::runtime::load_config_source("rig.json", dir);
+
+    EXPECT_FALSE(src.opaque);
+    EXPECT_EQ(src.text, R"({"gain":3})");
+    EXPECT_EQ(src.origin, atp::runtime::path_to_utf8(dir / "rig.json"));
+    ASSERT_NE(src.root.find("gain"), nullptr);
+    EXPECT_EQ(src.root.find("gain")->as_int(), 3);
+}
+
+TEST(ConfigSource, AnUnknownExtensionYieldsBytesAndAnEmptyTree) {
+    const std::filesystem::path dir = make_temp_dir("source_opaque");
+    write_text(dir / "rig.ini", "rate = 48000\n");
+
+    const atp::runtime::config_source src = atp::runtime::load_config_source("rig.ini", dir);
+
+    EXPECT_TRUE(src.opaque);
+    EXPECT_EQ(src.text, "rate = 48000\n");
+    EXPECT_TRUE(src.root.is_null());
 }
 
 TEST(PipelineBuilderFileConfig, ParsesAJsonFile) {

@@ -23,8 +23,31 @@ concept has_module_version = requires {
     { T::module_version } -> std::convertible_to<version>;
 };
 
+/// Contract "this module declares its config": a config_type that is a module_config heir and can be
+/// built with no arguments, which is how its structure is read without a module.
+///
+/// Declaring it is also what puts the module's config through the host's check: a module that reads a
+/// tree by hand names no config_type and is left exactly as it was.
+template <typename TModule>
+concept declares_config =
+    requires { typename TModule::config_type; } && std::derived_from<typename TModule::config_type, module_config> &&
+    std::default_initializable<typename TModule::config_type>;
+
+/// Contract "this module takes its config in its constructor": the bound arguments followed by
+/// ownership of the declared config.
+///
+/// A concept rather than a bool written out at the use site, because the two halves have to be
+/// checked in this order — a `&&` of two expressions would substitute TModule::config_type even for a
+/// module that names none, which is a hard error rather than a false.
+/// @tparam TModule module type
+/// @tparam TArgs constructor argument types bound at registration
+template <typename TModule, typename... TArgs>
+concept takes_config =
+    declares_config<TModule> &&
+    std::constructible_from<TModule, const TArgs&..., std::unique_ptr<typename TModule::config_type>>;
+
 /// What it takes to build TModule from arguments bound at registration: either the plain form, or the
-/// same arguments followed by the per-instance config.
+/// same arguments followed by ownership of the per-instance config.
 ///
 /// Named rather than written out at the class, because module_registry::add has to require **exactly**
 /// this and not something stricter. It used to ask for the plain form alone, which rejected a module
@@ -33,8 +56,7 @@ concept has_module_version = requires {
 /// @tparam TModule module type
 /// @tparam TArgs constructor argument types bound at registration
 template <typename TModule, typename... TArgs>
-concept factory_constructible = std::constructible_from<TModule, const TArgs&...> ||
-                                std::constructible_from<TModule, const TArgs&..., const module_config&>;
+concept factory_constructible = std::constructible_from<TModule, const TArgs&...> || takes_config<TModule, TArgs...>;
 
 /// Typed module factory.
 ///
@@ -81,37 +103,41 @@ class module_factory final : public module_factory_base {
     /// module_base names no node, and for it the old probe is still the only answer; the choice is
     /// made at compile time, so neither path pays for the other.
     [[nodiscard]] module_declaration declaration() const override {
-        module_declaration decl = [this] {
-            if constexpr (declares_ports<TModule>) {
-                return declare_from_ports<typename TModule::ports_type>();
-            } else {
-                const module_ptr probe = create(module_config{});
-                return declare_from_module(*probe);
-            }
-        }();
-        if constexpr (declares_config<TModule>) {
-            const typename TModule::config_type schema;
-            decl.config_schema = schema.declared();
+        if constexpr (declares_ports<TModule>) {
+            return declare_from_ports<typename TModule::ports_type>();
+        } else {
+            const module_ptr probe = create(make_config());
+            return declare_from_module(*probe);
         }
-        return decl;
     }
 
-    /// A module that declares a config_type has its config validated here, before the module is built:
-    /// the declared object is constructed once for the check and once more inside the module. The
-    /// duplication is the price of validating at all — an unknown key is only knowable once every field
-    /// has been declared, which is after the last member-initializer of the heir, where a module author
-    /// using `using fields::fields;` has no code of their own to call from. The reward is that a bad
-    /// config is refused before the module exists, so its failure never has to be told apart from a
-    /// failure of the constructor.
-    [[nodiscard]] module_ptr create(const module_config& cfg) const override {
+    /// The module's own config type at its declared defaults, or nothing when the module declares
+    /// none. Built here and handed back type-erased, which is what lets a host fill it through
+    /// module_config::entry without ever naming the type.
+    [[nodiscard]] config_ptr make_config() const override {
         if constexpr (declares_config<TModule>) {
-            const typename TModule::config_type checked(cfg);
-            checked.throw_if_invalid();
+            return config_ptr(new typename TModule::config_type, config_deleter{});
+        } else {
+            return {};
         }
+    }
+
+    /// The config must be the one this factory made: it is cast back to the module's own type, and a
+    /// config of another module is refused rather than reinterpreted.
+    ///
+    /// Ownership passes into the module, and the deleter's pin is dropped with it on purpose — from
+    /// here on the config lives inside the module, and the module holds the library up with a pin of
+    /// its own.
+    [[nodiscard]] module_ptr create(config_ptr config) const override {
         return std::apply(
-            [&cfg](const TArgs&... args) {
-                if constexpr (std::constructible_from<TModule, const TArgs&..., const module_config&>) {
-                    return module_ptr(new TModule(args..., cfg), {});
+            [&](const TArgs&... args) {
+                if constexpr (takes_config<TModule, TArgs...>) {
+                    using config_type = typename TModule::config_type;
+                    if (dynamic_cast<config_type*>(config.get()) == nullptr) {
+                        throw config::access_error("factory '" + name_ + "' was handed a config of another module");
+                    }
+                    std::unique_ptr<config_type> owned(static_cast<config_type*>(config.release()));
+                    return module_ptr(new TModule(args..., std::move(owned)), {});
                 } else {
                     return module_ptr(new TModule(args...), {});
                 }

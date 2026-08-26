@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <typeindex>
 #include <utility>
@@ -17,7 +18,9 @@
 #include <atp/io/outputs.hpp>
 #include <atp/io/properties.hpp>
 #include <atp/io/property_base.hpp>
+#include <atp/module/module_config.hpp>
 #include <atp/runtime/module_loader.hpp>
+#include <atp/runtime/raw_config.hpp>
 
 namespace atp::studio {
 
@@ -45,9 +48,25 @@ struct module_info {
     /// which file it came from, and the loader does.
     std::string source;
 
-    /// Fields the module declares its config out of, absent when it declares none — an editor then
-    /// falls back to editing the config as text, which is what studio does for every module today.
-    std::optional<std::vector<atp::config::field_declaration>> config_schema;
+    /// Whether a module of this factory is handed a config at all — that is, whether it declared a
+    /// constructor taking one.
+    ///
+    /// It is a separate answer from config_schema, and the pair is what tells "takes no config" apart
+    /// from "takes one it does not describe". A module writing `using config_type = atp::module_config;`
+    /// declares no field and reads text() instead, which is the whole point of a "file:" config; a C
+    /// module and both bridges take the document whole. All three take a config and have no fields to
+    /// show, and reporting them as a module that accepts nothing is how a config that would have
+    /// reached them stops being written.
+    bool takes_config = false;
+
+    /// The config a module of this factory declares: structure and defaults, no values. Empty when
+    /// the module declares none, and empty as well for a module that takes the document whole — a C
+    /// module is still edited as text.
+    ///
+    /// A prototype object rather than a copied description, because the object already answers every
+    /// question a description was invented to answer, and answers them from the one implementation the
+    /// module itself was built against.
+    std::shared_ptr<const atp::module_config> config_schema;
 };
 
 /// Description of one plugin file and the modules it brought.
@@ -248,14 +267,26 @@ class module_manager {
     ///
     /// A port list still cannot depend on a config. When it learns to, this is the call that has to
     /// learn where to get one.
+    ///
+    /// The config prototype is the factory's own object, and the config_ptr turns into a shared_ptr
+    /// **with its deleter**: the pin that deleter carries is what keeps the plugin loaded for as long
+    /// as the palette caches the prototype, and without it a rescan would leave a dangling vtable
+    /// behind every entry it kept. A raw_config is deliberately not kept — it declares no field, so
+    /// there would be nothing to show, and a module reading a document whole is edited as text. That
+    /// it exists at all is recorded in takes_config instead, which is a different question and has to
+    /// survive the prototype being dropped.
     [[nodiscard]] static module_info describe(const module_factory_base& factory) {
-        module_info info{std::string(factory.name()), factory.get_version(), {}, {}, {}, false, {}, {}};
+        module_info info{std::string(factory.name()), factory.get_version(), {}, {}, {}, false, {}, {}, false, {}};
         try {
             module_declaration decl = factory.declaration();
             info.inputs = std::move(decl.inputs);
             info.outputs = std::move(decl.outputs);
             info.properties = std::move(decl.properties);
-            info.config_schema = std::move(decl.config_schema);
+            config_ptr declared = factory.make_config();
+            info.takes_config = declared != nullptr;
+            if (declared && dynamic_cast<const runtime::raw_config*>(declared.get()) == nullptr) {
+                info.config_schema = std::shared_ptr<const atp::module_config>(std::move(declared));
+            }
         } catch (const std::exception& e) {
             info.broken = true;
             info.error = e.what();

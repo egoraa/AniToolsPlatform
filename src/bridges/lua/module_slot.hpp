@@ -29,6 +29,10 @@ struct module_slot {
     std::vector<atp_input_desc> inputs;
     std::vector<atp_output_desc> outputs;
     std::vector<atp_property_desc> properties;
+    /// Config field declarations, one vector per object of the declared tree. A deque of vectors, and
+    /// not a vector of them, for the reason the strings are a deque: a nested field points into a
+    /// sibling vector, and a reallocation would leave every such pointer dangling.
+    std::deque<std::vector<atp_config_field_desc>> config_fields;
     /// Declared kinds by port index, which is what a conversion is chosen by at run time.
     std::vector<atp_kind> input_kinds;
     std::vector<atp_kind> output_kinds;

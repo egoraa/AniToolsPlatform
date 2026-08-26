@@ -3,8 +3,7 @@
     "plugins": ["../plugins/atp_demo_plugin"],
     "configs": {
         "printing": {
-            "show": ["value", "measure", "sample"],
-            "names": { "value": "n", "measure": "m" }
+            "show": ["value", "measure", "sample"]
         }
     },
     "pipeline": {
@@ -19,7 +18,7 @@
                         "properties": { "start_at": 100, "step": 5 },
                         "config": {
                             "milestones": [
-                                { "at": 110, "say": "one hundred and ten" }
+                                { "at": 110, "say": "one hundred and ten", "how": "shout" }
                             ]
                         }
                     },

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -11,8 +13,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atp/plugin_c.h>
 #include <atp/hosting/module_factory.hpp>
 #include <atp/module.hpp>
+#include <atp/runtime/c_module.hpp>
 #include <atp/studio/module_manager.hpp>
 
 namespace {
@@ -102,10 +106,17 @@ TEST(ModuleManager, ABrokenConstructorNoLongerMakesAModuleUndescribable) {
     EXPECT_TRUE(info.error.empty());
 }
 
+struct hungry_config : atp::module_config {
+    using module_config::module_config;
+    std::int64_t& channels = field<std::int64_t>("channels");
+};
+
 class config_hungry_module : public atp::module<atp::ports<>, "hungry"> {
    public:
-    explicit config_hungry_module(const atp::module_config& config) {
-        if (config.root().is_null()) {
+    using config_type = hungry_config;
+
+    explicit config_hungry_module(std::unique_ptr<hungry_config> config) {
+        if (!config->find("channels")->is_set()) {
             throw std::runtime_error("channels is required");
         }
     }
@@ -292,4 +303,66 @@ TEST(ModuleManager, AModuleWithoutAPortNodeIsStillProbedAndStillCanBeBroken) {
 
     EXPECT_TRUE(info.broken);
     EXPECT_NE(info.error.find("handmade constructor failed"), std::string::npos);
+}
+
+namespace {
+
+void* declared_create(const atp_api*, atp_ctx*, void*) {
+    return nullptr;
+}
+
+void declared_destroy(void*) {}
+
+atp_work declared_iterate(void*) {
+    return ATP_WORK_IDLE;
+}
+
+const char* const declared_engines[] = {"fm", "additive"};
+
+const atp_config_field_desc declared_master_fields[] = {
+    {"gain", ATP_FIELD_REAL, "1.0", nullptr, 0, ATP_FIELD_STRING, nullptr, 0},
+};
+
+const atp_config_field_desc declared_fields[] = {
+    {"rate", ATP_FIELD_INT, nullptr, nullptr, 0, ATP_FIELD_STRING, nullptr, 0},
+    {"engine", ATP_FIELD_STRING, "fm", declared_engines, 2, ATP_FIELD_STRING, nullptr, 0},
+    {"master", ATP_FIELD_OBJECT, nullptr, nullptr, 0, ATP_FIELD_STRING, declared_master_fields, 1},
+};
+
+atp_module_desc make_desc(const atp_config_field_desc* fields, std::uint32_t count) {
+    atp_module_desc desc{};
+    desc.struct_size = sizeof(atp_module_desc);
+    desc.name = "c_described";
+    desc.version[0] = 1;
+    desc.version_count = 1;
+    desc.create = declared_create;
+    desc.destroy = declared_destroy;
+    desc.iterate = declared_iterate;
+    desc.config_fields = fields;
+    desc.config_field_count = count;
+    return desc;
+}
+
+}  // namespace
+
+TEST(ModuleManager, ACModuleDeclaringFieldsKeepsItsConfigSchema) {
+    const atp_module_desc desc = make_desc(declared_fields, 3);
+    const atp::runtime::c_module_factory factory(desc);
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+
+    EXPECT_FALSE(info.broken) << info.error;
+    EXPECT_TRUE(info.takes_config);
+    ASSERT_NE(info.config_schema, nullptr) << "a declared config is what the inspector draws a tree from";
+    ASSERT_EQ(info.config_schema->entries().size(), 3U);
+    EXPECT_EQ(info.config_schema->entries()[0].name(), "rate");
+    EXPECT_EQ(info.config_schema->find("engine")->options(), (std::vector<std::string>{"fm", "additive"}));
+}
+
+TEST(ModuleManager, ACModuleDeclaringNoFieldsTakesAConfigWithoutDescribingIt) {
+    const atp_module_desc desc = make_desc(nullptr, 0);
+    const atp::runtime::c_module_factory factory(desc);
+    const atp::studio::module_info info = atp::studio::module_manager::describe(factory);
+
+    EXPECT_TRUE(info.takes_config);
+    EXPECT_EQ(info.config_schema, nullptr) << "a raw_config declares nothing, so there is no tree to draw";
 }

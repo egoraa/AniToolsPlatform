@@ -370,6 +370,48 @@ typedef atp_status (*atp_lifecycle_fn)(void* self);
 /// the api and ctx it was created with.
 typedef atp_work (*atp_iterate_fn)(void* self);
 
+/// Form of one declared config field — the six forms of atp::field_kind, in the same order.
+typedef enum atp_config_field_kind {
+    ATP_FIELD_BOOL = 0,
+    ATP_FIELD_INT = 1,
+    ATP_FIELD_REAL = 2,
+    ATP_FIELD_STRING = 3,
+    ATP_FIELD_OBJECT = 4,
+    ATP_FIELD_ARRAY = 5
+} atp_config_field_kind;
+
+/// Declaration of one config field: what a module says about a setting it is handed at creation.
+///
+/// It carries no struct_size, unlike atp_module_desc, and that is deliberate rather than an omission:
+/// this is read as an **array**, and a growable element type in an array breaks the stride — the host
+/// would index with its own sizeof over a plugin's shorter elements. atp_input_desc, atp_output_desc
+/// and atp_property_desc are frozen for exactly that reason, and this follows them. Only the module
+/// descriptor, fetched one at a time by pointer, can grow.
+typedef struct atp_config_field_desc {
+    /// NUL-terminated, unique among the fields of its own object.
+    const char* name;
+    atp_config_field_kind kind;
+    /// Default in the platform's canonical string form ("2", "1.5", "true", or the text itself), parsed
+    /// by the same code that parses a property default.
+    ///
+    /// NULL declares the field **required** — its absence from a document is then a problem rather than
+    /// a fallback, which is the same criterion the C++ side uses: required means no default. Unread for
+    /// ATP_FIELD_OBJECT and ATP_FIELD_ARRAY.
+    const char* default_value;
+    /// Allowed values in canonical string form. A non-empty set is what makes the field an enumeration,
+    /// exactly as it does for a property — an enumeration is not a seventh kind. For an ATP_FIELD_ARRAY
+    /// it constrains every element.
+    const char* const* options;
+    uint32_t option_count;
+    /// ATP_FIELD_ARRAY only: the form of one element. Never ATP_FIELD_ARRAY — an array of arrays is not
+    /// declarable, the same limit the host's own config has.
+    atp_config_field_kind element;
+    /// ATP_FIELD_OBJECT: this object's own fields. ATP_FIELD_ARRAY of ATP_FIELD_OBJECT: the fields of
+    /// one element. NULL otherwise.
+    const struct atp_config_field_desc* fields;
+    uint32_t field_count;
+} atp_config_field_desc;
+
 /// Declaration of one input.
 typedef struct atp_input_desc {
     /// NUL-terminated, unique among this module's inputs.
@@ -456,6 +498,16 @@ typedef struct atp_module_desc {
     /// A host may offer to open it; nothing depends on it, and a plugin built before this field
     /// existed is accepted unchanged because struct_size says so.
     const char* source;
+
+    /// Fields of this module's config, or NULL when it declares none.
+    ///
+    /// NULL is what every plugin built before this field says, and it keeps meaning what it always
+    /// meant: hand the document over whole, and let the module walk it through the config_* callbacks.
+    /// Declaring fields instead buys a host that can describe, validate and edit the config without ever
+    /// building the module — and buys the module a config with every declared key present at its own
+    /// default, so a script reading it as a dictionary needs no fallback for a key it declared.
+    const atp_config_field_desc* config_fields;
+    uint32_t config_field_count;
 } atp_module_desc;
 
 /// Size of atp_module_desc as ATP_C_ABI 1 defined it, and the least a host accepts in `struct_size`.

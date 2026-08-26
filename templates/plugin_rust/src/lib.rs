@@ -32,6 +32,9 @@ const PROP_WINDOW: u32 = 0;
 const PROP_MODE: u32 = 1;
 const PROP_PANIC: u32 = 2;
 
+/// rust_gate addresses its own ports from zero, like every module does.
+const GATE_OUT_PASSED: u32 = 0;
+
 /// State of one instance: what a C++ module would keep in its members.
 struct Averager {
     api: &'static AtpApi,
@@ -188,6 +191,112 @@ impl Averager {
     }
 }
 
+/// The second module, and the second way a config can reach one.
+///
+/// `rust_averager` above leaves `config_fields` null and walks the document itself: it asks for a key,
+/// checks the form it found and falls back to an empty vector at every step, because nothing promised
+/// the key would be there. That is the right shape for a config whose form the platform cannot express
+/// — a format it does not parse, or a tree whose keys are data.
+///
+/// This one **declares** its fields instead, and gets three things for it. atp_studio edits the config
+/// as typed rows with a drop-down for `mode` rather than as raw JSON. A document that does not fit is
+/// refused before the pipeline starts, naming the file and the field — `threshold` has no default, so a
+/// pipeline that forgets it fails loudly instead of gating on zero. And every declared key is in the
+/// tree by the time `create` runs, at its own default when the document said nothing, so the reads
+/// below need no fallback and no form check.
+struct Gate {
+    api: &'static AtpApi,
+    ctx: *mut AtpCtx,
+    threshold: i64,
+    blocking: bool,
+}
+
+impl Reports for Gate {
+    fn api(&self) -> &'static AtpApi {
+        self.api
+    }
+    fn ctx(&self) -> *mut AtpCtx {
+        self.ctx
+    }
+}
+
+/// Reads one declared scalar by path. No form check and no fallback: the field was declared, so the
+/// host put it there.
+///
+/// `has_config_text` and not `has_config`: `config_find_path` is one of the four callbacks appended
+/// after the first seven, and a host carrying only those seven answers yes to the other question. The
+/// guard stays because a plugin may meet an older host than the one it was built against.
+fn declared_value(api: &AtpApi, ctx: *mut AtpCtx, path: &[u8]) -> Option<AtpValue> {
+    if !api.has_config_text() {
+        return None;
+    }
+    let root = unsafe { (api.config_root)(ctx) };
+    let node = unsafe { (api.config_find_path)(ctx, root, path.as_ptr().cast::<c_char>(), path.len()) };
+    if node == ATP_CONFIG_NONE {
+        return None;
+    }
+    let mut value = AtpValue::empty();
+    if unsafe { (api.config_value_of)(ctx, node, &mut value) } == 1 {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+impl Gate {
+    fn pass(&mut self) -> c_int {
+        let mut status = ATP_WORK_IDLE;
+        while let Some(value) = self.take_i32(IN_VALUE) {
+            let blocked = self.blocking && i64::from(value) < self.threshold;
+            if !blocked && !self.write(GATE_OUT_PASSED, &AtpValue::i32(value)) {
+                let text = "an output refused the value";
+                unsafe { (self.api.set_error)(self.ctx, text.as_ptr().cast::<c_char>(), text.len()) };
+                return ATP_WORK_ERROR;
+            }
+            status = ATP_WORK_BUSY;
+        }
+        status
+    }
+
+    fn take_i32(&self, port: u32) -> Option<i32> {
+        let mut value = AtpValue::empty();
+        if unsafe { (self.api.take_input)(self.ctx, port, &mut value) } == 1 {
+            Some(unsafe { value.payload.as_i32 })
+        } else {
+            None
+        }
+    }
+
+    fn write(&self, port: u32, value: &AtpValue) -> bool {
+        unsafe { (self.api.write_output)(self.ctx, port, value) == 1 }
+    }
+}
+
+unsafe extern "C" fn gate_create(api: *const AtpApi, ctx: *mut AtpCtx, _user_data: *mut c_void) -> *mut c_void {
+    let made = catch_unwind(AssertUnwindSafe(|| {
+        let api = &*api;
+        let threshold = declared_value(api, ctx, b"threshold").map_or(0, |v| v.payload.as_i64);
+        let blocking = declared_value(api, ctx, b"mode").is_some_and(|v| {
+            let bytes = v.payload.as_bytes;
+            !bytes.data.is_null()
+                && core::slice::from_raw_parts(bytes.data.cast::<u8>(), bytes.size) == b"block"
+        });
+        Box::into_raw(Box::new(Gate { api, ctx, threshold, blocking })).cast::<c_void>()
+    }));
+    made.unwrap_or(core::ptr::null_mut())
+}
+
+unsafe extern "C" fn gate_destroy(self_: *mut c_void) {
+    if self_.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(self_.cast::<Gate>()))));
+}
+
+unsafe extern "C" fn gate_iterate(self_: *mut c_void) -> c_int {
+    guarded(self_, Gate::pass, ATP_WORK_ERROR)
+}
+
 /// Turns a caught panic into a message worth putting in a log.
 fn panic_text(payload: &(dyn Any + Send)) -> String {
     if let Some(text) = payload.downcast_ref::<&str>() {
@@ -199,12 +308,30 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
     String::from("panicked")
 }
 
+/// What the panic guard needs of any module state: somewhere to report the panic to.
+///
+/// A trait rather than a second copy of the guard, because this file now holds two modules and the
+/// guard is the one thing neither of them may get wrong.
+trait Reports {
+    fn api(&self) -> &'static AtpApi;
+    fn ctx(&self) -> *mut AtpCtx;
+}
+
+impl Reports for Averager {
+    fn api(&self) -> &'static AtpApi {
+        self.api
+    }
+    fn ctx(&self) -> *mut AtpCtx {
+        self.ctx
+    }
+}
+
 /// Runs a lifecycle step under the panic guard, reporting a panic the way any other failure is
 /// reported. `self_` is what `create` returned, so it is never null.
-unsafe fn guarded<F: FnOnce(&mut Averager) -> c_int>(self_: *mut c_void, body: F, failed: c_int) -> c_int {
-    let state = &mut *(self_.cast::<Averager>());
-    let api = state.api;
-    let ctx = state.ctx;
+unsafe fn guarded<T: Reports, F: FnOnce(&mut T) -> c_int>(self_: *mut c_void, body: F, failed: c_int) -> c_int {
+    let state = &mut *(self_.cast::<T>());
+    let api = state.api();
+    let ctx = state.ctx();
     match catch_unwind(AssertUnwindSafe(|| body(state))) {
         Ok(status) => status,
         Err(payload) => {
@@ -235,7 +362,7 @@ unsafe extern "C" fn destroy(self_: *mut c_void) {
 unsafe extern "C" fn start(self_: *mut c_void) -> c_int {
     guarded(
         self_,
-        |state| {
+        |state: &mut Averager| {
             let window = state.property_i32(PROP_WINDOW);
             state.log(ATP_LOG_INFO, &format!("averaging over a window of {window}"));
             ATP_OK
@@ -247,7 +374,7 @@ unsafe extern "C" fn start(self_: *mut c_void) -> c_int {
 unsafe extern "C" fn stop(self_: *mut c_void) -> c_int {
     guarded(
         self_,
-        |state| {
+        |state: &mut Averager| {
             state.recent.clear();
             ATP_OK
         },
@@ -268,6 +395,7 @@ unsafe extern "C" fn iterate(self_: *mut c_void) -> c_int {
 /// what moves is the handle, never the heap buffer it points at.
 struct Registry {
     module: AtpModuleDesc,
+    gate: AtpModuleDesc,
 }
 
 // The raw pointers inside are read by the host, never written, and outlive every reader.
@@ -346,9 +474,79 @@ fn registry() -> &'static Registry {
                 iterate: Some(iterate),
                 stop: Some(stop),
                 source: core::ptr::null(),
+                config_fields: core::ptr::null(),
+                config_field_count: 0,
             },
+            gate: gate_desc(),
         }
     })
+}
+
+/// The declaration `rust_gate` hands the host, and everything it points at.
+///
+/// Leaked for the same reason the port tables are: the host keeps these pointers until the library is
+/// unloaded. Every string is a NUL-terminated literal because that is what the C side reads — `cstr`
+/// only takes the pointer, it does not copy.
+///
+/// `threshold` has no default, which is how a required field is spelled: `default_value` is null. A
+/// non-empty `options` set is what makes `mode` an enumeration — there is no separate kind for one,
+/// exactly as there is none for an enumerated property.
+fn gate_desc() -> AtpModuleDesc {
+    let inputs: &'static [AtpInputDesc] = Box::leak(Box::new([AtpInputDesc {
+        name: cstr(b"value "),
+        kind: ATP_KIND_I32,
+        flavor: ATP_QUEUE,
+        capacity: 64,
+        overflow: ATP_DROP_OLDEST,
+    }]));
+    let outputs: &'static [AtpOutputDesc] =
+        Box::leak(Box::new([AtpOutputDesc { name: cstr(b"passed "), kind: ATP_KIND_I32 }]));
+    let modes: &'static [*const c_char] = Box::leak(Box::new([cstr(b"pass "), cstr(b"block ")]));
+    let fields: &'static [AtpConfigFieldDesc] = Box::leak(Box::new([
+        AtpConfigFieldDesc {
+            name: cstr(b"threshold "),
+            kind: ATP_FIELD_INT,
+            default_value: core::ptr::null(),
+            options: core::ptr::null(),
+            option_count: 0,
+            element: ATP_FIELD_STRING,
+            fields: core::ptr::null(),
+            field_count: 0,
+        },
+        AtpConfigFieldDesc {
+            name: cstr(b"mode "),
+            kind: ATP_FIELD_STRING,
+            default_value: cstr(b"pass "),
+            options: modes.as_ptr(),
+            option_count: modes.len() as u32,
+            element: ATP_FIELD_STRING,
+            fields: core::ptr::null(),
+            field_count: 0,
+        },
+    ]));
+
+    AtpModuleDesc {
+        struct_size: core::mem::size_of::<AtpModuleDesc>() as u32,
+        name: cstr(b"rust_gate "),
+        version: [1, 0, 0, 0],
+        version_count: 2,
+        inputs: inputs.as_ptr(),
+        input_count: inputs.len() as u32,
+        outputs: outputs.as_ptr(),
+        output_count: outputs.len() as u32,
+        properties: core::ptr::null(),
+        property_count: 0,
+        user_data: core::ptr::null_mut(),
+        create: Some(gate_create),
+        destroy: Some(gate_destroy),
+        initialize: None,
+        start: None,
+        iterate: Some(gate_iterate),
+        stop: None,
+        source: core::ptr::null(),
+        config_fields: fields.as_ptr(),
+        config_field_count: fields.len() as u32,
+    }
 }
 
 #[no_mangle]
@@ -358,14 +556,14 @@ pub extern "C" fn atp_c_abi_version() -> u32 {
 
 #[no_mangle]
 pub extern "C" fn atp_module_count() -> u32 {
-    1
+    2
 }
 
 #[no_mangle]
 pub extern "C" fn atp_module_desc_at(index: u32) -> *const AtpModuleDesc {
-    if index == 0 {
-        &registry().module
-    } else {
-        core::ptr::null()
+    match index {
+        0 => &registry().module,
+        1 => &registry().gate,
+        _ => core::ptr::null(),
     }
 }

@@ -73,7 +73,7 @@ static_assert(!lp64 || offsetof(atp_property_desc, options) == 24);
 static_assert(!lp64 || offsetof(atp_property_desc, option_count) == 32);
 static_assert(!lp64 || offsetof(atp_property_desc, persistent) == 36);
 
-static_assert(!lp64 || sizeof(atp_module_desc) == 152);
+static_assert(!lp64 || sizeof(atp_module_desc) == 168);
 static_assert(!lp64 || offsetof(atp_module_desc, struct_size) == 0);
 static_assert(!lp64 || offsetof(atp_module_desc, name) == 8);
 static_assert(!lp64 || offsetof(atp_module_desc, version) == 16);
@@ -92,8 +92,20 @@ static_assert(!lp64 || offsetof(atp_module_desc, start) == 120);
 static_assert(!lp64 || offsetof(atp_module_desc, iterate) == 128);
 static_assert(!lp64 || offsetof(atp_module_desc, stop) == 136);
 static_assert(!lp64 || offsetof(atp_module_desc, source) == 144);
+static_assert(!lp64 || offsetof(atp_module_desc, config_fields) == 152);
+static_assert(!lp64 || offsetof(atp_module_desc, config_field_count) == 160);
 
 static_assert(!lp64 || ATP_MODULE_DESC_SIZE_V1 == 144);
+
+static_assert(!lp64 || sizeof(atp_config_field_desc) == 56);
+static_assert(!lp64 || offsetof(atp_config_field_desc, name) == 0);
+static_assert(!lp64 || offsetof(atp_config_field_desc, kind) == 8);
+static_assert(!lp64 || offsetof(atp_config_field_desc, default_value) == 16);
+static_assert(!lp64 || offsetof(atp_config_field_desc, options) == 24);
+static_assert(!lp64 || offsetof(atp_config_field_desc, option_count) == 32);
+static_assert(!lp64 || offsetof(atp_config_field_desc, element) == 36);
+static_assert(!lp64 || offsetof(atp_config_field_desc, fields) == 40);
+static_assert(!lp64 || offsetof(atp_config_field_desc, field_count) == 48);
 
 static_assert(ATP_C_ABI == 1);
 

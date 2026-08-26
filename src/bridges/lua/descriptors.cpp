@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <deque>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <system_error>
 
@@ -58,6 +59,25 @@ long long int_at(lua_State* state, int table, int index) {
     return value;
 }
 
+std::optional<atp_kind> kind_at(lua_State* state, int table, int index) {
+    switch (int_at(state, table, index)) {
+        case ATP_KIND_I32:
+            return ATP_KIND_I32;
+        case ATP_KIND_I64:
+            return ATP_KIND_I64;
+        case ATP_KIND_F64:
+            return ATP_KIND_F64;
+        case ATP_KIND_BOOL:
+            return ATP_KIND_BOOL;
+        case ATP_KIND_TEXT:
+            return ATP_KIND_TEXT;
+        case ATP_KIND_BLOB:
+            return ATP_KIND_BLOB;
+        default:
+            return std::nullopt;
+    }
+}
+
 bool bool_at(lua_State* state, int table, int index) {
     lua_rawgeti(state, table, index);
     const bool value = lua_toboolean(state, -1) != 0;
@@ -77,7 +97,9 @@ void read_inputs(lua_State* state, module_slot& slot, int rows) {
         const int row = lua_gettop(state);
         atp_input_desc desc{};
         desc.name = keep_at(state, slot, row, 1);
-        desc.kind = static_cast<atp_kind>(int_at(state, row, 2));
+        if (const std::optional<atp_kind> kind = kind_at(state, row, 2)) {
+            desc.kind = *kind;
+        }
         desc.flavor = static_cast<atp_flavor>(int_at(state, row, 3));
         desc.capacity = static_cast<std::uint32_t>(int_at(state, row, 4));
         desc.overflow = static_cast<atp_overflow>(int_at(state, row, 5));
@@ -94,7 +116,9 @@ void read_outputs(lua_State* state, module_slot& slot, int rows) {
         const int row = lua_gettop(state);
         atp_output_desc desc{};
         desc.name = keep_at(state, slot, row, 1);
-        desc.kind = static_cast<atp_kind>(int_at(state, row, 2));
+        if (const std::optional<atp_kind> kind = kind_at(state, row, 2)) {
+            desc.kind = *kind;
+        }
         slot.outputs.push_back(desc);
         slot.output_kinds.push_back(desc.kind);
         lua_pop(state, 1);
@@ -108,7 +132,9 @@ void read_properties(lua_State* state, module_slot& slot, int rows) {
         const int row = lua_gettop(state);
         atp_property_desc desc{};
         desc.name = keep_at(state, slot, row, 1);
-        desc.kind = static_cast<atp_kind>(int_at(state, row, 2));
+        if (const std::optional<atp_kind> kind = kind_at(state, row, 2)) {
+            desc.kind = *kind;
+        }
         desc.default_value = keep_at(state, slot, row, 3);
 
         lua_rawgeti(state, row, 4);
@@ -128,6 +154,74 @@ void read_properties(lua_State* state, module_slot& slot, int rows) {
         slot.property_kinds.push_back(desc.kind);
         lua_pop(state, 1);
     }
+}
+
+atp_config_field_kind field_kind_at(lua_State* state, int row, int index) {
+    switch (int_at(state, row, index)) {
+        case ATP_FIELD_BOOL:
+            return ATP_FIELD_BOOL;
+        case ATP_FIELD_INT:
+            return ATP_FIELD_INT;
+        case ATP_FIELD_REAL:
+            return ATP_FIELD_REAL;
+        case ATP_FIELD_OBJECT:
+            return ATP_FIELD_OBJECT;
+        case ATP_FIELD_ARRAY:
+            return ATP_FIELD_ARRAY;
+        default:
+            return ATP_FIELD_STRING;
+    }
+}
+
+std::vector<atp_config_field_desc>* read_config_fields(lua_State* state, module_slot& slot, int rows) {
+    if (lua_type(state, rows) != LUA_TTABLE) {
+        return nullptr;
+    }
+    const std::size_t count = lua_rawlen(state, rows);
+    if (count == 0) {
+        return nullptr;
+    }
+    std::vector<atp_config_field_desc>& into = slot.config_fields.emplace_back();
+    into.reserve(count);
+    for (std::size_t i = 1; i <= count; ++i) {
+        lua_rawgeti(state, rows, static_cast<lua_Integer>(i));
+        const int row = lua_gettop(state);
+        atp_config_field_desc desc{};
+        desc.name = keep_at(state, slot, row, 1);
+        desc.kind = field_kind_at(state, row, 2);
+
+        lua_rawgeti(state, row, 3);
+        desc.default_value = lua_isnil(state, -1) ? nullptr : keep_at(state, slot, row, 3);
+        lua_pop(state, 1);
+
+        lua_rawgeti(state, row, 4);
+        const int options = lua_gettop(state);
+        const std::size_t option_count = lua_type(state, options) == LUA_TTABLE ? lua_rawlen(state, options) : 0;
+        std::vector<const char*>& pointers = slot.option_pointers.emplace_back();
+        pointers.reserve(option_count);
+        for (std::size_t o = 1; o <= option_count; ++o) {
+            pointers.push_back(keep_at(state, slot, options, static_cast<int>(o)));
+        }
+        lua_pop(state, 1);
+        desc.option_count = static_cast<std::uint32_t>(option_count);
+        desc.options = pointers.empty() ? nullptr : pointers.data();
+
+        lua_rawgeti(state, row, 5);
+        const bool has_element = !lua_isnil(state, -1);
+        lua_pop(state, 1);
+        desc.element = has_element ? field_kind_at(state, row, 5) : ATP_FIELD_STRING;
+
+        lua_rawgeti(state, row, 6);
+        if (const std::vector<atp_config_field_desc>* nested = read_config_fields(state, slot, lua_gettop(state))) {
+            desc.fields = nested->data();
+            desc.field_count = static_cast<std::uint32_t>(nested->size());
+        }
+        lua_pop(state, 1);
+
+        into.push_back(desc);
+        lua_pop(state, 1);
+    }
+    return &into;
 }
 
 std::string field_text(lua_State* state, int table, const char* key) {
@@ -171,6 +265,13 @@ void build_one(lua_State* state, const std::filesystem::path& script, int row) {
     lua_pop(state, 1);
     lua_getfield(state, row, "properties");
     read_properties(state, slot, lua_gettop(state));
+    lua_pop(state, 1);
+
+    lua_getfield(state, row, "config");
+    if (const std::vector<atp_config_field_desc>* fields = read_config_fields(state, slot, lua_gettop(state))) {
+        desc.config_fields = fields->data();
+        desc.config_field_count = static_cast<std::uint32_t>(fields->size());
+    }
     lua_pop(state, 1);
 
     desc.inputs = slot.inputs.empty() ? nullptr : slot.inputs.data();

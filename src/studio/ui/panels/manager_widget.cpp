@@ -130,6 +130,11 @@ void manager_widget::scan() {
             callbacks_.report(QString::fromStdString(studio::stale_bridge_note(*stale, ours.bridge)),
                               atp::log_level::warning);
         }
+        if (const std::optional<std::filesystem::path> stale =
+                studio::stale_loaded_package(state_.manager, ours, lang)) {
+            callbacks_.report(QString::fromStdString(studio::stale_package_note(*stale, ours.package)),
+                              atp::log_level::warning);
+        }
     }
     state_.invalidate_descriptions();
     callbacks_.project_changed();

@@ -2,16 +2,22 @@
 #ifndef ATP_STUDIO_UI_CANVAS_ITEMS_HPP
 #define ATP_STUDIO_UI_CANVAS_ITEMS_HPP
 
+#include "canvas/canvas_palette.hpp"
+
 #include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
 #include <typeindex>
 
+#include <QColor>
 #include <QGraphicsEllipseItem>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsSimpleTextItem>
+#include <QPainterPath>
+#include <QPointF>
+#include <QRectF>
 #include <QString>
 
 namespace atp::studio::ui {
@@ -21,6 +27,10 @@ inline constexpr double node_width = 180.0;
 inline constexpr double node_header = 34.0;
 inline constexpr double pin_row = 18.0;
 inline constexpr double pin_radius = 5.0;
+
+/// Length of the segment a stub reaches out from its pin. A short mark beside the port rather than a
+/// line across the level: an exported port is a fact about that port, and it is read next to it.
+inline constexpr double stub_length = 40.0;
 
 /// Tooltip for a port pin: the port name, then what travels through it. The hollow ring is the mark
 /// a universal input can be recognised by at a glance, this is the same fact in words — and the only
@@ -45,9 +55,19 @@ class pin_item final : public QGraphicsEllipseItem {
     /// alike. An output of type std::any is not marked: there the type is a restriction rather than
     /// a freedom — it only fits a universal input — so the ring keeps exactly one meaning.
     ///
+    /// The type decides the hue and the scheme decides the rest: a saturation and a lightness picked
+    /// to sit on a dark node wash out on a pale one, so the pin is handed the palette rather than
+    /// reaching for the application's. The ring is the fill of the node the pin is a child of, which
+    /// is why the parent is read here rather than a colour taken from the palette: a subgroup's body
+    /// is a hue away from a module's, and one ring for both would sit off-ground on one of them.
+    ///
     /// The missing fill costs nothing in hit testing: QGraphicsEllipseItem::shape() unions the whole
     /// ellipse with the stroke, so a drag started in the middle of the ring still finds the pin.
-    pin_item(QGraphicsItem* parent, std::string port_path, bool output, const std::optional<std::type_index>& type);
+    pin_item(QGraphicsItem* parent,
+             std::string port_path,
+             bool output,
+             const std::optional<std::type_index>& type,
+             const canvas_palette& colors);
 
     [[nodiscard]] int type() const override;
     [[nodiscard]] const std::string& port_path() const;
@@ -86,7 +106,7 @@ class node_item final : public QGraphicsRectItem {
    public:
     enum { Type = UserType + 2 };
 
-    node_item(std::string child_name, bool is_group, double height);
+    node_item(std::string child_name, bool is_group, double height, const canvas_palette& colors);
 
     [[nodiscard]] int type() const override;
     [[nodiscard]] const std::string& child_name() const;
@@ -106,6 +126,8 @@ class node_item final : public QGraphicsRectItem {
    private:
     std::string child_name_;
     bool group_;
+    QColor border_;
+    QColor drop_;
 };
 
 /// A connection between two pins, carrying an optional monitoring label.
@@ -113,7 +135,7 @@ class link_item final : public QGraphicsPathItem {
    public:
     enum { Type = UserType + 3 };
 
-    explicit link_item(std::size_t index);
+    link_item(std::size_t index, const canvas_palette& colors);
 
     [[nodiscard]] int type() const override;
 
@@ -130,32 +152,56 @@ class link_item final : public QGraphicsPathItem {
    private:
     std::size_t index_;
     QGraphicsSimpleTextItem* label_ = nullptr;
+    QColor idle_;
+    QColor hot_;
 };
 
 /// Group boundary stub: a short dangling segment from a child pin towards the "edge", showing that
 /// the port is exported out of the group. From inside the group this is the only visible mark of a
-/// link leading to the parent; the segment has a fixed length, because an infinite scene has no
-/// real edge. Selectable but not movable — it only follows its pin.
+/// link leading to the parent; the segment has a fixed length, because an infinite scene has no real
+/// edge. Selectable but not movable — it only follows its pin.
 class stub_item final : public QGraphicsPathItem {
    public:
     enum { Type = UserType + 4 };
 
     /// Stroked in the colour of the port type, and in the neutral ring colour when the port is a
     /// universal input — the stub is the only mark that port carries once it is exported.
-    stub_item(bool is_output, std::string alias, const std::optional<std::type_index>& type);
+    stub_item(bool is_output,
+              std::string alias,
+              const std::optional<std::type_index>& type,
+              const canvas_palette& colors);
 
     [[nodiscard]] int type() const override;
     [[nodiscard]] bool is_output() const;
     [[nodiscard]] const std::string& alias() const;
 
-    /// Anchors the stub to a pin: an exported output leads to the right (an arrow away from the
-    /// pin), an input arrives from the left (an arrow into it).
+    /// Anchors the stub to a pin: an exported output leads to the right (an arrow away from the pin),
+    /// an input arrives from the left (an arrow into it), and the alias is written at the far end.
+    /// @param pin_scene_pos scene position of the child pin this stub belongs to
     void set_anchor(QPointF pin_scene_pos);
+
+    /// The arrow end and its alias, and not the segment leading to them.
+    ///
+    /// What a stub can be pointed at is the head it ends in — that is where its name is written and
+    /// where a person aims. Leaving the shape as the stroked path let a rubber band drawn round a
+    /// node take in a stub that happened to reach across it, and Delete then un-exported a group
+    /// port along with the node, in the same undo step and with nothing said about it.
+    [[nodiscard]] QPainterPath shape() const override;
+
+    /// The segment, the head and the alias together.
+    ///
+    /// It has to be stated because narrowing shape() narrows this too: QGraphicsPathItem derives its
+    /// bounding rectangle **from shape()** whenever the pen has a width, and a stub's pen has one.
+    /// Left as it was, the rectangle covered only the head — so a node dragged away left the old
+    /// segment painted on the canvas, and scrolling the head out of sight took the whole line with
+    /// it, because the scene culls by this rectangle. Qt also requires shape() to lie inside it.
+    [[nodiscard]] QRectF boundingRect() const override;
 
    private:
     bool is_output_;
     std::string alias_;
     QGraphicsSimpleTextItem* label_ = nullptr;
+    QPointF outer_;
 };
 
 }  // namespace atp::studio::ui

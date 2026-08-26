@@ -5,14 +5,14 @@
 #include <algorithm>
 #include <any>
 #include <array>
+#include <deque>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include <atp/module.hpp>
-#include <atp/module/module_config.hpp>
 
 #include "demo_types.hpp"
 
@@ -65,40 +65,33 @@ struct printer_props : atp::io::properties {
 };
 using printer_ports = atp::ports<printer_inputs, atp::io::outputs, printer_props>;
 
+/// What printer declares as its config: the ports worth printing, and nothing else.
+///
+/// A list of strings is the plainest thing a property cannot hold, which is the whole reason the
+/// config channel exists beside the properties: `show` is decided when the pipeline is written and
+/// nobody turns it while watching the output, while all four of this module's settings that somebody
+/// does turn stayed properties.
+///
+/// An empty list is not a mistake and means "print every port" — a module's node that names no config
+/// leaves every field at its default, and the default of a list is empty.
+struct printer_config : atp::module_config {
+    using module_config::module_config;
+    std::deque<std::string>& show = list<std::string>("show");
+};
+
 /// Sink demonstrating two paths at once: a setting from the config to the output — all four
 /// properties show up in the printing — and a value of any type from a connection to a line.
 class printer_module : public atp::module<printer_ports, "printer", atp::ver<"1.0">> {
    public:
+    using config_type = printer_config;
+
     /// Takes the module config, the third kind of setting beside properties and ports: a structure
     /// the module is given at creation, before connect and before initialize.
     ///
-    /// The two keys are what a property could not carry — `show` is a list of the ports worth
-    /// printing, `names` a table renaming them in the output. Both are decided when the pipeline is
-    /// written, which is the other half of the rule: a setting somebody turns while watching the
-    /// output is a property, and all four of this module's properties stayed properties.
-    ///
-    /// An absent key leaves the default behaviour (print every port under its own name), because the
-    /// value handed here is null whenever the module's node named no config. A wrong type inside a
-    /// config that *is* there still throws, and should: that is a mistake in the document, not a
-    /// module without a config.
-    ///
-    /// This config is read by hand rather than declared through config::fields, and not for lack of
-    /// trying: `show` is a list of strings and would declare cleanly, but `names` is an object whose
-    /// **keys are port names**, chosen by whoever writes the document. The three declarable primitives
-    /// name their fields in the source, so a map with keys nobody knows in advance has no form among
-    /// them — which is why the inspector shows this module's config as text and not as rows.
-    explicit printer_module(const atp::module_config& config) {
-        if (const atp::config::node* show = config.find("show"); show != nullptr) {
-            for (const atp::config::node& port : show->elements()) {
-                shown_.push_back(port.as_string());
-            }
-        }
-        if (const atp::config::node* names = config.find("names"); names != nullptr) {
-            for (const auto& [port, title] : names->entries()) {
-                names_.emplace_back(port, title.as_string());
-            }
-        }
-    }
+    /// Nothing is read here. The list is filled from the document before this body runs, and the
+    /// document has already been checked against the declaration above, so a config naming a key this
+    /// module does not declare has failed long before the module exists.
+    explicit printer_module(std::unique_ptr<printer_config> config) : config_(std::move(config)) {}
 
     void initialize(atp::module_context&) override {
         watcher_.watch(properties().format, [](const print_format& f) {
@@ -141,16 +134,8 @@ class printer_module : public atp::module<printer_ports, "printer", atp::ver<"1.
 
    private:
     [[nodiscard]] bool shown(const std::string& port) const {
-        return shown_.empty() || std::ranges::find(shown_, port) != shown_.end();
-    }
-
-    [[nodiscard]] const std::string& displayed(const std::string& port) const {
-        for (const auto& [from, to] : names_) {
-            if (from == port) {
-                return to;
-            }
-        }
-        return port;
+        const std::deque<std::string>& show = config_->show;
+        return show.empty() || std::ranges::find(show, port) != show.end();
     }
 
     void print(const std::string& port, const std::string& body) {
@@ -158,7 +143,7 @@ class printer_module : public atp::module<printer_ports, "printer", atp::ver<"1.
             return;
         }
         const std::string tag = properties().tag.get();
-        const std::string prefix = (tag.empty() ? std::string("printer") : tag) + "." + displayed(port);
+        const std::string prefix = (tag.empty() ? std::string("printer") : tag) + "." + port;
         ++printed_;
 
         std::string line;
@@ -195,8 +180,7 @@ class printer_module : public atp::module<printer_ports, "printer", atp::ver<"1.
         return std::string("<") + value.type().name() + ">";
     }
 
-    std::vector<std::string> shown_;
-    std::vector<std::pair<std::string, std::string>> names_;
+    std::unique_ptr<printer_config> config_;
     atp::io::watcher watcher_;
     int printed_ = 0;
 };

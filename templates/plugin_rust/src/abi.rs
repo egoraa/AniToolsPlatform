@@ -262,6 +262,42 @@ pub struct AtpModuleDesc {
     /// Where the module is declared, or null when it is declared nowhere a person could open —
     /// which is the case for a compiled plugin like this one.
     pub source: *const c_char,
+    /// Declared config fields, or null to take the document whole.
+    ///
+    /// Both are shown in this template: `rust_averager` leaves this null and walks the tree itself,
+    /// `rust_gate` declares its fields here and is then edited as typed rows in atp_studio.
+    pub config_fields: *const AtpConfigFieldDesc,
+    pub config_field_count: u32,
+}
+
+pub const ATP_FIELD_BOOL: u32 = 0;
+pub const ATP_FIELD_INT: u32 = 1;
+pub const ATP_FIELD_REAL: u32 = 2;
+pub const ATP_FIELD_STRING: u32 = 3;
+pub const ATP_FIELD_OBJECT: u32 = 4;
+pub const ATP_FIELD_ARRAY: u32 = 5;
+
+/// Declaration of one config field, mirroring `atp_config_field_desc` of `plugin_c.h`.
+///
+/// It carries no `struct_size`, unlike `AtpModuleDesc`, and that is the C header's decision rather than
+/// this mirror's: the host reads these as an **array**, and a growable element type in an array breaks
+/// the stride. The three port descriptors are frozen for the same reason.
+#[repr(C)]
+pub struct AtpConfigFieldDesc {
+    pub name: *const c_char,
+    pub kind: u32,
+    /// Canonical string form of the default; null declares the field **required**, and then a document
+    /// that omits it is refused before the pipeline starts, naming the file and the field.
+    pub default_value: *const c_char,
+    /// A non-empty set is what makes the field an enumeration — it is not a seventh kind, exactly as it
+    /// is not for a property.
+    pub options: *const *const c_char,
+    pub option_count: u32,
+    /// Array only: the form of one element. Never `ATP_FIELD_ARRAY`.
+    pub element: u32,
+    /// Object: its own fields. Array of objects: the fields of one element. Null otherwise.
+    pub fields: *const AtpConfigFieldDesc,
+    pub field_count: u32,
 }
 
 /// A NUL-terminated name for a descriptor field, out of a byte literal that already ends in one.

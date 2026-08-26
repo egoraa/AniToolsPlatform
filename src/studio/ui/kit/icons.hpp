@@ -58,6 +58,14 @@ namespace atp::studio::ui::icons {
 /// A folder — a directory of the file system, as opposed to a group of nodes.
 [[nodiscard]] QIcon directory();
 
+/// A triangle pointing the way the data flows — starting the pipeline. Outlined rather than filled,
+/// like the rest of the family: a solid triangle beside line art reads as a different set of icons.
+[[nodiscard]] QIcon run();
+
+/// A square — stopping the pipeline. The pair with run() is the one shape convention a transport
+/// control may borrow from outside this family, because it is the one every user already knows.
+[[nodiscard]] QIcon stop();
+
 }  // namespace atp::studio::ui::icons
 
 #endif

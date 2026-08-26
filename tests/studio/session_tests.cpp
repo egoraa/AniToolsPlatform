@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <any>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -59,10 +60,16 @@ struct target_props : atp::io::properties {
 };
 class target_module : public atp::module<atp::ports<atp::io::inputs, atp::io::outputs, target_props>, "target"> {};
 
+struct channels_config : atp::module_config {
+    using module_config::module_config;
+    std::int64_t& channels = field("channels", std::int64_t{0});
+};
+
 class config_reading_module : public atp::module<atp::ports<>, "config_reader"> {
    public:
-    explicit config_reading_module(const atp::module_config& cfg)
-        : channels_(atp::config::int_or(cfg.find("channels"), 0)) {}
+    using config_type = channels_config;
+
+    explicit config_reading_module(std::unique_ptr<channels_config> cfg) : channels_(cfg->channels) {}
 
     [[nodiscard]] std::int64_t channels() const {
         return channels_;

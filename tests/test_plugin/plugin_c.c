@@ -480,8 +480,75 @@ ATP_C_EXPORT unsigned atp_c_abi_version(void) {
     return ATP_C_ABI;
 }
 
+static void* declared_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
+    config_state* state = (config_state*)calloc(1, sizeof(config_state));
+    uint32_t root;
+
+    (void)user_data;
+    if (state == NULL) {
+        return NULL;
+    }
+    state->api = api;
+    state->ctx = ctx;
+    if (!atp_api_has_config_text(api)) {
+        config_append(state, "api-too-old");
+        return state;
+    }
+
+    root = api->config_root(ctx);
+    config_append(state, api->config_find_path(ctx, root, "rate", 4) != ATP_CONFIG_NONE ? "rate=yes " : "rate=no ");
+    config_append(state,
+                  api->config_find_path(ctx, root, "engine", 6) != ATP_CONFIG_NONE ? "engine=yes " : "engine=no ");
+    config_append(state,
+                  api->config_find_path(ctx, root, "master.gain", 11) != ATP_CONFIG_NONE ? "gain=yes " : "gain=no ");
+    config_append(state, api->config_find_path(ctx, root, "taps", 4) != ATP_CONFIG_NONE ? "taps=yes " : "taps=no ");
+    config_append(state, api->config_find_path(ctx, root, "absent", 6) == ATP_CONFIG_NONE ? "absent=no" : "absent=yes");
+    return state;
+}
+
+static const char* const declared_engines[] = {"fm", "additive"};
+
+static const atp_config_field_desc declared_voice_fields[] = {
+    {"note", ATP_FIELD_INT, "60", NULL, 0, ATP_FIELD_STRING, NULL, 0},
+};
+
+static const atp_config_field_desc declared_master_fields[] = {
+    {"gain", ATP_FIELD_REAL, "1.0", NULL, 0, ATP_FIELD_STRING, NULL, 0},
+};
+
+static const atp_config_field_desc declared_fields[] = {
+    {"rate", ATP_FIELD_INT, NULL, NULL, 0, ATP_FIELD_STRING, NULL, 0},
+    {"engine", ATP_FIELD_STRING, "fm", declared_engines, 2, ATP_FIELD_STRING, NULL, 0},
+    {"master", ATP_FIELD_OBJECT, NULL, NULL, 0, ATP_FIELD_STRING, declared_master_fields, 1},
+    {"voices", ATP_FIELD_ARRAY, NULL, NULL, 0, ATP_FIELD_OBJECT, declared_voice_fields, 1},
+    {"taps", ATP_FIELD_ARRAY, NULL, NULL, 0, ATP_FIELD_REAL, NULL, 0},
+};
+
+static const atp_module_desc declared_module = {
+    sizeof(atp_module_desc),
+    "c_declared",
+    {1, 0, 0, 0},
+    1,
+    NULL,
+    0,
+    config_outputs,
+    1,
+    NULL,
+    0,
+    NULL,
+    declared_create,
+    config_destroy,
+    NULL,
+    NULL,
+    config_iterate,
+    NULL,
+    NULL,
+    declared_fields,
+    5,
+};
+
 ATP_C_EXPORT unsigned atp_module_count(void) {
-    return 7;
+    return 8;
 }
 
 ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index) {
@@ -505,6 +572,9 @@ ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index) {
     }
     if (index == 6) {
         return &destroys_taken_module;
+    }
+    if (index == 7) {
+        return &declared_module;
     }
     return NULL;
 }

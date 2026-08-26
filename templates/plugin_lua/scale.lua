@@ -22,17 +22,36 @@ M.factor = atp.property(atp.i32, 3)
 --- in the message.
 M.fail = atp.property(atp.bool, false)
 
---- Reads the config, an ordinary Lua table this instance was handed at creation — `nil` when the
---- module's node named none, which is why every read below has a fallback.
+--- What this module accepts under "config", declared once and checked by the host.
 ---
---- The bands are the kind of setting this channel exists for: a list of pairs no property could
---- hold, fixed before the module is connected rather than turned while it runs. `factor` stays a
---- property for exactly the opposite reasons. Note that an array keeps its order here while the keys
---- of a table do not, so nothing in a Lua module may depend on the order an object was written in.
+--- The bands are the kind of setting this channel exists for: a list of pairs no property could hold,
+--- fixed before the module is connected rather than turned while it runs. `factor` stays a property for
+--- exactly the opposite reasons.
+---
+--- Declaring buys three things at once: atp_studio edits the config as typed rows instead of raw JSON, a
+--- document that does not fit is refused before the pipeline starts — naming the file and the field —
+--- and every declared key arrives at its own default, so the reads below need no fallbacks.
+---
+--- **A group and a list of objects take a function, never a table.** `pairs` has no order and the order
+--- of a config's fields is a contract — it is the order atp_studio draws the rows in — so a nested
+--- object is collected by a proxy exactly as the declarations above are. A table literal would lose it.
+--- The same caveat is why nothing in a Lua module may depend on the order an object was written in.
+---
+--- Declaring is optional. A module whose config is a format the platform does not parse declares
+--- nothing, reads self.config_text itself, and checks self.config_opaque to know that is all there is.
+M.config = atp.config(function(c)
+    c.bands = atp.list(function(band)
+        band.upto = atp.field(atp.i32)
+        band.name = atp.field(atp.text)
+    end)
+    c.otherwise = atp.field(atp.text, "large")
+end)
+
+--- Reads the config, an ordinary Lua table this instance was handed at creation. Every key declared
+--- above is already in it, at its own default when the document said nothing about it.
 function M:initialize()
-    local config = self.config or {}
-    self.bands = config.bands or {}
-    self.otherwise = config.otherwise or "large"
+    self.bands = self.config.bands
+    self.otherwise = self.config.otherwise
     self:log("lua_scale ready with " .. #self.bands .. " bands")
 end
 

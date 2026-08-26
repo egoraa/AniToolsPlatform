@@ -9,6 +9,7 @@
 #include "model/app_state.hpp"
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -59,6 +60,12 @@ class inspector_widget final : public QWidget {
     void sync_config();
 
     [[nodiscard]] const atp::config::node* effective_config() const;
+
+    /// The config the module is being shown, as a value: the same node effective_config() points at, or
+    /// an empty object where it points at nothing. Both callers ask a question of the document as a
+    /// whole — does the tree still hold it, does it fit again — and neither has anything to ask when
+    /// there is no config section on screen, which is why this is not folded into sync().
+    [[nodiscard]] atp::config::node shown_config() const;
 
     void apply_lock();
 
@@ -138,7 +145,7 @@ class inspector_widget final : public QWidget {
 
     /// Content of the file a "file:" config names, or the reason it cannot be read.
     ///
-    /// Read through runtime::load_module_config, the same call the builder makes, and against
+    /// Read through runtime::load_config_source, the same call the builder makes, and against
     /// app_state::saved_dir() rather than config_dir(): an unsaved project has no directory to resolve a
     /// relative path against, and saying so is more useful than reading a file from wherever studio was
     /// launched.
@@ -160,12 +167,28 @@ class inspector_widget final : public QWidget {
     /// string stay on the text editor: a block belongs to the document and may be named by modules
     /// whose schemas differ, so drawing it by one module's schema would let that module rewrite
     /// fields it cannot show.
+    ///
+    /// A fourth case sends the config to the text editor as well, and this one comes and goes with the
+    /// document rather than with the selection: a config holding a value of a form the declaration
+    /// does not give that field. The rows cannot carry such a value — they would drop it on the next
+    /// edit of anything else — so they are not offered, config_declined_ says which field and what is
+    /// wrong with it, and the editor is where the reader fixes it. The form comes back on its own once
+    /// it fits, which is why sync() asks the question again on every document change.
     config_tree* config_tree_ = nullptr;
     QPlainTextEdit* config_edit_ = nullptr;
     QComboBox* config_source_ = nullptr;
     QLineEdit* share_name_ = nullptr;
     std::string config_group_;
     std::string config_module_;
+
+    /// Why the rows are not there, one problem per line; empty whenever they are, and always empty for
+    /// a config that would not have had them anyway — a shared block, a file, a module declaring none.
+    QString config_declined_;
+
+    /// The declaration the palette holds for the module being shown, kept so that sync() can ask
+    /// whether a document that arrived from elsewhere fits it without building a config object to find
+    /// out. Null when the module declared none.
+    std::shared_ptr<const atp::module_config> config_schema_;
 
     /// Name of the block the editor is bound to; empty means the module's own node. Kept beside the
     /// widgets rather than read from the project on each commit, for the same reason the group is:

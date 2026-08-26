@@ -359,6 +359,30 @@ struct bridge_source {
     return !copy_failed && !platform_failed && platform_time > copy_time;
 }
 
+/// Whether a copy of the package is older than the platform's own, and therefore worth saying so about.
+///
+/// The twin of bridge_copy_is_stale, and it needs its own guards for the same reason: a package that is
+/// not there answers "infinitely old" through newest_write, which is not evidence of age but of absence,
+/// and the advice that follows a stale verdict is "delete this". A copy that *is* the platform's own is
+/// the ordinary case — a module folder is a search directory, so the loaded bridge is often the studio's
+/// — and it is not stale by being itself.
+/// @param copy the package in question
+/// @param platform the package the studio ships
+/// @param lang the language whose package it is, which decides whether it is a directory or a file
+/// @return true when the copy is older
+[[nodiscard]] inline bool package_copy_is_stale(const std::filesystem::path& copy,
+                                                const std::filesystem::path& platform,
+                                                const script_language& lang) {
+    std::error_code same;
+    if (copy.empty() || platform.empty() || std::filesystem::equivalent(copy, platform, same)) {
+        return false;
+    }
+    if (!std::filesystem::exists(copy) || !std::filesystem::exists(platform)) {
+        return false;
+    }
+    return detail::package_is_older(copy, platform, lang);
+}
+
 /// The bridge this session actually loaded, when it is older than the one the studio ships.
 ///
 /// Worth asking at every scan and not only when a module is created. A module folder carries its own
@@ -391,6 +415,48 @@ struct bridge_source {
     return "the bridge in use, " + loaded.string() + ", is older than the studio's own, " + platform.string() +
            "; replacing the file would not change the copy already loaded, so delete it and scan again "
            "if modules of that folder behave as if the platform were older";
+}
+
+/// The package the loaded bridge reads, when it is older than the one the studio ships.
+///
+/// A separate question from stale_loaded_bridge and asked beside it, because the two go stale
+/// independently and only one of them is visible. A folder keeps its own copy of both; the bridge is
+/// never replaced, so it is the obvious suspect, while the package is replaced only by provision_folder
+/// — that is, only when somebody creates a module in that folder. A folder merely *scanned* since it was
+/// provisioned therefore keeps a package as old as the day it was made, and a script written against
+/// anything the platform added since fails inside the interpreter, naming a file in the folder rather
+/// than the reason. That is the diagnosis this question exists to shorten.
+/// @param manager the session's module manager
+/// @param source where the studio's own bridge and package are
+/// @param lang the language whose package is considered
+/// @return the loaded bridge's package when it is the older one, nullopt otherwise
+[[nodiscard]] inline std::optional<std::filesystem::path> stale_loaded_package(const module_manager& manager,
+                                                                               const bridge_source& source,
+                                                                               const script_language& lang) {
+    const std::vector<std::filesystem::path> loaded = loaded_bridges(manager, lang);
+    if (loaded.empty() || !source.found()) {
+        return std::nullopt;
+    }
+    std::filesystem::path mine = loaded.front().parent_path() / lang.scripts_subdir / lang.package_entry;
+    if (!package_copy_is_stale(mine, source.package, lang)) {
+        return std::nullopt;
+    }
+    return mine;
+}
+
+/// What to say about the package in use being older than the studio's own.
+///
+/// It names a different way out than stale_bridge_note, and the difference is the point: a loaded
+/// library cannot be replaced under the process, while a package is only read when a script imports it,
+/// so refreshing this one is enough and needs no deletion.
+/// @param loaded the package in use
+/// @param platform the package the studio ships
+/// @return the line, which has to name both files and the way out
+[[nodiscard]] inline std::string stale_package_note(const std::filesystem::path& loaded,
+                                                    const std::filesystem::path& platform) {
+    return "the package in use, " + loaded.string() + ", is older than the studio's own, " + platform.string() +
+           "; scripts there cannot use anything the platform added since it was copied, so replace it with "
+           "the studio's own — creating a module in that folder does it";
 }
 
 /// What provision_folder had to do, so the caller can say it out loud.

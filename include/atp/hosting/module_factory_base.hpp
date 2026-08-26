@@ -28,7 +28,20 @@ class module_factory_base {
     /// Version of the modules it creates.
     [[nodiscard]] virtual version get_version() const noexcept = 0;
 
-    /// Creates a module instance from a structured config.
+    /// The declared config of this factory's modules: structure and defaults, no values. Empty when
+    /// the module declares none, which is how "edit this as text" is told from "takes no settings".
+    ///
+    /// Not pure virtual: a factory written by hand outside the tree declares no config by staying
+    /// silent, and that is the honest default.
+    ///
+    /// The object is built here and filled elsewhere, because filling it means reading a document and
+    /// a factory knows nothing about one. What comes back is the module's own config type, so whoever
+    /// fills it works through module_config::entry and never has to name that type.
+    [[nodiscard]] virtual config_ptr make_config() const {
+        return {};
+    }
+
+    /// Creates a module, handing it the config it will own.
     ///
     /// The config arrives here, and not in initialize, because the constructor is the only point
     /// earlier than both connect and initialize, and it is where the make<>() calls that declare the
@@ -38,18 +51,19 @@ class module_factory_base {
     /// channel is for is a setting a property cannot express — a list, a table, a nested object —
     /// needed before initialize and not edited live.
     ///
+    /// The object comes from this very factory's make_config(), filled and checked by the host in
+    /// between. Passing one from another factory is a programming error and is refused rather than
+    /// cast blindly.
+    ///
     /// No default argument is given, deliberately: on a virtual function a default is taken from the
-    /// static type of the call, which is a classic trap. The convenient overload without a config
-    /// lives on module_registry instead.
+    /// static type of the call, which is a classic trap. The convenient overload that makes the config
+    /// itself lives on module_registry instead.
     ///
     /// module_ptr is safe across a plugin boundary — the module's destructor is code of the library
     /// that created it, and the pin in the deleter keeps that library loaded while the module
     /// lives.
-    /// The parameter is the config as a whole rather than the root of its tree, because a module is
-    /// entitled to more than the tree: a path lookup, and — when the config came from a file the host
-    /// does not parse — the bytes of that file and its name.
-    /// @param cfg config for this instance; the default form when the node named none
-    [[nodiscard]] virtual module_ptr create(const module_config& cfg) const = 0;
+    /// @param config config for this instance; empty when the module declares none
+    [[nodiscard]] virtual module_ptr create(config_ptr config) const = 0;
 
     /// Ports and properties the modules of this factory declare — without creating one.
     ///

@@ -2,25 +2,20 @@
 #ifndef ANITOOLSPLATFORM_CONFIG_READ_HPP
 #define ANITOOLSPLATFORM_CONFIG_READ_HPP
 
-#include <concepts>
 #include <cstdint>
 #include <string>
 #include <utility>
 
 #include <atp/config/node.hpp>
+#include <atp/config/scalar.hpp>
 
 namespace atp::config {
-
-/// The four scalar forms a config node can be read out as.
-template <typename T>
-concept scalar =
-    std::same_as<T, bool> || std::same_as<T, std::int64_t> || std::same_as<T, double> || std::same_as<T, std::string>;
 
 /// Value of @p found, or @p fallback when there is no node or it holds another form — the two failures
 /// a caller with a default in hand treats the same way.
 ///
 /// Takes a nullable node rather than a config, so one utility serves both levels of lookup: what
-/// module_config::find(path) answers and what node::find(key) answers. Members on module_config would
+/// raw_config::find(path) answers and what node::find(key) answers. Members on raw_config would
 /// have meant four more of them for the same four types.
 template <scalar T>
 [[nodiscard]] inline T value_or(const node* found, T fallback) {

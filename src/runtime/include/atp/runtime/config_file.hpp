@@ -11,8 +11,8 @@
 #include <utility>
 
 #include <atp/config/node.hpp>
-#include <atp/module/module_config.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_source.hpp>
 #include <atp/runtime/json_codec.hpp>
 #include <atp/runtime/utf8_path.hpp>
 
@@ -21,7 +21,7 @@ namespace atp::runtime {
 /// The prefix that tells a "file:" source from the default one, which is a name in "configs".
 inline constexpr std::string_view config_file_prefix = "file:";
 
-/// Reads a module config from a file named by a "file:" string.
+/// Reads a config_source from a file named by a "file:" string.
 ///
 /// The extension decides the format, and that is a diagnosis rather than a convenience: a .json is
 /// required to parse, so a forgotten comma becomes an error naming the position instead of a silent
@@ -36,7 +36,7 @@ inline constexpr std::string_view config_file_prefix = "file:";
 ///        none, which is a hard error for a relative path and no obstacle for an absolute one
 /// @throws config_error naming the resolved path for every failure: no base directory, an unreadable
 ///         file, a directory, unparsable JSON, or a parsed root that is neither object nor null
-[[nodiscard]] inline module_config load_module_config(std::string_view spec, const std::filesystem::path& base_dir) {
+[[nodiscard]] inline config_source load_config_source(std::string_view spec, const std::filesystem::path& base_dir) {
     const std::filesystem::path named = path_from_utf8(spec);
     if (named.empty()) {
         throw config_error("a config file was named as 'file:' with no path");
@@ -60,7 +60,7 @@ inline constexpr std::string_view config_file_prefix = "file:";
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     if (extension != ".json") {
-        return module_config::opaque(std::move(text), shown);
+        return config_source{{}, std::move(text), shown, true};
     }
     atp::config::node parsed;
     try {
@@ -72,7 +72,7 @@ inline constexpr std::string_view config_file_prefix = "file:";
         throw config_error("the root of a config must be an object, but '" + shown + "' holds a " +
                            std::string(atp::config::node::kind_name(parsed.kind())));
     }
-    return module_config(std::move(parsed), std::move(text), shown);
+    return config_source{std::move(parsed), std::move(text), shown, false};
 }
 
 }  // namespace atp::runtime

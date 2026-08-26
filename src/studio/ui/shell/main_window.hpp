@@ -18,10 +18,12 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QDockWidget>
+#include <QLabel>
 #include <QMainWindow>
 #include <QMenu>
 #include <QString>
 #include <QTimer>
+#include <QToolBar>
 
 namespace atp::studio::ui {
 
@@ -33,6 +35,11 @@ class main_window final : public QMainWindow {
 
     /// Rebuilds every widget from the current project and selection.
     void refresh_all();
+
+    /// Puts the docks back where a fresh profile has them. Public because it is the only way to see
+    /// a changed default: a saved window_state wins over apply_default_layout on every start, and a
+    /// profile that has one keeps its old proportions until it is told to let go.
+    void reset_layout();
 
     /// Appends a line of the studio's own to the Log dock, rendered like a module's: the current
     /// time, the level in brackets, then the message. One shape for every line in the dock is what
@@ -69,6 +76,16 @@ class main_window final : public QMainWindow {
    private:
     void build_menus();
 
+    /// Raises the toolbar over the menus. Every action on it already exists as a menu entry — the
+    /// bar names no behaviour of its own, it only puts the handful a person reaches for within one
+    /// glance of the canvas instead of two menus down.
+    void build_toolbar();
+
+    /// Raises the status bar under the docks: what the pipeline is doing, and which file is open.
+    /// The run state is shown twice on purpose — here and in the Runtime dock — because the dock is
+    /// closeable and the answer to "is it running" must not be.
+    void build_status_bar();
+
     void build_view_menu(QMenu* view);
 
     void build_theme_menu(QMenu* view);
@@ -87,9 +104,18 @@ class main_window final : public QMainWindow {
 
     void apply_default_layout();
 
-    void restore_layout();
+    /// Gives the docks their share of the window. Split out of apply_default_layout and repeated
+    /// after restore_layout for a profile that has a geometry but no dock state: the constructor
+    /// lays the docks out before the saved geometry is applied, so at that point the height is the
+    /// hardcoded one and a share of it would be a share of the wrong window.
+    void size_docks();
 
-    void reset_layout();
+    /// Puts the window back where the profile left it.
+    /// @return whether the dock state was restored — false both when there is none saved and when
+    ///         restoreState refused the blob it was given, and in either case the docks are still at
+    ///         the sizes apply_default_layout gave them against the pre-geometry window, so the
+    ///         caller owes them a size_docks
+    [[nodiscard]] bool restore_layout();
 
     void rebuild_recent_menu();
 
@@ -120,6 +146,13 @@ class main_window final : public QMainWindow {
     runtime_widget* runtime_ = nullptr;
     log_widget* log_ = nullptr;
     QMenu* recent_menu_ = nullptr;
+    QToolBar* toolbar_ = nullptr;
+    QLabel* status_run_ = nullptr;
+    QLabel* status_path_ = nullptr;
+    QAction* new_action_ = nullptr;
+    QAction* open_action_ = nullptr;
+    QAction* run_action_ = nullptr;
+    QAction* stop_action_ = nullptr;
     QAction* save_action_ = nullptr;
     QAction* save_as_action_ = nullptr;
     QAction* attach_action_ = nullptr;

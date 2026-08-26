@@ -22,6 +22,10 @@
 #include <atp/io.hpp>
 #include <atp/module/module_base.hpp>
 #include <atp/module/module_host.hpp>
+#include <atp/runtime/c_config.hpp>
+#include <atp/runtime/config_path.hpp>
+#include <atp/runtime/config_tree_source.hpp>
+#include <atp/runtime/raw_config.hpp>
 
 namespace atp::runtime {
 class c_module;
@@ -308,6 +312,20 @@ template <typename T>
     return c_text(desc.source);
 }
 
+/// The config declaration of a descriptor, empty for a plugin built before the field existed.
+///
+/// Read behind the size check for the same reason c_desc_source is: struct_size says how much of the
+/// struct the plugin actually wrote, and reading past it would read whatever happened to follow.
+[[nodiscard]] inline std::span<const atp_config_field_desc> c_desc_config_fields(const atp_module_desc& desc) {
+    if (desc.struct_size < offsetof(atp_module_desc, config_field_count) + sizeof(desc.config_field_count)) {
+        return {};
+    }
+    if (desc.config_fields == nullptr) {
+        return {};
+    }
+    return {desc.config_fields, desc.config_field_count};
+}
+
 /// Rejects a descriptor that cannot be turned into a module, before anything is built from it.
 ///
 /// The checks are all of the "a C struct cannot express this" kind: a required function pointer left
@@ -424,16 +442,21 @@ class c_module final : public module_base {
     /// present a config error as a failure of initialize.
     /// @param desc descriptor, which must outlive this object — the loader keeps the plugin's library
     ///        pinned for exactly that reason
-    /// @param cfg config for this instance, readable through the api's config_* callbacks
+    /// @param config config for this instance, readable through the api's config_* callbacks; owned
+    ///        from here on, and never null — the factory refuses a config it did not make
     /// @throws std::runtime_error if a port cannot be built, std::invalid_argument if a property
     ///         default is unparsable or outside its own options, or whatever a callback raised
-    c_module(const atp_module_desc& desc, const module_config& cfg)
-        : desc_(&desc), name_(detail::c_text(desc.name)), config_(cfg) {
+    c_module(const atp_module_desc& desc, std::unique_ptr<atp::module_config> config)
+        : desc_(&desc), name_(detail::c_text(desc.name)), config_(std::move(config)) {
+        tree_ = dynamic_cast<const config_tree_source*>(config_.get());
+        if (tree_ == nullptr) {
+            throw atp::config::access_error("a C module was handed a config that carries no tree");
+        }
         for (std::uint32_t i = 0; i < desc.version_count; ++i) {
             version_.parts[i] = desc.version[i];
         }
         version_.count = desc.version_count;
-        index_config(config_.root());
+        index_config(tree_->tree());
         build_inputs();
         build_outputs();
         build_properties();
@@ -896,35 +919,35 @@ class c_module final : public module_base {
         };
         table.config_find_path = [](atp_ctx* ctx, std::uint32_t node, const char* path, std::size_t len) noexcept {
             return guarded_value<std::uint32_t>(ctx, ATP_CONFIG_NONE, [&](c_module& self) -> std::uint32_t {
-                if (path == nullptr || self.config_at(node) != &self.config_.root()) {
+                if (path == nullptr || self.config_at(node) != &self.tree_->tree()) {
                     return ATP_CONFIG_NONE;
                 }
-                const atp::config::node* found = self.config_.find(std::string_view(path, len));
+                const atp::config::node* found = find_path(self.tree_->tree(), std::string_view(path, len));
                 return found == nullptr ? ATP_CONFIG_NONE : self.handle_of(found);
             });
         };
         table.config_text = [](atp_ctx* ctx, const char** out, std::size_t* len) noexcept {
             return guarded(ctx, [&](c_module& self) {
-                if (!self.config_.from_file() || out == nullptr || len == nullptr) {
+                if (self.config_->origin().empty() || out == nullptr || len == nullptr) {
                     return false;
                 }
-                *out = self.config_.text().c_str();
-                *len = self.config_.text().size();
+                *out = self.config_->text().c_str();
+                *len = self.config_->text().size();
                 return true;
             });
         };
         table.config_origin = [](atp_ctx* ctx, const char** out, std::size_t* len) noexcept {
             return guarded(ctx, [&](c_module& self) {
-                if (!self.config_.from_file() || out == nullptr || len == nullptr) {
+                if (self.config_->origin().empty() || out == nullptr || len == nullptr) {
                     return false;
                 }
-                *out = self.config_.origin().c_str();
-                *len = self.config_.origin().size();
+                *out = self.config_->origin().c_str();
+                *len = self.config_->origin().size();
                 return true;
             });
         };
         table.config_is_opaque = [](atp_ctx* ctx) noexcept {
-            return guarded_value<int>(ctx, 0, [](c_module& self) -> int { return self.config_.is_opaque() ? 1 : 0; });
+            return guarded_value<int>(ctx, 0, [](c_module& self) -> int { return self.config_->is_opaque() ? 1 : 0; });
         };
         return table;
     }
@@ -940,7 +963,10 @@ class c_module final : public module_base {
     std::vector<output_entry> output_index_;
     std::vector<property_entry> property_index_;
 
-    module_config config_;
+    std::unique_ptr<atp::module_config> config_;
+
+    /// The same object under the name that answers the tree; owned through config_ above.
+    const config_tree_source* tree_ = nullptr;
     std::vector<const atp::config::node*> nodes_;
 
     atp_ctx ctx_{this};
@@ -977,8 +1003,31 @@ class c_module_factory final : public module_factory_base {
         return version_;
     }
 
-    [[nodiscard]] module_ptr create(const module_config& cfg) const override {
-        return module_ptr(new c_module(*desc_, cfg), module_deleter{});
+    /// A module that declares fields gets a config that carries them; one that declares none gets the
+    /// document whole, exactly as the whole C path did before declarations existed.
+    [[nodiscard]] config_ptr make_config() const override {
+        const std::span<const atp_config_field_desc> fields = detail::c_desc_config_fields(*desc_);
+        if (fields.empty()) {
+            return config_ptr(new raw_config, config_deleter{});
+        }
+        return config_ptr(new c_config(fields), config_deleter{});
+    }
+
+    /// The config must be one make_config() handed out; another module's is refused rather than
+    /// reinterpreted, and carrying a tree is exactly what tells the two apart from everything else.
+    ///
+    /// A declared config is rendered into its tree here — after load_fields filled it and before
+    /// c_module indexes it, which has to happen before desc.create, since a C module reads its config
+    /// from inside what is its constructor.
+    [[nodiscard]] module_ptr create(config_ptr config) const override {
+        if (dynamic_cast<config_tree_source*>(config.get()) == nullptr) {
+            throw atp::config::access_error("a C module was handed a config of another module");
+        }
+        if (auto* declared = dynamic_cast<c_config*>(config.get())) {
+            declared->materialize();
+        }
+        std::unique_ptr<atp::module_config> owned(config.release());
+        return module_ptr(new c_module(*desc_, std::move(owned)), module_deleter{});
     }
 
     /// Answered from the descriptors, creating nothing: the C path declares its ports statically by

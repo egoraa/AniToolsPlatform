@@ -79,6 +79,39 @@ answers yes to. They are `config_find_path` (a whole dotted path in one call, fo
 root), and `config_text` / `config_origin` / `config_is_opaque` for a config the pipeline attached as a
 file in a format the host does not parse: the bytes arrive verbatim and the module parses them itself.
 
+## Declaring the config instead
+
+`rust_gate`, the second module in `src/lib.rs`, is the same channel taken the other way: it fills
+`config_fields` in its descriptor and so **declares** what it accepts, rather than discovering it.
+
+```json
+{
+    "module": "rust_gate",
+    "name": "gate",
+    "config": { "threshold": 10, "mode": "block" }
+}
+```
+
+Declaring buys three things at once:
+
+- atp_studio edits the config as typed rows, with a drop-down for `mode` because it lists its values,
+  instead of handing you the raw JSON;
+- a document that does not fit is refused before the pipeline starts, naming the file and the field.
+  `threshold` has `default_value: null`, which is how a **required** field is spelled, so a pipeline
+  that forgets it fails loudly instead of gating on zero;
+- every declared key is in the tree by the time `create` runs, at its own default when the document
+  said nothing about it — which is why `gate_create` reads with no fallback and no form check, where
+  `read_weights` needs both.
+
+Two things about the declaration itself. An enumeration is **not** a separate kind: `mode` is
+`ATP_FIELD_STRING` with a non-empty `options` set, exactly as an enumerated property is. And
+`AtpConfigFieldDesc` carries no `struct_size`, unlike `AtpModuleDesc` — the host reads these as an
+array, and a growable element type in an array breaks the stride.
+
+Which way to take is decided by the config, not by taste. Declare when the platform can express the
+form; walk the tree yourself when it cannot — a format the host does not parse, or an object whose
+keys are data rather than a schema.
+
 ## A panic is not "just an error"
 
 A panic unwinding into a C++ frame is undefined behaviour, and it is the main thing to take away from

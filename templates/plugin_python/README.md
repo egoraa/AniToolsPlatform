@@ -28,10 +28,22 @@ path does not name.
   is connected and never edited afterwards.
 
 The config is bound to `self.config` **before `__init__`**, so the constructor can read it while
-deciding what the module is; ports are bound after, and belong to `initialize`. `self.config` is
-`None` when the module's node named no config, which is why `averager.py` reads it as
-`self.config or {}` — a module that throws on an absent config is one nobody can place, since placing
-it is how one would give it the config it wanted.
+deciding what the module is; ports are bound after, and belong to `initialize`.
+
+`averager.py` **declares** what it accepts, in the `AveragerConfig` class, and names it with
+`config_type`. Declaring buys three things at once:
+
+- atp_studio edits the config as typed rows, with a drop-down for any field that lists its values,
+  instead of handing you the raw JSON;
+- a document that does not fit is refused before the pipeline starts, naming the file and the field —
+  a field declared with no default at all is required, and forgetting it fails loudly;
+- every declared key is already in `self.config` at its own default, so the constructor needs no
+  `self.config or {}` and no `.get(key, default)`.
+
+Declaring is optional and the other way is still right for one case: a config whose form the platform
+cannot express — a file it does not parse, or a tree whose keys are data. Such a module declares
+nothing, reads `self.config_text` itself and checks `self.config_opaque` to know that is all there is.
+Then `self.config` may be `None`, and the fallbacks come back.
 
 In `pipeline.json` the two sit side by side:
 

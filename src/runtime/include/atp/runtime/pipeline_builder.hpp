@@ -16,8 +16,10 @@
 #include <atp/config/node.hpp>
 #include <atp/hosting/module_registry.hpp>
 #include <atp/io/property_codec.hpp>
+#include <atp/runtime/config_binding.hpp>
 #include <atp/runtime/config_file.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_source.hpp>
 #include <atp/runtime/group.hpp>
 #include <atp/runtime/module_loader.hpp>
 #include <atp/runtime/pipeline.hpp>
@@ -124,18 +126,18 @@ inline void apply_properties(module_base& m, const module_node& node) {
 /// @param base_dir directory of the document, which a relative "file:" path resolves against
 /// @throws config_error for an unsupported source prefix, a name absent from the shared block, or
 ///         anything that goes wrong reading a named file
-[[nodiscard]] inline module_config resolve_config(const module_node& node,
+[[nodiscard]] inline config_source resolve_config(const module_node& node,
                                                   const std::vector<std::pair<std::string, atp::config::node>>& shared,
                                                   const std::filesystem::path& base_dir) {
     if (!node.config) {
-        return module_config{};
+        return config_source{};
     }
     if (!node.config->is_string()) {
-        return module_config(*node.config);
+        return config_source{*node.config, {}, {}, false};
     }
     const std::string text = node.config->as_string();
     if (text.starts_with(config_file_prefix)) {
-        return load_module_config(std::string_view(text).substr(config_file_prefix.size()), base_dir);
+        return load_config_source(std::string_view(text).substr(config_file_prefix.size()), base_dir);
     }
     const std::optional<std::string> ref = parse_config_ref(text);
     if (!ref) {
@@ -148,9 +150,9 @@ inline void apply_properties(module_base& m, const module_node& node) {
                 if (!shared_text.starts_with(config_file_prefix)) {
                     throw config_error("config '" + *ref + "' in 'configs' must be an object or a 'file:' path");
                 }
-                return load_module_config(std::string_view(shared_text).substr(config_file_prefix.size()), base_dir);
+                return load_config_source(std::string_view(shared_text).substr(config_file_prefix.size()), base_dir);
             }
-            return module_config(value);
+            return config_source{value, {}, {}, false};
         }
     }
     throw config_error("no entry named '" + *ref + "' in 'configs'");
@@ -164,10 +166,15 @@ inline void build_group(group& g,
     for (const child_node& c : node.modules) {
         if (c.module) {
             try {
-                const module_config cfg = resolve_config(*c.module, shared, base_dir);
-                module_ptr m = c.module->factory_version
-                                   ? registry.create(c.module->factory, *c.module->factory_version, cfg)
-                                   : registry.create(c.module->factory, cfg);
+                const config_source src = resolve_config(*c.module, shared, base_dir);
+                const module_factory_base& factory = c.module->factory_version
+                                                         ? registry.at(c.module->factory, *c.module->factory_version)
+                                                         : registry.at(c.module->factory);
+                config_ptr cfg = factory.make_config();
+                if (cfg) {
+                    load_fields_or_throw(*cfg, src);
+                }
+                module_ptr m = factory.create(std::move(cfg));
                 apply_properties(*m, *c.module);
                 g.add(c.module->name, std::move(m));
             } catch (const std::exception& e) {

@@ -57,28 +57,34 @@ class module_registry : public detail::registration_api<module_registry> {
 
     /// Creates a module of the latest (highest) registered version of this name.
     /// @throws std::runtime_error if the name is unknown
-    [[nodiscard]] module_ptr create(const std::string& name, const module_config& cfg) const {
-        return at(name).create(cfg);
+    [[nodiscard]] module_ptr create(const std::string& name, config_ptr config) const {
+        return at(name).create(std::move(config));
     }
 
     /// Creates a module of an exact version (1.2 == 1.2.0: zero padding).
     /// @throws std::runtime_error if the name or the version is unknown
-    [[nodiscard]] module_ptr create(const std::string& name, const version& v, const module_config& cfg) const {
-        return at(name, v).create(cfg);
+    [[nodiscard]] module_ptr create(const std::string& name, const version& v, config_ptr config) const {
+        return at(name, v).create(std::move(config));
     }
 
-    /// Creates a module with no config, for the callers that have none to give — tests and studio's
-    /// add_module among them. The convenience lives here rather than as a default argument on
-    /// module_factory_base::create, because on a virtual function a default is taken from the static
-    /// type of the call, which is a classic trap. It is not offered on module_factory either: there it
-    /// would let a caller that does hold a config drop it silently.
+    /// Builds the module with a config at its declared defaults and **does not fill it**: filling
+    /// means reading a document, and there is none here. That job, and the check that goes with it,
+    /// belong to the host and live in runtime::config_binding.
+    ///
+    /// For the callers that have no document to give — tests and studio's add_module among them. The
+    /// convenience lives here rather than as a default argument on module_factory_base::create,
+    /// because on a virtual function a default is taken from the static type of the call, which is a
+    /// classic trap. It is not offered on module_factory either: there it would let a caller that does
+    /// hold a config drop it silently.
     [[nodiscard]] module_ptr create(const std::string& name) const {
-        return create(name, module_config{});
+        const module_factory_base& f = at(name);
+        return f.create(f.make_config());
     }
 
-    /// Creates a module of an exact version with no config.
+    /// Creates a module of an exact version with a config at its declared defaults.
     [[nodiscard]] module_ptr create(const std::string& name, const version& v) const {
-        return create(name, v, module_config{});
+        const module_factory_base& f = at(name, v);
+        return f.create(f.make_config());
     }
 
     /// Factory of the latest registered version of this name.

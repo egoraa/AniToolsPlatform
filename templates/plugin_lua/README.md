@@ -84,13 +84,26 @@ A property is one scalar with a default, edited live. A **config** is the other 
 ```
 
 It arrives as an ordinary Lua table in `self.config`, readable from `initialize` onward — Lua has no
-constructor, so there is nothing earlier to read it in. It is `nil` when the module's node named no
-config, which is why every read in `scale.lua` has a fallback: a module that fell over on an absent
-config would be one nobody could place, since placing it is how one would give it a config.
+constructor, so there is nothing earlier to read it in.
 
-One caveat that is this bridge's alone: **an array keeps its order, the keys of a table do not.** The
-host's own value and a Python dict preserve the order the entries were given in; a Lua table cannot,
-so nothing in a Lua module may depend on the order an object was written in.
+`scale.lua` **declares** what it accepts, with `atp.config(...)`. Declaring buys three things at once:
+
+- atp_studio edits the config as typed rows, with a drop-down for any field that lists its values,
+  instead of handing you the raw JSON;
+- a document that does not fit is refused before the pipeline starts, naming the file and the field —
+  a field declared with no default at all is required, and forgetting it fails loudly;
+- every declared key is already in `self.config` at its own default, so the reads need no fallback.
+
+**A group and a list of objects take a function, never a table**, and that is this bridge's own caveat
+rather than a style: `pairs` has no order, while the order of a config's fields is a contract — it is
+the order atp_studio draws the rows in. A function lets the same proxy that orders the declarations
+order the fields too; a table literal would lose it. The same reason is why nothing in a Lua module may
+depend on the order an object was *written* in — an array keeps its order, the keys of a table do not.
+
+Declaring is optional and the other way is still right for one case: a config whose form the platform
+cannot express — a file it does not parse, or a tree whose keys are data. Such a module declares
+nothing, reads `self.config_text` itself and checks `self.config_opaque` to know that is all there is.
+Then `self.config` may be `nil`, and the fallbacks come back.
 
 ## Three things this bridge does differently
 

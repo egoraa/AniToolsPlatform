@@ -41,7 +41,14 @@ process keeps running the code it mapped, so the symptom is the same either way 
 delete the copy and scan again. A folder provisioned before an update thus keeps loading the old
 bridge with no error of its own — `stale_loaded_bridge` is therefore asked at startup and at every
 rescan, per language, and the warning names both files; when a module folder behaves as if the
-platform were older, that copy is the first suspect. The build-tree equivalent is
+platform were older, that copy is the first suspect. **`stale_loaded_package` is asked beside it and
+is a different question**: the bridge is never replaced, while the package is replaced only by
+`provision_folder`, i.e. only when somebody creates a module in that folder — so a folder merely
+*scanned* since it was provisioned keeps a package as old as the day it was made. A script written
+against anything the platform added since then fails inside the interpreter, naming a file in the
+folder rather than the reason (`AttributeError: module 'atp' has no attribute 'Config'` is what that
+looks like), and the two notes differ in the way out because the causes do: a loaded library cannot be
+replaced under the process, a package can. The build-tree equivalent is
 forgetting to rebuild a bridge, which leaves `plugins/` beside `atp_studio` stale — and
 `find_bridge_source` looks exactly there first. That directory is now the bridges' own output
 directory rather than a copy of it (`ATP_PLUGIN_OUTPUT_DIRECTORY`), so a bridge that was rebuilt is
@@ -63,36 +70,72 @@ as a JSON area — but only when its config is an **inline object** or absent. T
 on the text editor and are untouched: a module that declared no schema has no types to check against; a
 `"file:"` config is somebody else's file in a format the platform may not parse; and a reference to a
 shared block belongs to the **document** and may be named by modules whose schemas differ, so drawing it
-by one module's schema would let that module rewrite fields it cannot even show. `UiInspectorConfig.*`
+by one module's schema would let that module rewrite fields it cannot even show — and a fourth case, a
+document holding a value of a form the declaration does not give it, which is below. `UiInspectorConfig.*`
 (23 tests) is the guard: its module declares nothing and keeps an inline config, so any widening of the
 tree drops them all at once.
 
-**The widget holds no rules.** What it shows is `studio::materialise(schema, stored)` — the config with
-every declared field present, taking its default where the document said nothing, which is why the tree
-can be an editor of an *object* rather than of a schema. What it writes is
-`studio::strip_defaults(schema, edited)`. Both are free functions over `atp::config::node` in
-`studio/config_shape.hpp`, know nothing about Qt and are tested in `atp_tests`; the pinning assertion is
-**`strip(materialise(x)) == strip(x)`**, and it exists because the predecessor kept the same logic inside
-the widget and lost data three separate ways.
+**The widget holds no rules, because the object holds them all.** `config_tree` takes its own object of
+the module's config type from the very factory that would build the module (`make_config()`), fills it
+with `runtime::load_fields`, draws one row per `module_config::entry` and writes back
+`runtime::save_fields`. What a default is, which fields exist, what a fresh list element looks like and
+what is worth writing down are all questions the object and the binder answer; the predecessor
+re-implemented every one of them inside the widget, and losing data three separate ways was what that
+cost. `studio/config_shape.hpp` (`materialise`/`strip_defaults`) is gone with them — the invariant it was
+pinned by lives on as `ConfigBinding.LoadingWhatWasSavedGivesTheSameDocument`.
 
-**Row order in the tree is `materialise`'s own decision now**, and that is new: a `config::node` object
-keeps what it was given, so the alphabetical order the old `nlohmann::json` inherited from its `std::map`
-is gone. What it writes instead is the declared fields in the order the module declared them, then the
-undeclared keys the document held — the order a reader of the plugin's source expects. Saving is
-unaffected, since `runtime::json_dump` sorts.
+The prototype the palette holds is `studio::module_info::config_schema`, a
+`shared_ptr<const atp::module_config>` made from the factory's `config_ptr` **with its deleter**: that
+deleter carries the plugin pin, and without it a rescan would leave a dangling vtable behind every cached
+entry. It is empty for a module that declares no config and for a `runtime::raw_config` — a module that
+takes the document whole has no fields to draw and is edited as text. Whether a config reaches the module
+at all is the **separate** `module_info::takes_config`, and the pair is what tells "takes none" apart from
+"takes one it does not describe": MCP prints the `"config"` key exactly when the module takes one, so an
+empty `"fields"` says the module reads what it is given whole — which is what `using config_type =
+atp::module_config;` is written for, and reporting it as accepting nothing is how a `"file:"` config that
+would have reached it stops being written.
 
-Three rules live in `strip_defaults` and nowhere else. A value equal to its default is not written — the
-document must not grow to the full schema because somebody opened a module. A key the schema does not
-declare passes through untouched, and unlike before it is also **shown**: the tree walks the object, so a
-config written by hand or by a newer plugin is no longer half invisible. A required field holding the
-empty value of its type is dropped rather than written, so the module fails with "required and absent"
-instead of being handed an empty string — and a **list element is thinned to `{}`** while the array keeps
-its length, because the position is the data and an empty element materialises straight back.
+Row order is the order the module declared its fields in, since the tree walks the declarations. Three
+rules live in `runtime::save_fields` and nowhere else. A value equal to its default is not written — the
+document must not grow to the full schema because somebody opened a module. A required field nobody wrote
+is absent rather than written as the zero of its type, so the module fails with "required and absent"
+instead of being handed an empty string — which is why emptying such a row erases the key. And a **list
+element is thinned to `{}`** while the array keeps its length, because the position is the data and an
+empty element loads straight back into the defaults it stood for.
+
+**A field with a declared value set is a drop-down**, never a line to type into: which names exist is the
+entry's business (`options()` — an enum's table, or the set the module listed with `allowed()`), and typed
+into a line every typo would travel as a refused edit. That covers an element of a list of enums too. A
+name outside the set is treated by `config_misfits` exactly like a value of the wrong form, and for the
+same reason: `from_string` refuses it, the field stays unset, and the next save would drop it.
+
+A key no field declares has **no row** — there is nothing to draw it from — but it is not dropped either:
+the widget carries it through every save, and the problem `load_fields` reports about it is put on the
+tree. The document is wrong, and saying so is not the same as deleting it.
+
+**A value the rows cannot read takes the rows away**, and that is a fourth reason for the text editor,
+one that comes and goes with the **document** rather than with the selection. `config_misfits`
+(`ui/kit/config_tree.hpp`) walks the declaration against the document and answers every field holding a
+form that is not the declared one — `8.5` in an integer field, `7` under an array field, a string among
+an array of objects — in the very line `load_fields` would say about it. On anything but an empty answer
+`config_tree::rebuild`/`sync` refuse, the inspector shows the JSON editor with those lines above it in
+`config_problem`, and the rows come back by themselves once the document fits again, which is why `sync`
+asks on every change rather than only when the selection moves.
+
+The distinction that makes this work is between a problem that **survives** a save and one that does not.
+A required field nobody filled and a key no field declares are both problems, and both are shown while
+the rows stand: the first is an empty cell, the second rides through `carry_unknown`. A value of the
+wrong form survives nothing — `load_fields` leaves the field unset, `save_fields` writes nothing for an
+unset field, and the value is gone from the document the moment anything else on the form is edited. So
+"did `load_fields` complain" is the wrong question to lock the form on, and `config_misfits` is not a
+second implementation of the binder but exactly that different question. Answering the first would leave
+a module with a required field no form at all, since an empty config is "required and absent" from the
+start.
 
 **A module config that names a file** (`"config": "file:rig.ini"`, or a shared block that is itself such a
 string — the reference is followed before deciding) is shown in the inspector **read-only**
 — the source row carries the reference as written and the area below it the content of the file, or the
-reason it cannot be read, produced by the very `runtime::load_module_config` the run uses. Studio neither
+reason it cannot be read, produced by the very `runtime::load_config_source` the run uses. Studio neither
 edits nor rewrites that file: it is somebody else's, in a format the platform may not parse. A relative
 path resolves against `app_state::saved_dir()`, which is **empty** for a project that was never saved —
 deliberately not `config_dir()`, whose fallback is the directory studio was launched from, so an unsaved

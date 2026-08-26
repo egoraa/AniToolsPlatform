@@ -9,6 +9,11 @@
                 "properties": { "start_at": 1, "step": 2 }
             },
             {
+                "module": "rust_gate",
+                "name": "gate",
+                "config": { "threshold": 5, "mode": "block" }
+            },
+            {
                 "module": "rust_averager",
                 "name": "mean",
                 "properties": { "window": 4, "mode": "verbose" },
@@ -21,7 +26,8 @@
             }
         ],
         "connections": [
-            { "from": "ticks.count", "to": "mean.value" },
+            { "from": "ticks.count", "to": "gate.value" },
+            { "from": "gate.passed", "to": "mean.value" },
             { "from": "mean.report", "to": "sink.label" },
             { "from": "mean.mean", "to": "sink.measure" }
         ]

@@ -23,12 +23,16 @@
 #include <QGuiApplication>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QStatusBar>
 #include <QStringList>
 #include <QStyle>
 #include <QStyleFactory>
 #include <QStyleHints>
+#include <QTabWidget>
 #include <QTimer>
+#include <QToolBar>
 #include <QVBoxLayout>
+#include <QWidget>
 #include <QtVersion>
 
 #include <atp/plugin.hpp>
@@ -42,7 +46,18 @@ namespace {
 
 constexpr int window_state_version = 2;
 
+/// Fraction of the window the bottom row of docks starts at, as a divisor. A share rather than the
+/// pixel count it replaced: the canvas is what a taller screen should give the room to, and a
+/// constant height turns into a third of a laptop window and an eighth of a 4K one.
+constexpr int bottom_row_share = 3;
+
 constexpr std::string_view site_url = "https://anitools.studio";
+
+/// Set this and the Style menu lists every style Qt can build. It lists two otherwise, and that is
+/// the point: the panels are drawn for one look, and half of what QStyleFactory offers renders them
+/// in another. A style already chosen in the profile is listed whatever this says, so a person who
+/// picked one is never left looking at a menu with nothing ticked.
+constexpr const char* all_styles_var = "ATP_STUDIO_ALL_STYLES";
 
 /// Refresh period of the local view: reading a pointer costs nothing, so it runs at the rate the eye
 /// wants.
@@ -100,9 +115,13 @@ main_window::main_window(app_state& state) : state_(state), default_style_(QAppl
     apply_style();
 
     build_menus();
+    build_toolbar();
+    build_status_bar();
 
     apply_default_layout();
-    restore_layout();
+    if (!restore_layout()) {
+        size_docks();
+    }
 
     poll_timer_ = new QTimer(this);
     QObject::connect(poll_timer_, &QTimer::timeout, this, [this] { poll(); });
@@ -111,7 +130,38 @@ main_window::main_window(app_state& state) : state_(state), default_style_(QAppl
     refresh_all();
 }
 
+void main_window::build_toolbar() {
+    toolbar_ = addToolBar("Main");
+    toolbar_->setObjectName("toolbar.main");
+    toolbar_->setMovable(false);
+    toolbar_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+
+    toolbar_->addAction(new_action_);
+    toolbar_->addAction(open_action_);
+    toolbar_->addAction(save_action_);
+    toolbar_->addSeparator();
+    toolbar_->addAction(undo_action_);
+    toolbar_->addAction(redo_action_);
+    toolbar_->addSeparator();
+    toolbar_->addAction(new_group_action_);
+    toolbar_->addSeparator();
+    toolbar_->addAction(run_action_);
+    toolbar_->addAction(stop_action_);
+}
+
+void main_window::build_status_bar() {
+    status_run_ = new QLabel("stopped", this);
+    status_run_->setObjectName("status.run");
+    status_path_ = new QLabel(this);
+    status_path_->setObjectName("status.path");
+    status_path_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    style::muted(status_path_);
+    statusBar()->addWidget(status_run_);
+    statusBar()->addPermanentWidget(status_path_);
+}
+
 void main_window::apply_default_layout() {
+    setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
     addDockWidget(Qt::LeftDockWidgetArea, tree_dock_);
     addDockWidget(Qt::LeftDockWidgetArea, palette_dock_);
     addDockWidget(Qt::RightDockWidgetArea, inspector_dock_);
@@ -126,20 +176,25 @@ void main_window::apply_default_layout() {
         dock->show();
     }
 
+    size_docks();
+}
+
+void main_window::size_docks() {
     resizeDocks({tree_dock_, inspector_dock_}, {256, 315}, Qt::Horizontal);
     resizeDocks({tree_dock_, palette_dock_}, {1, 1}, Qt::Vertical);
     resizeDocks({log_dock_, runtime_dock_}, {1, 1}, Qt::Horizontal);
-    resizeDocks({log_dock_}, {284}, Qt::Vertical);
+    resizeDocks({log_dock_}, {height() / bottom_row_share}, Qt::Vertical);
 }
 
-void main_window::restore_layout() {
+bool main_window::restore_layout() {
     if (!state_.settings.window_geometry.empty()) {
         (void)restoreGeometry(QByteArray::fromBase64(QByteArray::fromStdString(state_.settings.window_geometry)));
     }
-    if (!state_.settings.window_state.empty()) {
-        (void)restoreState(QByteArray::fromBase64(QByteArray::fromStdString(state_.settings.window_state)),
-                           window_state_version);
+    if (state_.settings.window_state.empty()) {
+        return false;
     }
+    return restoreState(QByteArray::fromBase64(QByteArray::fromStdString(state_.settings.window_state)),
+                        window_state_version);
 }
 
 void main_window::reset_layout() {
@@ -168,6 +223,14 @@ void main_window::refresh_all() {
     stop_remote_action_->setEnabled(attached);
     poll_timer_->setInterval(attached ? remote_poll_ms : local_poll_ms);
     recent_menu_->setEnabled(!state_.settings.recent_projects.empty());
+    run_action_->setEnabled(!locked && !attached);
+    stop_action_->setEnabled(locked && !attached);
+    status_run_->setText(attached ? QString::fromStdString("attached to " + state_.endpoint())
+                                  : QString(locked ? "running" : "stopped"));
+    const QString where =
+        state_.doc_path ? QString::fromStdWString(state_.doc_path->wstring()) : QStringLiteral("Untitled");
+    status_path_->setText(where);
+    status_path_->setToolTip(where);
     tree_->refresh();
     manager_->refresh();
     palette_->refresh();
@@ -262,18 +325,22 @@ void main_window::open_path(const std::filesystem::path& path) {
 
 void main_window::build_menus() {
     QMenu* file = menuBar()->addMenu("&File");
-    file->addAction(icons::new_project(), "&New", QKeySequence::New, [this] {
+    new_action_ = file->addAction(icons::new_project(), "&New", QKeySequence::New, [this] {
         state_.doc = project::create();
         state_.doc_path.reset();
         state_.reset_view();
         refresh_all();
     });
-    file->addAction(icons::open_project(), "&Open...", QKeySequence::Open, [this] { open_dialog(); });
+    new_action_->setObjectName("action.new");
+    open_action_ = file->addAction(icons::open_project(), "&Open...", QKeySequence::Open, [this] { open_dialog(); });
+    open_action_->setObjectName("action.open");
     recent_menu_ = file->addMenu(icons::recent(), "Recent Projects");
     QObject::connect(recent_menu_, &QMenu::aboutToShow, recent_menu_, [this] { rebuild_recent_menu(); });
     save_action_ = file->addAction(icons::save(), "&Save", QKeySequence::Save, [this] { save(false); });
+    save_action_->setObjectName("action.save");
     save_as_action_ =
         file->addAction(icons::save_as(), "Save &As...", QKeySequence("Ctrl+Shift+S"), [this] { save(true); });
+    save_as_action_->setObjectName("action.save_as");
     file->addSeparator();
     file->addAction(icons::module(), "&New module...", [this] { new_script_module(); });
 
@@ -286,11 +353,20 @@ void main_window::build_menus() {
         (void)state_.doc.redo();
         refresh_all();
     });
+    undo_action_->setObjectName("action.undo");
+    redo_action_->setObjectName("action.redo");
     edit->addSeparator();
     new_group_action_ = edit->addAction(icons::new_group(), "New &group", QKeySequence("Ctrl+Shift+G"),
                                         [this] { create_group(state_, callbacks_, std::nullopt); });
+    new_group_action_->setObjectName("action.new_group");
 
     QMenu* host = menuBar()->addMenu("&Host");
+    run_action_ = host->addAction(icons::run(), "&Run", QKeySequence(Qt::Key_F5), [this] { runtime_->start_run(); });
+    run_action_->setObjectName("action.run");
+    stop_action_ =
+        host->addAction(icons::stop(), "S&top", QKeySequence(Qt::SHIFT | Qt::Key_F5), [this] { runtime_->stop_run(); });
+    stop_action_->setObjectName("action.stop");
+    host->addSeparator();
     attach_action_ = host->addAction("&Attach to a running host...", [this] { attach_dialog_flow(); });
     refresh_mirror_action_ = host->addAction("&Refresh the mirror", [this] {
         try {
@@ -332,6 +408,11 @@ void main_window::build_view_menu(QMenu* view) {
         panels->addAction(dock->toggleViewAction());
     }
 
+    view->addAction("Zoom &In", QKeySequence::ZoomIn, [this] { canvas_->zoom_in(); });
+    view->addAction("Zoom &Out", QKeySequence::ZoomOut, [this] { canvas_->zoom_out(); });
+    view->addAction("&Actual Size", QKeySequence("Ctrl+0"), [this] { canvas_->zoom_reset(); });
+    view->addAction("&Fit to Window", QKeySequence("Ctrl+Shift+F"), [this] { canvas_->zoom_to_fit(); });
+    view->addSeparator();
     view->addAction("Reset &Layout", [this] { reset_layout(); });
     view->addSeparator();
     build_theme_menu(view);
@@ -375,7 +456,18 @@ void main_window::build_style_menu(QMenu* view) {
 
     entry(QStringLiteral("&System"), std::string());
     style->addSeparator();
-    for (const QString& key : QStyleFactory::keys()) {
+
+    QStringList keys;
+    if (qEnvironmentVariableIsSet(all_styles_var)) {
+        keys = QStyleFactory::keys();
+    } else {
+        keys = QStyleFactory::keys().filter(QStringLiteral("Fusion"), Qt::CaseInsensitive);
+        const QString chosen = QString::fromStdString(state_.settings.style);
+        if (!chosen.isEmpty() && !keys.contains(chosen, Qt::CaseInsensitive)) {
+            keys.push_back(chosen);
+        }
+    }
+    for (const QString& key : keys) {
         entry(key, key.toStdString());
     }
 }
@@ -408,13 +500,13 @@ void main_window::apply_theme() {
     switch (state_.settings.theme) {
         case app_theme::light:
             hints->setColorScheme(Qt::ColorScheme::Light);
-            return;
+            break;
         case app_theme::dark:
             hints->setColorScheme(Qt::ColorScheme::Dark);
-            return;
+            break;
         case app_theme::system:
             hints->setColorScheme(Qt::ColorScheme::Unknown);
-            return;
+            break;
     }
 }
 

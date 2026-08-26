@@ -3,11 +3,11 @@
 #define ATP_EXAMPLES_PLUGIN_DEMO_SCALER_MODULE_HPP
 
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 
 #include <atp/module.hpp>
-#include <atp/module/module_config.hpp>
 
 #include "demo_types.hpp"
 
@@ -35,6 +35,10 @@ using scaler_ports = atp::ports<scaler_inputs, scaler_outputs, scaler_props>;
 /// Scales the count and publishes the result twice: as a bare number and as a numbered sample.
 class scaler_module : public atp::module<scaler_ports, "scaler", atp::ver<"1.0">> {
    public:
+    /// The base itself, declaring no field: this module wants the bytes of its file and nothing else,
+    /// and that is exactly what "a config with no declarations" means.
+    using config_type = atp::module_config;
+
     /// Takes the module config to show the half of that channel the printer does not: a config the host
     /// did **not** parse, handed over as the bytes of the file it came from.
     ///
@@ -45,9 +49,9 @@ class scaler_module : public atp::module<scaler_ports, "scaler", atp::ver<"1.0">
     ///
     /// is_opaque() rather than "text is not empty": a `.json` file holding literally `null` also leaves
     /// an empty tree beside a non-empty text, and this is exactly the question that tells the two apart.
-    explicit scaler_module(const atp::module_config& config)
-        : from_file_(config.is_opaque() ? config.origin() + " (" + std::to_string(config.text().size()) + " bytes)"
-                                        : std::string()) {}
+    explicit scaler_module(std::unique_ptr<atp::module_config> config)
+        : from_file_(config->is_opaque() ? config->origin() + " (" + std::to_string(config->text().size()) + " bytes)"
+                                         : std::string()) {}
 
     void start() override {
         if (!from_file_.empty()) {

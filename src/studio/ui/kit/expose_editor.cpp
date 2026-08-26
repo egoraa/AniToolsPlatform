@@ -34,6 +34,7 @@ expose_editor::expose_editor(app_state& state, ui_callbacks& callbacks, bool inp
     tree_->setRootIsDecorated(false);
     tree_->header()->setSectionResizeMode(QHeaderView::Stretch);
     style::embed_view(tree_);
+    style::set_placeholder(tree_, "No port of this group is exported yet.");
     layout->addWidget(tree_, 1);
 
     const style::button_bar bar = style::make_button_bar(this);

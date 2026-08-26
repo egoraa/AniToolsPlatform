@@ -33,6 +33,8 @@ places that must stay in step: `cmake/Format.cmake` and the workflow. Install ex
 <build-dir> --target format` reformats every tracked source in place (the target appears when a
 clang-format is found, and configure reports it if its major differs from the pinned one).
 
+**A file git does not track yet is not formatted.** The file list comes from `git ls-files`, so a newly created header or test is skipped until it is added — write, `git add`, *then* format, or the first thing the clang-format CI job sees is a diff in a file you thought you had formatted.
+
 ## API reference
 
 `docs/Doxyfile` (run by hand from the repo root as `doxygen docs/Doxyfile`, or through the optional `docs`

@@ -37,8 +37,16 @@ class runtime_widget final : public QWidget {
     /// they are. A frozen stamp names the moment they stopped being true.
     void refresh();
 
+    /// Loads the plugins the project names and starts the pipeline, reporting a failure through the
+    /// callbacks rather than throwing. Public because the toolbar drives the very same action as
+    /// this panel's own button: two copies of the sequence would be two places to forget the plugin
+    /// loading in.
+    void start_run();
+
+    /// Stops the pipeline and tells the window to refresh. Idempotent, as the runner's own stop is.
+    void stop_run();
+
    private:
-    void start();
     void refresh_modules();
     void refresh_ports();
 

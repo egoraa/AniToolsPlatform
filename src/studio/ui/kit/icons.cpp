@@ -152,4 +152,12 @@ QIcon directory() {
     return from_resource("directory.svg");
 }
 
+QIcon run() {
+    return from_resource("run.svg");
+}
+
+QIcon stop() {
+    return from_resource("stop.svg");
+}
+
 }  // namespace atp::studio::ui::icons

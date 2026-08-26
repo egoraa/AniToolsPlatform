@@ -82,6 +82,8 @@ void inspector_widget::rebuild() {
     config_edit_ = nullptr;
     config_source_ = nullptr;
     share_name_ = nullptr;
+    config_declined_.clear();
+    config_schema_.reset();
     property_rows_.clear();
 
     const runtime::group_node* g = state_.doc.group_at(state_.current_group);
@@ -118,9 +120,22 @@ void inspector_widget::sync() {
     }
     sync_config();
     if (config_tree_ != nullptr) {
-        const atp::config::node* stored = effective_config();
-        config_tree_->sync(stored == nullptr ? atp::config::node(atp::config::node::object_type{}) : *stored);
+        if (!config_tree_->sync(shown_config())) {
+            rebuild();
+        }
+        return;
     }
+    if (config_declined_.isEmpty() || config_schema_ == nullptr || config_edit_ == nullptr) {
+        return;
+    }
+    if (!config_edit_->document()->isModified() && config_misfits(*config_schema_, shown_config()).empty()) {
+        rebuild();
+    }
+}
+
+atp::config::node inspector_widget::shown_config() const {
+    const atp::config::node* stored = effective_config();
+    return stored == nullptr ? atp::config::node(atp::config::node::object_type{}) : *stored;
 }
 
 void inspector_widget::sync_config() {
@@ -223,7 +238,7 @@ void inspector_widget::build_module_section(const runtime::module_node& m) {
 
 void inspector_widget::build_config_section(const runtime::module_node& m) {
     const module_info* info = state_.describe_cached(m.factory, m.factory_version);
-    const bool declared = info != nullptr && info->config_schema.has_value() && !info->config_schema->empty();
+    const bool declared = info != nullptr && info->config_schema != nullptr && !info->config_schema->entries().empty();
 
     const style::section s = add_section("config");
     config_group_ = state_.current_group;
@@ -254,13 +269,20 @@ void inspector_widget::build_config_section(const runtime::module_node& m) {
     QObject::connect(config_source_, &QComboBox::currentIndexChanged, this,
                      [this](int) { change_config_source(config_source_->currentText()); });
 
+    if (declared) {
+        config_schema_ = info->config_schema;
+    }
     if (declared && shared_name_.empty() && config_file_.empty()) {
         const atp::config::node empty(atp::config::node::object_type{});
-        config_tree_ = new config_tree(state_, callbacks_, body_);
-        config_tree_->rebuild(config_group_, config_module_, m.config ? *m.config : empty, *info->config_schema);
-        s.form->addRow(config_tree_);
-        build_share_row(s);
-        return;
+        auto* rows = new config_tree(state_, callbacks_, body_);
+        if (rows->rebuild(config_group_, config_module_, m.config ? *m.config : empty, config_schema_)) {
+            config_tree_ = rows;
+            s.form->addRow(config_tree_);
+            build_share_row(s);
+            return;
+        }
+        config_declined_ = rows->declined();
+        delete rows;
     }
 
     config_edit_ = new QPlainTextEdit(body_);
@@ -276,6 +298,14 @@ void inspector_widget::build_config_section(const runtime::module_node& m) {
         config_edit_->setPlainText(QString::fromStdString(config_file_preview()));
     }
     config_edit_->document()->setModified(false);
+    if (!config_declined_.isEmpty()) {
+        auto* why = new QLabel(config_declined_, body_);
+        why->setObjectName("config_problem");
+        why->setWordWrap(true);
+        style::error_text(why);
+        s.form->addRow(why);
+        style::mark_error(config_edit_, config_declined_);
+    }
     s.form->addRow(config_edit_);
 
     config_edit_->installEventFilter(this);
@@ -309,9 +339,9 @@ void inspector_widget::build_share_row(const style::section& s) {
 
 std::string inspector_widget::config_file_preview() const {
     try {
-        const module_config cfg = runtime::load_module_config(
+        const runtime::config_source src = runtime::load_config_source(
             std::string_view(config_file_).substr(runtime::config_file_prefix.size()), state_.saved_dir());
-        return cfg.text();
+        return src.text;
     } catch (const std::exception& e) {
         return e.what();
     }

@@ -5,12 +5,12 @@
 #include <cstdint>
 #include <deque>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
-#include <atp/config/fields.hpp>
 #include <atp/module.hpp>
-#include <atp/module/module_config.hpp>
 
 /// @file
 /// The smallest module worth writing: one input, one output, one property. It is a starting point
@@ -41,8 +41,8 @@ struct doubler_props : atp::io::properties {
 using doubler_ports = atp::ports<doubler_inputs, doubler_outputs, doubler_props>;
 
 /// One band of the table: everything at or below `upto` is called `name`.
-struct band_config : atp::config::fields {
-    using fields::fields;
+struct band_config : atp::module_config {
+    using module_config::module_config;
     std::int64_t& upto = field("upto", std::int64_t{0});
     std::string& name = field("name", "?");
 };
@@ -58,11 +58,10 @@ struct band_config : atp::config::fields {
 /// hold, and reading it by hand means a loop, an index, and a fallback on every key; here it is one
 /// declaration and the elements arrive as objects.
 ///
-/// Declaring is optional and not the only way. A module whose config is a format the platform does not
-/// parse reads `config.text()` itself, and one that wants a single key deep in a tree can still call
-/// `config.find("audio.rate")`. Declaring is what buys the checking and the form.
-struct doubler_config : atp::config::fields {
-    using fields::fields;
+/// Declaring is optional. A module whose config is a format the platform does not parse declares no
+/// field at all — `using config_type = atp::module_config;` — and reads `config->text()` itself.
+struct doubler_config : atp::module_config {
+    using module_config::module_config;
     std::deque<band_config>& bands = list<band_config>("bands");
     std::string& otherwise = field("otherwise", "large");
 };
@@ -88,7 +87,7 @@ class doubler_module : public atp::module<doubler_ports, "doubler", atp::ver<"1.
     /// been checked against the declaration above, with every problem reported at once. An empty
     /// config is not a problem either — every field but a required one has a default, and this module
     /// declares none as required.
-    explicit doubler_module(const atp::module_config& config) : config_(config) {}
+    explicit doubler_module(std::unique_ptr<doubler_config> config) : config_(std::move(config)) {}
 
     atp::work_status iterate(std::stop_token) override {
         atp::work_status status = atp::work_status::idle;
@@ -104,15 +103,15 @@ class doubler_module : public atp::module<doubler_ports, "doubler", atp::ver<"1.
 
    private:
     [[nodiscard]] const std::string& band_of(int value) const {
-        for (const band_config& band : config_.bands) {
+        for (const band_config& band : config_->bands) {
             if (value <= band.upto) {
                 return band.name;
             }
         }
-        return config_.otherwise;
+        return config_->otherwise;
     }
 
-    doubler_config config_;
+    std::unique_ptr<doubler_config> config_;
 };
 
 }  // namespace atp_template

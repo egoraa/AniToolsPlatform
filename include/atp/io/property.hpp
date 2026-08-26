@@ -13,39 +13,12 @@
 #include <utility>
 #include <vector>
 
+#include <atp/io/option_set.hpp>
 #include <atp/io/property_base.hpp>
 #include <atp/io/property_codec.hpp>
 #include <atp/io/threading.hpp>
 
 namespace atp::io {
-
-namespace detail {
-
-template <property_value T>
-std::vector<std::string> type_options() {
-    if constexpr (requires { property_codec<T>::options(); }) {
-        std::vector<std::string> result;
-        result.reserve(property_codec<T>::options().size());
-        for (std::string_view name : property_codec<T>::options()) {
-            result.emplace_back(name);
-        }
-        return result;
-    } else {
-        return {};
-    }
-}
-
-template <property_value T, typename TValue>
-std::vector<std::string> render_options(const option_set<TValue>& allowed) {
-    std::vector<std::string> result;
-    result.reserve(allowed.values.size());
-    for (const TValue& value : allowed.values) {
-        result.push_back(property_codec<T>::to_string(T(value)));
-    }
-    return result;
-}
-
-}  // namespace detail
 
 /// Typed property: a module setting with a default value. Unlike an input it always holds a value,
 /// so get() never throws. Writing mirrors an input (T is constructed outside the lock, no user code

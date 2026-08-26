@@ -7,13 +7,12 @@
 #include <string_view>
 #include <utility>
 
-#include <QApplication>
 #include <QBrush>
 #include <QColor>
 #include <QGraphicsSceneHoverEvent>
 #include <QPainterPath>
-#include <QPalette>
 #include <QPen>
+#include <QRectF>
 
 #include <atp/studio/port_types.hpp>
 
@@ -21,33 +20,39 @@ namespace atp::studio::ui {
 namespace {
 
 constexpr int drop_frame_width = 2;
+constexpr int node_frame_width = 1;
 constexpr double typed_pin_pen_width = 1.0;
 constexpr double universal_pin_pen_width = 2.0;
 constexpr double dimmed_pin_opacity = 0.25;
 constexpr double hovered_pin_scale = 1.6;
+constexpr double idle_link_width = 1.5;
+constexpr double hot_link_width = 3.0;
+constexpr double arrow_head = 5.0;
+constexpr double label_gap = 4.0;
+constexpr double label_rise = 16.0;
+constexpr double grab_radius = 8.0;
 
-QPen idle_node_pen() {
-    return {QColor(140, 140, 150), 1};
-}
-
-QColor type_color(const std::optional<std::type_index>& type) {
+QColor type_color(const std::optional<std::type_index>& type, const canvas_palette& colors) {
     if (!type) {
-        return {150, 150, 150};
+        return QColor::fromHsl(0, 0, colors.type_lightness);
     }
     const std::string_view name = type->name();
     std::uint64_t hash = 14695981039346656037ull;
     for (const char c : name) {
         hash = (hash ^ static_cast<unsigned char>(c)) * 1099511628211ull;
     }
-    return QColor::fromHsv(static_cast<int>(hash % 360), 170, 220);
-}
-
-QColor universal_color() {
-    return {220, 220, 230};
+    return QColor::fromHsl(static_cast<int>(hash % 360), colors.type_saturation, colors.type_lightness);
 }
 
 bool universal_input(const std::optional<std::type_index>& type, bool output) {
     return !output && type && studio::is_universal(*type);
+}
+
+QColor ring_ground(QGraphicsItem* parent, const canvas_palette& colors) {
+    if (auto* node = qgraphicsitem_cast<node_item*>(parent)) {
+        return node->brush().color();
+    }
+    return colors.pin_outline;
 }
 
 }  // namespace
@@ -67,14 +72,15 @@ QString pin_tooltip(const std::string& port, const std::optional<std::type_index
 pin_item::pin_item(QGraphicsItem* parent,
                    std::string port_path,
                    bool output,
-                   const std::optional<std::type_index>& type)
+                   const std::optional<std::type_index>& type,
+                   const canvas_palette& colors)
     : QGraphicsEllipseItem(-pin_radius, -pin_radius, 2 * pin_radius, 2 * pin_radius, parent)
     , port_path_(std::move(port_path))
     , output_(output)
     , port_type_(type) {
     const bool universal = universal_input(type, output);
-    setBrush(universal ? QBrush(Qt::NoBrush) : QBrush(type_color(type)));
-    setPen(QPen(universal ? universal_color() : QColor(Qt::black),
+    setBrush(universal ? QBrush(Qt::NoBrush) : QBrush(type_color(type, colors)));
+    setPen(QPen(universal ? colors.universal_ink : ring_ground(parent, colors),
                 universal ? universal_pin_pen_width : typed_pin_pen_width));
     setAcceptHoverEvents(true);
 }
@@ -113,15 +119,19 @@ void pin_item::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
     QGraphicsEllipseItem::hoverLeaveEvent(event);
 }
 
-node_item::node_item(std::string child_name, bool is_group, double height)
-    : QGraphicsRectItem(0, 0, node_width, height), child_name_(std::move(child_name)), group_(is_group) {
+node_item::node_item(std::string child_name, bool is_group, double height, const canvas_palette& colors)
+    : QGraphicsRectItem(0, 0, node_width, height)
+    , child_name_(std::move(child_name))
+    , group_(is_group)
+    , border_(colors.node_border)
+    , drop_(colors.drop_target) {
     setFlags(ItemIsSelectable | ItemSendsGeometryChanges);
-    setBrush(QBrush(is_group ? QColor(58, 52, 70) : QColor(48, 52, 64)));
-    setPen(idle_node_pen());
+    setBrush(QBrush(is_group ? colors.group_fill : colors.node_fill));
+    setPen(QPen(border_, node_frame_width));
 }
 
 void node_item::set_drop_target(bool on) {
-    setPen(on ? QPen(QApplication::palette().color(QPalette::Highlight), drop_frame_width) : idle_node_pen());
+    setPen(on ? QPen(drop_, drop_frame_width) : QPen(border_, node_frame_width));
 }
 
 int node_item::type() const {
@@ -143,11 +153,12 @@ QVariant node_item::itemChange(GraphicsItemChange change, const QVariant& value)
     return QGraphicsRectItem::itemChange(change, value);
 }
 
-link_item::link_item(std::size_t index) : index_(index) {
+link_item::link_item(std::size_t index, const canvas_palette& colors)
+    : index_(index), idle_(colors.link), hot_(colors.link_hot) {
     setFlag(ItemIsSelectable);
     set_hot(false);
     label_ = new QGraphicsSimpleTextItem(this);
-    label_->setBrush(QBrush(QColor(190, 240, 190)));
+    label_->setBrush(QBrush(colors.link_label));
 }
 
 int link_item::type() const {
@@ -167,24 +178,40 @@ void link_item::set_endpoints(QPointF from, QPointF to) {
 }
 
 void link_item::set_hot(bool hot) {
-    setPen(QPen(hot ? QColor(110, 230, 110) : QColor(150, 150, 160), hot ? 3.0 : 1.5));
+    setPen(QPen(hot ? hot_ : idle_, hot ? hot_link_width : idle_link_width));
 }
 
 void link_item::set_label(const QString& text) {
     label_->setText(text);
 }
 
-stub_item::stub_item(bool is_output, std::string alias, const std::optional<std::type_index>& type)
+stub_item::stub_item(bool is_output,
+                     std::string alias,
+                     const std::optional<std::type_index>& type,
+                     const canvas_palette& colors)
     : is_output_(is_output), alias_(std::move(alias)) {
     setFlag(ItemIsSelectable);
-    setPen(QPen(universal_input(type, is_output) ? universal_color() : type_color(type), 1.5, Qt::DashLine));
+    setPen(QPen(universal_input(type, is_output) ? colors.universal_ink : type_color(type, colors), idle_link_width,
+                Qt::DashLine));
     label_ = new QGraphicsSimpleTextItem(this);
-    label_->setBrush(QBrush(QColor(180, 180, 190)));
+    label_->setBrush(QBrush(colors.stub_label));
     label_->setText(QString::fromStdString(alias_));
 }
 
 int stub_item::type() const {
     return Type;
+}
+
+QRectF stub_item::boundingRect() const {
+    const double pad = pen().widthF() / 2.0;
+    return path().controlPointRect().adjusted(-pad, -pad, pad, pad).united(shape().controlPointRect());
+}
+
+QPainterPath stub_item::shape() const {
+    QPainterPath hit;
+    hit.addRect(QRectF(outer_.x() - grab_radius, outer_.y() - grab_radius, 2 * grab_radius, 2 * grab_radius));
+    hit.addRect(label_->boundingRect().translated(label_->pos()));
+    return hit;
 }
 
 bool stub_item::is_output() const {
@@ -196,20 +223,21 @@ const std::string& stub_item::alias() const {
 }
 
 void stub_item::set_anchor(QPointF pin_scene_pos) {
-    constexpr double length = 40.0;
+    prepareGeometryChange();
     const double dir = is_output_ ? 1.0 : -1.0;
-    const QPointF outer = pin_scene_pos + QPointF(dir * length, 0.0);
+    const QPointF outer = pin_scene_pos + QPointF(dir * stub_length, 0.0);
+    outer_ = outer;
     QPainterPath path(pin_scene_pos);
     path.lineTo(outer);
     const QPointF tip = is_output_ ? outer : pin_scene_pos;
-    const double head = 5.0;
     path.moveTo(tip);
-    path.lineTo(tip + QPointF(-dir * head, -head));
+    path.lineTo(tip + QPointF(-dir * arrow_head, -arrow_head));
     path.moveTo(tip);
-    path.lineTo(tip + QPointF(-dir * head, head));
+    path.lineTo(tip + QPointF(-dir * arrow_head, arrow_head));
     setPath(path);
     label_->setText(QString::fromStdString(alias_));
-    label_->setPos(outer + QPointF(is_output_ ? 4.0 : -4.0 - label_->boundingRect().width(), -16.0));
+    const double offset = is_output_ ? label_gap : -label_gap - label_->boundingRect().width();
+    label_->setPos(outer + QPointF(offset, -label_rise));
 }
 
 }  // namespace atp::studio::ui

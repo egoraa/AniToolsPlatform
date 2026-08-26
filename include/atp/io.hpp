@@ -12,6 +12,7 @@
 #include <atp/io/inputs.hpp>
 #include <atp/io/io_base.hpp>
 #include <atp/io/io_registry.hpp>
+#include <atp/io/option_set.hpp>
 #include <atp/io/output.hpp>
 #include <atp/io/output_base.hpp>
 #include <atp/io/outputs.hpp>

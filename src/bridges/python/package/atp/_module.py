@@ -34,6 +34,14 @@ class Module:
     name = None
     version = (1, 0)
 
+    config_type = None
+    """This module's config schema: an atp.Config subclass, or None to take the document whole.
+
+    Naming one is what buys a typed editor in studio, a document checked before the pipeline starts, and
+    a `config` with every declared key already present at its own default — so the fallback spelling
+    described below stops being necessary. Leaving it None is the older arrangement, unchanged.
+    """
+
     config = None
     """This module's config: a dict, a list, a scalar or None, mirroring the JSON it was written as.
 
@@ -41,6 +49,10 @@ class Module:
     what a module is allowed to know while deciding what it is, and ports are not reachable there yet.
     Nothing else is done to it: keys are looked up with ordinary dict calls, and an entry a document
     did not write is simply absent.
+
+    A module that named a `config_type` never sees None here and never needs a fallback: the host fills
+    the declaration and hands over every declared key at its own default. The rest of this paragraph is
+    about a module that declared no schema.
 
     It is None when the module's node named no config, so read it with a fallback rather than
     assuming a dict::

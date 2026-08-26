@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -14,26 +13,12 @@
 #include <variant>
 #include <vector>
 
+#include <atp/config/access_error.hpp>
+
 namespace atp::config {
 
 /// The seven forms a config value can take, in the order the C ABI's atp_config_kind spells them.
 enum class kind { null, boolean, integer, real, string, array, object };
-
-/// Reaching into a config node went wrong: a key is missing, an index is past the end, the value
-/// found is of another form, or a path does not parse.
-///
-/// The message names the key whenever the failing call knew it — int_at("rate") can say which key
-/// disappointed it, as_int() on a value already in hand can only name the form it found. A full path
-/// through the tree is deliberately absent here: it would require every value to know its parent;
-/// module_config::at, which does know the path, spells it out itself.
-///
-/// Named access_error rather than error because atp::runtime::config_error is a different failure at
-/// a different layer and the two used to be told apart by their namespaces alone: this one means one
-/// node or one path is wrong, that one means the host could not read, validate or build a config.
-class access_error : public std::runtime_error {
-   public:
-    using std::runtime_error::runtime_error;
-};
 
 /// One node of a module's config: a scalar, an array or an object, in the seven forms above.
 ///
@@ -49,7 +34,7 @@ class access_error : public std::runtime_error {
 /// not 3.0.
 ///
 /// Named node rather than value because it describes one node of a tree and not the tree: what a
-/// module receives is atp::module_config, which owns the root and adds path access, the text and the
+/// module receives is atp::raw_config, which owns the root and adds path access, the text and the
 /// origin. The distinction is worth keeping in the names, since both are "the config" in conversation.
 ///
 /// It may be edited in place — operator[](key) inserts, push_back appends, erase removes — because the
@@ -361,7 +346,7 @@ class node {
     ///
     /// There is deliberately no fallback overload here. Reading with a default in hand is
     /// config::bool_or and its three peers in <atp/config/read.hpp>, over a **nullable** node, so that
-    /// one vocabulary serves both what node::find(key) answers and what module_config::find(path)
+    /// one vocabulary serves both what node::find(key) answers and what raw_config::find(path)
     /// does. Members here would have covered only the first of the two.
     /// @throws access_error naming the key and both forms
     [[nodiscard]] bool bool_at(std::string_view key) const {

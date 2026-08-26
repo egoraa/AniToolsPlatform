@@ -39,6 +39,63 @@ TEST(PythonLanguage, ANameIsUsableWhenItSurvivesBothAsAnAttributeAndAsAClass) {
     EXPECT_TRUE(atp::studio::python_language.name_valid("atp_thing"));
 }
 
+TEST(ScriptModules, OnlyAnOlderPackageCopyCountsAsStale) {
+    const std::filesystem::path dir = fresh_dir("package_staleness");
+    const std::filesystem::path copy = dir / "copy" / "atp";
+    const std::filesystem::path platform = dir / "platform" / "atp";
+    std::filesystem::create_directories(copy);
+    std::filesystem::create_directories(platform);
+    std::ofstream(copy / "__init__.py") << "x";
+    std::ofstream(platform / "__init__.py") << "x";
+
+    const auto when = std::filesystem::last_write_time(platform / "__init__.py");
+    std::filesystem::last_write_time(copy / "__init__.py", when - std::chrono::hours(1));
+    EXPECT_TRUE(atp::studio::package_copy_is_stale(copy, platform, atp::studio::python_language));
+
+    std::filesystem::last_write_time(copy / "__init__.py", when + std::chrono::hours(1));
+    EXPECT_FALSE(atp::studio::package_copy_is_stale(copy, platform, atp::studio::python_language));
+
+    EXPECT_FALSE(atp::studio::package_copy_is_stale(platform, platform, atp::studio::python_language))
+        << "one package is never older than itself";
+    EXPECT_FALSE(atp::studio::package_copy_is_stale(dir / "absent", platform, atp::studio::python_language))
+        << "a package that is not there is not a stale one";
+}
+
+TEST(ScriptModules, APackageIsAgedOverItsOwnSourcesAndNotOverWhatAnInterpreterWrote) {
+    const std::filesystem::path dir = fresh_dir("package_pycache");
+    const std::filesystem::path copy = dir / "copy" / "atp";
+    const std::filesystem::path platform = dir / "platform" / "atp";
+    std::filesystem::create_directories(copy / "__pycache__");
+    std::filesystem::create_directories(platform);
+    std::ofstream(copy / "__init__.py") << "x";
+    std::ofstream(platform / "__init__.py") << "x";
+    std::ofstream(copy / "__pycache__" / "__init__.cpython-313.pyc") << "x";
+
+    const auto when = std::filesystem::last_write_time(platform / "__init__.py");
+    std::filesystem::last_write_time(copy / "__init__.py", when - std::chrono::hours(1));
+    std::filesystem::last_write_time(copy / "__pycache__" / "__init__.cpython-313.pyc", when + std::chrono::hours(1));
+
+    EXPECT_TRUE(atp::studio::package_copy_is_stale(copy, platform, atp::studio::python_language))
+        << "a copy that has merely been imported is not a fresh one";
+}
+
+TEST(ScriptModules, ASingleFilePackageIsAgedOverItself) {
+    const std::filesystem::path dir = fresh_dir("package_single_file");
+    const std::filesystem::path copy = dir / "copy" / "atp.lua";
+    const std::filesystem::path platform = dir / "platform" / "atp.lua";
+    std::filesystem::create_directories(copy.parent_path());
+    std::filesystem::create_directories(platform.parent_path());
+    std::ofstream(copy) << "x";
+    std::ofstream(platform) << "x";
+
+    const auto when = std::filesystem::last_write_time(platform);
+    std::filesystem::last_write_time(copy, when - std::chrono::hours(1));
+    EXPECT_TRUE(atp::studio::package_copy_is_stale(copy, platform, atp::studio::lua_language));
+
+    std::filesystem::last_write_time(copy, when + std::chrono::hours(1));
+    EXPECT_FALSE(atp::studio::package_copy_is_stale(copy, platform, atp::studio::lua_language));
+}
+
 TEST(ScriptModules, OnlyAnOlderBridgeCopyCountsAsStale) {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_bridge_staleness";
     std::filesystem::remove_all(dir);

@@ -42,6 +42,7 @@ def describe(cls):
         "inputs": [declaration.row() for declaration in cls._inputs],
         "outputs": [declaration.row() for declaration in cls._outputs],
         "properties": [declaration.row() for declaration in cls._properties],
+        "config": None if cls.config_type is None else cls.config_type._rows(),
     }
 
 

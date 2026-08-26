@@ -15,5 +15,6 @@
 #include <atp/hosting/null_host.hpp>
 #include <atp/hosting/registration_api.hpp>
 #include <atp/module.hpp>
+#include <atp/module/dynamic_config.hpp>
 
 #endif

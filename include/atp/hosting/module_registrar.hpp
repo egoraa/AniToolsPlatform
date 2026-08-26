@@ -26,8 +26,12 @@ class pinned_factory final : public module_factory_base {
     [[nodiscard]] version get_version() const noexcept override {
         return inner_->get_version();
     }
-    [[nodiscard]] module_ptr create(const module_config& cfg) const override {
-        module_ptr m = inner_->create(cfg);
+    [[nodiscard]] config_ptr make_config() const override {
+        config_ptr inner = inner_->make_config();
+        return inner ? config_ptr(inner.release(), config_deleter{pin_}) : config_ptr{};
+    }
+    [[nodiscard]] module_ptr create(config_ptr config) const override {
+        module_ptr m = inner_->create(config_ptr(config.release(), config_deleter{}));
         return module_ptr(m.release(), module_deleter{pin_});
     }
     [[nodiscard]] module_declaration declaration() const override {

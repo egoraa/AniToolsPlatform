@@ -38,6 +38,11 @@ int main(int argc, char** argv) {
             startup_notes.emplace_back(QString::fromStdString(atp::studio::stale_bridge_note(*stale, ours.bridge)),
                                        atp::log_level::warning);
         }
+        if (const std::optional<std::filesystem::path> stale =
+                atp::studio::stale_loaded_package(state.manager, ours, lang)) {
+            startup_notes.emplace_back(QString::fromStdString(atp::studio::stale_package_note(*stale, ours.package)),
+                                       atp::log_level::warning);
+        }
     }
 
     atp::studio::ui::main_window window(state);

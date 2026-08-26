@@ -14,11 +14,14 @@ namespace atp {
 /// docs/architecture.md — a version list is rationale, and rationale lives in the document rather
 /// than in a comment that grows by a paragraph per bump.
 ///
+/// 15 is the module creation channel: a factory now makes the config and the module is handed
+/// ownership of it, so a plugin built against 14 must not be loaded.
+///
 /// Bumping this number is also a change to templates/plugin/CMakeLists.txt, which names the ABI it
 /// was written for and is meant to stop configuring until the plugin there has been looked at. CMake
 /// reads the value below out of this file (cmake/Install.cmake) to export it as a package constant,
 /// so the line must stay in this exact shape.
-inline constexpr unsigned plugin_abi = 14;
+inline constexpr unsigned plugin_abi = 15;
 
 /// The plugin contract is two C symbols:
 ///

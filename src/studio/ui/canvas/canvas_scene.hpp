@@ -3,18 +3,25 @@
 #define ATP_STUDIO_UI_CANVAS_SCENE_HPP
 
 #include "canvas/canvas_items.hpp"
+#include "canvas/canvas_palette.hpp"
 #include "model/app_state.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include <QAction>
 #include <QGraphicsLineItem>
 #include <QGraphicsScene>
+#include <QMenu>
+#include <QPainter>
 #include <QPoint>
+#include <QRectF>
 
 #include <atp/studio/layout.hpp>
 #include <atp/studio/port_types.hpp>
@@ -32,8 +39,26 @@ class canvas_scene final : public QGraphicsScene {
     /// callbacks is already gone: Qt deletes its widgets from ~QWidget, after its own members.
     ~canvas_scene() override;
 
-    /// Rebuilds the scene from the current group of the project.
+    /// Rebuilds the scene from the current group of the project, putting the selection back on the
+    /// nodes that carried it.
+    ///
+    /// Carrying it over has to be asked for, because clear() drops it and the handler that would
+    /// have noticed is suppressed for the duration: what was left behind was a project still naming
+    /// the selected child — so the inspector went on editing a node — while the canvas selected
+    /// nothing and Delete, which walks selectedItems(), did nothing at all. Every rebuild reached
+    /// that state, which is to say every change to the project did.
+    ///
+    /// The names are taken from the **scene** and not from the project, which remembers one child:
+    /// a selection of three would otherwise come back as one. A rebuild that was already told what
+    /// to select — a paste, a copy-drag — is left alone, since it knows better than the selection it
+    /// is replacing.
     void rebuild();
+
+    /// Sets the colour scheme the next rebuild draws in. The scene does not read a palette itself:
+    /// whose palette a scene belongs to is the holding widget's question, and answering it here
+    /// would leave a scene with no view reaching for the application's on every rebuild.
+    /// @param colors the scheme
+    void set_colors(const canvas_palette& colors);
 
     /// Updates the link endpoints after nodes have been dragged, without rebuilding the scene.
     void update_link_paths();
@@ -45,6 +70,13 @@ class canvas_scene final : public QGraphicsScene {
     /// highlighted and their value labels updated. Only pens and texts change.
     void update_samples();
 
+    /// What the background menu's view entries do. Set by the widget that owns the view, because the
+    /// scale belongs to the view and the scene has none of its own — and left as std::function rather
+    /// than routed through ui_callbacks, which carries what the **project** did, not how it is looked
+    /// at. Unset means the entries are not offered.
+    std::function<void()> on_fit_to_window;
+    std::function<void()> on_actual_size;
+
     /// Pastes the clipboard inside a subgroup of the group on screen, the way dropping a node on it
     /// puts the node inside. The nodes keep the positions they were copied from — a scene coordinate
     /// of this level means nothing one level down — and nothing is selected, since what arrived is
@@ -55,6 +87,14 @@ class canvas_scene final : public QGraphicsScene {
     void paste_inside(const std::string& child_name);
 
    protected:
+    /// Rules the empty canvas so that a distance can be judged and a node's place remembered.
+    ///
+    /// Drawn per exposed rectangle rather than once over the scene, which is what QGraphicsScene asks
+    /// for and what keeps the cost proportional to the window instead of to an unbounded scene.
+    /// @param painter the painter Qt handed the scene
+    /// @param rect the scene rectangle being repainted
+    void drawBackground(QPainter* painter, const QRectF& rect) override;
+
     void dragEnterEvent(QGraphicsSceneDragDropEvent* event) override;
 
     void dragMoveEvent(QGraphicsSceneDragDropEvent* event) override;
@@ -142,8 +182,14 @@ class canvas_scene final : public QGraphicsScene {
 
     void reposition_stubs();
 
+    /// Appends the view entries to a menu, when the widget gave the scene any.
+    /// @param menu the menu being built
+    /// @return the two actions, either of which may be null
+    std::pair<QAction*, QAction*> add_view_actions(QMenu& menu);
+
     app_state& state_;
     ui_callbacks& callbacks_;
+    canvas_palette colors_;
     std::unordered_map<std::string, pin_item*> pins_;
     std::vector<link_item*> links_;
     std::vector<stub_item*> stubs_;

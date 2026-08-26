@@ -3,12 +3,10 @@
 #define ANITOOLSPLATFORM_HOSTING_MODULE_DECLARATION_HPP
 
 #include <concepts>
-#include <optional>
 #include <string>
 #include <typeindex>
 #include <vector>
 
-#include <atp/config/fields.hpp>
 #include <atp/io/input_base.hpp>
 #include <atp/io/inputs.hpp>
 #include <atp/io/output_base.hpp>
@@ -41,19 +39,15 @@ struct property_declaration {
 /// What a module declares, without a module. Carries no name and no version: a factory answers those
 /// itself, and one module type may be registered under several names.
 ///
-/// Being its own type rather than three loose vectors is what left room for the config schema, and
-/// what leaves room for a declaration(const module_config&) one day.
+/// A type of its own rather than three loose vectors, which is what leaves room for a
+/// declaration(const module_config&) one day. It does **not** carry the declared config: a config is
+/// an object the factory hands out through make_config(), and describing one by copying it into a
+/// second representation was exactly the duplication that cost this project three implementations of
+/// the same rules.
 struct module_declaration {
     std::vector<port_declaration> inputs;
     std::vector<port_declaration> outputs;
     std::vector<property_declaration> properties;
-
-    /// Fields the module declares its config out of, absent when it declares none.
-    ///
-    /// Optional rather than an empty vector, because the two say different things to an editor: no
-    /// schema means "edit this as JSON, the module parses it itself", an empty schema means "this
-    /// module takes no settings at all".
-    std::optional<std::vector<config::field_declaration>> config_schema;
 };
 
 /// Reads three sections into a declaration, in declaration order.
@@ -88,16 +82,6 @@ struct module_declaration {
 template <typename T>
 concept declares_ports = requires { typename T::ports_type; } && ports_list<typename T::ports_type> &&
                          std::default_initializable<typename T::ports_type>;
-
-/// Contract "this module declares its config": a config_type that is a config::fields heir and can be
-/// built with no source, which is how its schema is read without a module.
-///
-/// Declaring it is also what puts the module's config through validation: a module that reads its tree
-/// by hand names no config_type and is left exactly as it was.
-template <typename T>
-concept declares_config = requires {
-    typename T::config_type;
-} && std::derived_from<typename T::config_type, config::fields> && std::default_initializable<typename T::config_type>;
 
 /// Describes a module type by building its port node alone — the module is never constructed.
 ///

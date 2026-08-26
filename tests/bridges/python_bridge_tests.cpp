@@ -24,6 +24,7 @@
 #include <atp/module/module_context.hpp>
 #include <atp/module/module_host.hpp>
 #include <atp/module/service_directory.hpp>
+#include <atp/runtime/config_binding.hpp>
 #include <atp/runtime/module_loader.hpp>
 #include <atp/studio/languages.hpp>
 #include <atp/studio/module_manager.hpp>
@@ -136,9 +137,15 @@ class python_bridge_test : public ::testing::Test {
         ASSERT_NE(module_, nullptr);
     }
 
-    void create(const std::string& name, const atp::module_config& cfg) {
-        module_ = registry_.create(name, cfg);
+    void create(const std::string& name, const atp::runtime::config_source& source) {
+        module_ = registry_.create(name, filled(name, source));
         ASSERT_NE(module_, nullptr);
+    }
+
+    [[nodiscard]] atp::config_ptr filled(const std::string& name, const atp::runtime::config_source& source) {
+        atp::config_ptr cfg = registry_.at(name).make_config();
+        atp::runtime::load_fields_or_throw(*cfg, source);
+        return cfg;
     }
 
     void feed(atp::io::output_base& source, const std::string& port) {
@@ -671,11 +678,14 @@ class Probe(atp.Module):
 TEST_F(python_bridge_test, ConfigReachesAScriptAsADict) {
     scan(ATP_PYTHON_BRIDGE_SCRIPTS);
     load();
-    create("py_config", atp::module_config(atp::config::node::object({
-                            {"channels", atp::config::node::array({1, 2, 6})},
-                            {"name", "rig"},
-                            {"nested", atp::config::node::object({{"deep", true}})},
-                        })));
+    create("py_config", {atp::config::node::object({
+                             {"channels", atp::config::node::array({1, 2, 6})},
+                             {"name", "rig"},
+                             {"nested", atp::config::node::object({{"deep", true}})},
+                         }),
+                         {},
+                         {},
+                         false});
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -697,7 +707,7 @@ TEST_F(python_bridge_test, AScriptWithNoConfigSeesNone) {
 TEST_F(python_bridge_test, AnOpaqueConfigReachesAScriptAsTextAndOrigin) {
     scan(ATP_PYTHON_BRIDGE_SCRIPTS);
     load();
-    create("py_config_text", atp::module_config::opaque("rate = 48000\n", "rig.ini"));
+    create("py_config_text", {{}, "rate = 48000\n", "rig.ini", true});
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -709,7 +719,7 @@ TEST_F(python_bridge_test, AParsedConfigLeavesTheTextEmptyAndTheTreeReadable) {
     scan(ATP_PYTHON_BRIDGE_SCRIPTS);
     load();
     create("py_config_text",
-           atp::module_config(atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}})));
+           {atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}}), {}, {}, false});
     collect("out_report", host_.inputs().text);
     run_lifecycle();
 
@@ -721,12 +731,50 @@ TEST_F(python_bridge_test, AConfigFileThatIsNotUtf8FailsCreationNamingIt) {
     scan(ATP_PYTHON_BRIDGE_SCRIPTS);
     load();
     try {
-        module_ =
-            registry_.create("py_config_text", atp::module_config::opaque(std::string("\xff\xfe rate", 7), "rig.ini"));
+        module_ = registry_.create("py_config_text",
+                                   filled("py_config_text", {{}, std::string("\xff\xfe rate", 7), "rig.ini", true}));
         FAIL() << "text that is not UTF-8 must not reach a script as if it were";
     } catch (const std::runtime_error& e) {
         const std::string message = e.what();
         EXPECT_NE(message.find("rig.ini"), std::string::npos) << message;
         EXPECT_NE(message.find("UnicodeDecodeError"), std::string::npos) << message;
     }
+}
+
+TEST_F(python_bridge_test, ADeclaredConfigReachesAScriptFilledWithItsDefaults) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    create("py_declared", {atp::config::node::object({{"rate", 48000}}), {}, {}, false});
+    collect("out_report", host_.inputs().text);
+    run_lifecycle();
+
+    EXPECT_EQ(pass(), atp::work_status::busy);
+    EXPECT_EQ(host_.inputs().text.get(),
+              "rate=48000 engine=fm note=60 voices=0 taps=0 keys=rate,engine,master,voices,taps")
+        << "only rate was written; every other key is the declaration's own default, in declaration order";
+}
+
+TEST_F(python_bridge_test, ADeclaringScriptDescribesItsConfigWithoutBeingBuilt) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    const atp::config_ptr cfg = registry_.at("py_declared").make_config();
+
+    ASSERT_NE(cfg, nullptr);
+    ASSERT_EQ(cfg->entries().size(), 5U);
+    EXPECT_TRUE(cfg->find("rate")->required());
+    EXPECT_EQ(cfg->find("engine")->options(), (std::vector<std::string>{"fm", "additive"}));
+    EXPECT_EQ(cfg->find("master")->group().find("note")->value<std::int64_t>(), 60);
+    EXPECT_EQ(cfg->find("voices")->element_shape().entries()[0].name(), "note");
+    EXPECT_EQ(cfg->find("taps")->element(), atp::field_kind::real);
+}
+
+TEST_F(python_bridge_test, ARequiredFieldAScriptDeclaredIsCheckedAgainstTheDocument) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS);
+    load();
+    const atp::config_ptr cfg = registry_.at("py_declared").make_config();
+    const std::vector<std::string> problems =
+        atp::runtime::load_fields(*cfg, {atp::config::node::object({}), {}, {}, false});
+
+    ASSERT_EQ(problems.size(), 1U);
+    EXPECT_NE(problems[0].find("rate"), std::string::npos);
 }

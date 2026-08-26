@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <atp/io/io_base.hpp>
+#include <atp/io/option_set.hpp>
 #include <atp/io/property_codec.hpp>
 #include <atp/io/threading.hpp>
 
@@ -26,29 +27,6 @@ inline constexpr persistence persistent{true};
 
 /// The value lives only while the pipeline runs.
 inline constexpr persistence transient{false};
-
-/// Set of allowed values — the instance-level flavour of an enumeration: the property type stays
-/// ordinary (int, std::string, an enum too) while the list of options is declared next to the port
-/// itself. Stores values rather than strings; the property codec turns them into strings, so that
-/// comparison always runs on the canonical form.
-template <typename TValue>
-struct option_set {
-    std::vector<TValue> values;
-};
-
-/// Declaration vocabulary for a value set:
-///
-///     make<property<int>>("channels", 2, allowed(1, 2, 6));
-///     make<property<std::string>>("codec", "h264", allowed("h264", "h265"));
-///
-/// An empty set is rejected at compile time: an "enumeration of nothing" would silently mean no
-/// constraint at all — exactly the opposite of the intent.
-template <typename... TValues>
-    requires(sizeof...(TValues) > 0)
-[[nodiscard]] auto allowed(TValues&&... values) {
-    using value_type = std::common_type_t<std::decay_t<TValues>...>;
-    return option_set<value_type>{{static_cast<value_type>(std::forward<TValues>(values))...}};
-}
 
 /// Type-erased base of a property, the peer of input_base/output_base: name, value type and
 /// synchronisation come from io_base, while string access (the builder, the CLI and studio edit a

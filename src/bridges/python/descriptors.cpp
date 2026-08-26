@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <string>
 
 #include "instance.hpp"
@@ -71,6 +72,42 @@ long long int_of(PyObject* dict, const char* key) {
     return number;
 }
 
+std::optional<atp_kind> kind_at(PyObject* row, Py_ssize_t index) {
+    switch (int_at(row, index)) {
+        case ATP_KIND_I32:
+            return ATP_KIND_I32;
+        case ATP_KIND_I64:
+            return ATP_KIND_I64;
+        case ATP_KIND_F64:
+            return ATP_KIND_F64;
+        case ATP_KIND_BOOL:
+            return ATP_KIND_BOOL;
+        case ATP_KIND_TEXT:
+            return ATP_KIND_TEXT;
+        case ATP_KIND_BLOB:
+            return ATP_KIND_BLOB;
+        default:
+            return std::nullopt;
+    }
+}
+
+atp_config_field_kind field_kind_at(PyObject* row, Py_ssize_t index) {
+    switch (int_at(row, index)) {
+        case ATP_FIELD_BOOL:
+            return ATP_FIELD_BOOL;
+        case ATP_FIELD_INT:
+            return ATP_FIELD_INT;
+        case ATP_FIELD_REAL:
+            return ATP_FIELD_REAL;
+        case ATP_FIELD_OBJECT:
+            return ATP_FIELD_OBJECT;
+        case ATP_FIELD_ARRAY:
+            return ATP_FIELD_ARRAY;
+        default:
+            return ATP_FIELD_STRING;
+    }
+}
+
 const char* keep(module_slot& slot, PyObject* value) {
     slot.texts.push_back(text_of(value));
     return slot.texts.back().c_str();
@@ -92,7 +129,9 @@ void read_inputs(module_slot& slot, PyObject* rows) {
         }
         atp_input_desc desc{};
         desc.name = keep_at(slot, row, 0);
-        desc.kind = static_cast<atp_kind>(int_at(row, 1));
+        if (const std::optional<atp_kind> kind = kind_at(row, 1)) {
+            desc.kind = *kind;
+        }
         desc.flavor = static_cast<atp_flavor>(int_at(row, 2));
         desc.capacity = static_cast<std::uint32_t>(int_at(row, 3));
         desc.overflow = static_cast<atp_overflow>(int_at(row, 4));
@@ -111,7 +150,9 @@ void read_outputs(module_slot& slot, PyObject* rows) {
         }
         atp_output_desc desc{};
         desc.name = keep_at(slot, row, 0);
-        desc.kind = static_cast<atp_kind>(int_at(row, 1));
+        if (const std::optional<atp_kind> kind = kind_at(row, 1)) {
+            desc.kind = *kind;
+        }
         slot.outputs.push_back(desc);
         slot.output_kinds.push_back(desc.kind);
         Py_DECREF(row);
@@ -127,7 +168,9 @@ void read_properties(module_slot& slot, PyObject* rows) {
         }
         atp_property_desc desc{};
         desc.name = keep_at(slot, row, 0);
-        desc.kind = static_cast<atp_kind>(int_at(row, 1));
+        if (const std::optional<atp_kind> kind = kind_at(row, 1)) {
+            desc.kind = *kind;
+        }
         desc.default_value = keep_at(slot, row, 2);
         PyObject* options = PySequence_GetItem(row, 3);
         const Py_ssize_t option_count = options == nullptr ? 0 : PySequence_Size(options);
@@ -146,6 +189,53 @@ void read_properties(module_slot& slot, PyObject* rows) {
         slot.property_kinds.push_back(desc.kind);
         Py_DECREF(row);
     }
+}
+
+std::vector<atp_config_field_desc>* read_config_fields(module_slot& slot, PyObject* rows) {
+    const Py_ssize_t count = rows == nullptr || rows == Py_None ? 0 : PySequence_Size(rows);
+    if (count <= 0) {
+        return nullptr;
+    }
+    std::vector<atp_config_field_desc>& into = slot.config_fields.emplace_back();
+    into.reserve(static_cast<std::size_t>(count));
+    for (Py_ssize_t i = 0; i < count; ++i) {
+        PyObject* row = PySequence_GetItem(rows, i);
+        if (row == nullptr) {
+            continue;
+        }
+        atp_config_field_desc desc{};
+        desc.name = keep_at(slot, row, 0);
+        desc.kind = field_kind_at(row, 1);
+        PyObject* fallback = PySequence_GetItem(row, 2);
+        desc.default_value = fallback == nullptr || fallback == Py_None ? nullptr : keep(slot, fallback);
+        Py_XDECREF(fallback);
+
+        PyObject* options = PySequence_GetItem(row, 3);
+        const Py_ssize_t option_count = options == nullptr ? 0 : PySequence_Size(options);
+        std::vector<const char*>& pointers = slot.option_pointers.emplace_back();
+        for (Py_ssize_t o = 0; o < option_count; ++o) {
+            pointers.push_back(keep_at(slot, options, o));
+        }
+        Py_XDECREF(options);
+        desc.option_count = static_cast<std::uint32_t>(option_count);
+        desc.options = pointers.empty() ? nullptr : pointers.data();
+
+        PyObject* element = PySequence_GetItem(row, 4);
+        const bool has_element = element != nullptr && element != Py_None;
+        Py_XDECREF(element);
+        desc.element = has_element ? field_kind_at(row, 4) : ATP_FIELD_STRING;
+
+        PyObject* children = PySequence_GetItem(row, 5);
+        if (const std::vector<atp_config_field_desc>* nested = read_config_fields(slot, children)) {
+            desc.fields = nested->data();
+            desc.field_count = static_cast<std::uint32_t>(nested->size());
+        }
+        Py_XDECREF(children);
+
+        into.push_back(desc);
+        Py_DECREF(row);
+    }
+    return &into;
 }
 
 void build_one(PyObject* row) {
@@ -169,6 +259,11 @@ void build_one(PyObject* row) {
     read_inputs(slot, PyDict_GetItemString(row, "inputs"));
     read_outputs(slot, PyDict_GetItemString(row, "outputs"));
     read_properties(slot, PyDict_GetItemString(row, "properties"));
+    if (const std::vector<atp_config_field_desc>* fields =
+            read_config_fields(slot, PyDict_GetItemString(row, "config"))) {
+        desc.config_fields = fields->data();
+        desc.config_field_count = static_cast<std::uint32_t>(fields->size());
+    }
     desc.inputs = slot.inputs.empty() ? nullptr : slot.inputs.data();
     desc.input_count = static_cast<std::uint32_t>(slot.inputs.size());
     desc.outputs = slot.outputs.empty() ? nullptr : slot.outputs.data();

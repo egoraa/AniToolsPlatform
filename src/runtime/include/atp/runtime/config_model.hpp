@@ -41,7 +41,7 @@ inline constexpr version config_schema_version{3, 3};
 /// way of never doing it: encode becomes a copy of the node and encode(decode(doc)) == doc needs no
 /// logic of its own. It is also what makes a file reference survive a save: a document that named a
 /// file still names it afterwards instead of having swallowed its contents. Resolving a reference,
-/// reading a file and converting to a module_config all happen in the builder instead.
+/// reading a file and converting to a raw_config all happen in the builder instead.
 struct module_node {
     std::string factory;
     std::string name;

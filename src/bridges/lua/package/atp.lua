@@ -100,6 +100,117 @@ function base:stop_requested()
     return self._ctx:stop_requested()
 end
 
+local FIELD_BOOL, FIELD_INT, FIELD_REAL, FIELD_STRING, FIELD_OBJECT, FIELD_ARRAY = 0, 1, 2, 3, 4, 5
+
+local field_codes = {
+    [atp.bool] = FIELD_BOOL,
+    [atp.i32] = FIELD_INT,
+    [atp.i64] = FIELD_INT,
+    [atp.f64] = FIELD_REAL,
+    [atp.text] = FIELD_STRING,
+}
+
+local config_declaration = {}
+config_declaration.__index = config_declaration
+
+--- Collects the fields of one config object in the order they were written.
+---
+--- A proxy and not a plain table for the reason the module table is one: `pairs` has no order, and the
+--- order of a config's fields is a contract — it is the order a host draws its rows in. Do not
+--- "simplify" this to a table literal.
+local function config_body(build)
+    local fields = {}
+    build(setmetatable({}, {
+        __newindex = function(_, key, value)
+            if getmetatable(value) ~= config_declaration then
+                error("only atp.field, atp.group and atp.list may be declared in a config")
+            end
+            value.name = key
+            fields[#fields + 1] = value
+        end,
+    }))
+    return fields
+end
+
+local function field_code(kind)
+    local code = field_codes[kind]
+    if code == nil then
+        error("a config field cannot hold " .. tostring(kind))
+    end
+    return code
+end
+
+local function config_rows(fields)
+    local rows = {}
+    for i, d in ipairs(fields) do
+        rows[i] = { d.name, d.kind, d.default, d.options, d.element, d.fields and config_rows(d.fields) }
+    end
+    return rows
+end
+
+--- One scalar setting of a config.
+---
+--- Omitting the default declares the field required: its absence from a document is then a problem
+--- naming the file rather than a fallback. A non-empty options set makes an enumeration, the same rule
+--- a property keeps.
+function atp.field(kind, default, options)
+    options = options or {}
+    local code = field_code(kind)
+    local allowed = {}
+    for i, value in ipairs(options.options or {}) do
+        allowed[i] = canonical(kind, value)
+    end
+    return setmetatable({
+        what = "config",
+        kind = code,
+        default = default ~= nil and canonical(kind, default) or nil,
+        options = allowed,
+    }, config_declaration)
+end
+
+--- A nested object, declared by a function that fills it.
+---
+--- A function and not a table, because a table literal loses the order of its keys and a config's field
+--- order is a contract.
+function atp.group(build)
+    if type(build) ~= "function" then
+        error("a group takes a function that declares its fields")
+    end
+    return setmetatable({ what = "config", kind = FIELD_OBJECT, options = {}, fields = config_body(build) },
+        config_declaration)
+end
+
+--- An array — of scalars when given a payload type, of objects when given a function that declares one
+--- element.
+function atp.list(of, options)
+    options = options or {}
+    if type(of) == "function" then
+        return setmetatable(
+            { what = "config", kind = FIELD_ARRAY, element = FIELD_OBJECT, options = {}, fields = config_body(of) },
+            config_declaration)
+    end
+    local code = field_code(of)
+    local allowed = {}
+    for i, value in ipairs(options.options or {}) do
+        allowed[i] = canonical(of, value)
+    end
+    return setmetatable({ what = "config", kind = FIELD_ARRAY, element = code, options = allowed },
+        config_declaration)
+end
+
+--- The config this module declares, so a host can describe, check and edit it without building the
+--- module — which is what fills the editor in atp_studio and the catalog in MCP.
+---
+--- Assign it to the module table as `M.config`. Declaring one also changes what `self.config` holds: no
+--- longer whatever the document happened to write, but every declared key at its own value, defaults
+--- included, so the fallbacks the plain channel needs stop being necessary.
+function atp.config(build)
+    if type(build) ~= "function" then
+        error("a config takes a function that declares its fields")
+    end
+    return setmetatable({ what = "config_schema", fields = config_body(build) }, config_declaration)
+end
+
 --- Declares a module and returns the table to describe it in.
 ---
 --- Ports and properties are assigned to that table; everything else assigned to it is a method the
@@ -165,12 +276,15 @@ function atp.module(name, version)
         inputs = {},
         outputs = {},
         properties = {},
+        config_schema = {},
         methods = setmetatable({}, { __index = base }),
     }
     declared[#declared + 1] = own
     return setmetatable({}, {
         __newindex = function(_, key, value)
-            if getmetatable(value) == declaration then
+            if getmetatable(value) == config_declaration then
+                own.config_schema[#own.config_schema + 1] = value
+            elseif getmetatable(value) == declaration then
                 value.name = key
                 local list = own[value.what]
                 list[#list + 1] = value
@@ -211,6 +325,7 @@ function atp._declared()
             properties = rows_of(own.properties, function(d)
                 return { d.name, d.kind, d.default, d.options, d.persistent }
             end),
+            config = own.config_schema[1] and config_rows(own.config_schema[1].fields) or nil,
         }
     end
     return table_out

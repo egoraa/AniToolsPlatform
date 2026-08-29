@@ -2,6 +2,7 @@
 #ifndef ANITOOLSPLATFORM_HOSTING_MODULE_REGISTRY_HPP
 #define ANITOOLSPLATFORM_HOSTING_MODULE_REGISTRY_HPP
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -169,7 +170,19 @@ class module_registry : public detail::registration_api<module_registry> {
         return true;
     }
 
-    /// Every registered factory, all names and versions alike.
+    /// Every registered factory, all names and versions alike, by name and then by version ascending.
+    ///
+    /// The order is deterministic on purpose and is produced here rather than by the store: this is
+    /// the one enumeration of this registry, MCP's module catalog is built straight from it, and the
+    /// hash order of the map left that catalog in an order no reader could predict — arbitrary, and
+    /// moving with insertion and rehashing rather than with anything the document says. The sort lives here
+    /// and not in the two readers — a consumer sorting to compensate for its source is exactly what
+    /// left the studio's canvas showing an order nobody else saw. The store stays a hash map because
+    /// its own layout is compiled into every plugin through module_registrar::add, so replacing it
+    /// would be an ABI break for a diagnostic ordering. Deliberately not load order either: a
+    /// registry gathers factories from several plugins, and a reader of a catalog wants a stable
+    /// list rather than the order the loader happened to open the files in. The palette of the
+    /// studio keeps load order because it is built from module_loader::modules() instead.
     [[nodiscard]] std::vector<const module_factory_base*> list() const {
         std::vector<const module_factory_base*> result;
         for (const auto& [name, versions] : registry_) {
@@ -177,6 +190,12 @@ class module_registry : public detail::registration_api<module_registry> {
                 result.push_back(factory.get());
             }
         }
+        std::ranges::sort(result, [](const module_factory_base* left, const module_factory_base* right) {
+            if (left->name() != right->name()) {
+                return left->name() < right->name();
+            }
+            return left->get_version() < right->get_version();
+        });
         return result;
     }
 

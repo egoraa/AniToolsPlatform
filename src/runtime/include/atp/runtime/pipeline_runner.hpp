@@ -97,7 +97,11 @@ class pipeline_runner {
 
     /// Builds the thread maps, validates the connections, runs the initialize and start cascades
     /// through the root and launches the loops. Any failure leaves the runner in its clean,
-    /// not-running state.
+    /// not-running state — the launch included, which is why running_ is raised before it: a thread
+    /// that was created holds this runner's stop_source, and only stop() knows how to reach it.
+    /// Installing the notifiers sits under the same rollback as start() for the same reason: it
+    /// allocates, and a throw there would otherwise leave every module started with no one left to
+    /// stop it.
     /// @throws std::logic_error if the pipeline is already running
     /// @throws std::invalid_argument if an assigned group is not part of this pipeline
     /// @throws std::runtime_error on a cross-thread connection into an unsafe input; anything a
@@ -124,6 +128,7 @@ class pipeline_runner {
             p.root().initialize(p.context());
             try {
                 p.root().start();
+                install_notifiers();
             } catch (...) {
                 try {
                     p.root().stop();
@@ -131,15 +136,19 @@ class pipeline_runner {
                 }
                 throw;
             }
-            install_notifiers();
         } catch (...) {
             uninstall_notifiers();
             undo_detach();
             reset_state();
             throw;
         }
-        launch_threads();
         running_ = true;
+        try {
+            launch_threads();
+        } catch (...) {
+            stop();
+            throw;
+        }
     }
 
     /// Requests the stop, joins the threads and runs the stop cascade. Idempotent and never throws:
@@ -196,8 +205,11 @@ class pipeline_runner {
     };
 
     /// Pacing diagnostics: a snapshot of the pass counters per thread, in declaration order. Empty
-    /// before the first start(); after stop() it survives until the next one. Reading while running
-    /// is fine — the counters are relaxed atomics, and monitoring needs no frame accuracy.
+    /// before the first start(); monotonic for the life of the runner afterwards, so a reader
+    /// interested in one run reports the difference. That is the same rule log_ring::dropped() and
+    /// group::metrics() keep, and it is the reason a restart does not zero them: the three
+    /// measuring surfaces would otherwise disagree about what "since when" means. Reading while
+    /// running is fine — the counters are relaxed atomics, and monitoring needs no frame accuracy.
     [[nodiscard]] std::vector<thread_stats> stats() const {
         std::vector<thread_stats> out;
         out.reserve(counters_.size());
@@ -385,8 +397,7 @@ class pipeline_runner {
 
     void launch_threads() {
         stop_source_ = {};
-        counters_.clear();
-        for (std::size_t i = 0; i < threads_config_.size(); ++i) {
+        while (counters_.size() < threads_config_.size()) {
             counters_.push_back(std::make_unique<pass_counters>());
         }
         std::vector<std::vector<group*>> per_thread(threads_config_.size());

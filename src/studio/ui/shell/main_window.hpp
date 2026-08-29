@@ -5,7 +5,7 @@
 #include "canvas/canvas_widget.hpp"
 #include "model/app_state.hpp"
 #include "panels/inspector_widget.hpp"
-#include "panels/log_widget.hpp"
+#include "panels/log_panel.hpp"
 #include "panels/manager_widget.hpp"
 #include "panels/palette_widget.hpp"
 #include "panels/project_tree.hpp"
@@ -144,7 +144,7 @@ class main_window final : public QMainWindow {
     canvas_widget* canvas_ = nullptr;
     inspector_widget* inspector_ = nullptr;
     runtime_widget* runtime_ = nullptr;
-    log_widget* log_ = nullptr;
+    log_panel* log_ = nullptr;
     QMenu* recent_menu_ = nullptr;
     QToolBar* toolbar_ = nullptr;
     QLabel* status_run_ = nullptr;

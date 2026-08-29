@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -35,7 +36,7 @@ namespace {
 TEST(PropertyCodec, IntRoundTrip) {
     EXPECT_EQ(atp::io::property_codec<int>::to_string(-42), "-42");
     EXPECT_EQ(atp::io::property_codec<int>::from_string("-42"), std::optional(-42));
-    EXPECT_EQ(atp::io::property_codec<int>::kind, atp::io::property_kind::number);
+    EXPECT_EQ(atp::io::property_codec<int>::kind, atp::io::property_kind::integer);
 }
 
 TEST(PropertyCodec, IntRejectsGarbage) {
@@ -70,3 +71,11 @@ TEST(PropertyCodec, UserSpecializationSatisfiesConcept) {
 }
 
 }  // namespace
+
+TEST(PropertyCodec, IntegerAndRealAreDifferentKinds) {
+    EXPECT_EQ(atp::io::property_codec<int>::kind, atp::io::property_kind::integer);
+    EXPECT_EQ(atp::io::property_codec<std::int64_t>::kind, atp::io::property_kind::integer);
+    EXPECT_EQ(atp::io::property_codec<double>::kind, atp::io::property_kind::real);
+    EXPECT_EQ(atp::io::property_codec<bool>::kind, atp::io::property_kind::boolean);
+    EXPECT_EQ(atp::io::property_codec<std::string>::kind, atp::io::property_kind::text);
+}

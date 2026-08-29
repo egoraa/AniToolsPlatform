@@ -4,19 +4,30 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string_view>
 #include <utility>
 
 #include <QBrush>
 #include <QColor>
 #include <QGraphicsSceneHoverEvent>
+#include <QPaintDevice>
+#include <QPainter>
 #include <QPainterPath>
 #include <QPen>
 #include <QRectF>
+#include <QSvgRenderer>
 
 #include <atp/studio/port_types.hpp>
 
 namespace atp::studio::ui {
+
+struct artwork_source {
+    std::unique_ptr<QSvgRenderer> renderer;
+    QRectF ink;
+};
+
 namespace {
 
 constexpr int drop_frame_width = 2;
@@ -31,6 +42,50 @@ constexpr double arrow_head = 5.0;
 constexpr double label_gap = 4.0;
 constexpr double label_rise = 16.0;
 constexpr double grab_radius = 8.0;
+
+constexpr int ink_probe_side = 64;
+
+QRectF measure_ink(QSvgRenderer& renderer) {
+    QImage probe(ink_probe_side, ink_probe_side, QImage::Format_ARGB32_Premultiplied);
+    probe.fill(Qt::transparent);
+    QPainter painter(&probe);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    renderer.render(&painter, QRectF(0.0, 0.0, ink_probe_side, ink_probe_side));
+    painter.end();
+
+    int left = ink_probe_side;
+    int top = ink_probe_side;
+    int right = -1;
+    int bottom = -1;
+    for (int y = 0; y < ink_probe_side; ++y) {
+        for (int x = 0; x < ink_probe_side; ++x) {
+            if (qAlpha(probe.pixel(x, y)) == 0) {
+                continue;
+            }
+            left = std::min(left, x);
+            top = std::min(top, y);
+            right = std::max(right, x);
+            bottom = std::max(bottom, y);
+        }
+    }
+    if (right < left || bottom < top) {
+        return {0.0, 0.0, 1.0, 1.0};
+    }
+    const double unit = ink_probe_side;
+    return {left / unit, top / unit, (right - left + 1) / unit, (bottom - top + 1) / unit};
+}
+
+artwork_source* artwork_for(const QString& path) {
+    static std::map<QString, artwork_source> parsed;
+    auto it = parsed.find(path);
+    if (it == parsed.end()) {
+        artwork_source source;
+        source.renderer = std::make_unique<QSvgRenderer>(path);
+        source.ink = source.renderer->isValid() ? measure_ink(*source.renderer) : QRectF(0.0, 0.0, 1.0, 1.0);
+        it = parsed.emplace(path, std::move(source)).first;
+    }
+    return &it->second;
+}
 
 QColor type_color(const std::optional<std::type_index>& type, const canvas_palette& colors) {
     if (!type) {
@@ -119,6 +174,80 @@ void pin_item::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
     QGraphicsEllipseItem::hoverLeaveEvent(event);
 }
 
+glyph_layout node_glyph_layout(const QFont& font, double text_top, double inset) {
+    const QFontMetricsF metrics(font);
+    const double cap = metrics.capHeight();
+    const double side = std::round(cap * node_glyph_over_cap);
+    const double baseline = text_top + metrics.ascent();
+    return {side, baseline - (cap / 2.0) - (side / 2.0), inset + side + node_glyph_gap};
+}
+
+glyph_item::glyph_item(QGraphicsItem* parent, QString artwork, QColor ink, double side)
+    : QGraphicsItem(parent)
+    , artwork_(std::move(artwork))
+    , ink_(std::move(ink))
+    , side_(side)
+    , source_(artwork_for(artwork_)) {
+    setAcceptedMouseButtons(Qt::NoButton);
+}
+
+int glyph_item::type() const {
+    return Type;
+}
+
+QRectF glyph_item::boundingRect() const {
+    return {0.0, 0.0, side_, side_};
+}
+
+bool glyph_item::valid() const {
+    return source_ != nullptr && source_->renderer->isValid();
+}
+
+const QString& glyph_item::artwork() const {
+    return artwork_;
+}
+
+const QColor& glyph_item::ink() const {
+    return ink_;
+}
+
+void glyph_item::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) {
+    if (!valid()) {
+        return;
+    }
+    const QRectF box = boundingRect();
+    const QRectF on_device = painter->worldTransform().mapRect(box);
+    const double ratio = painter->device() != nullptr ? painter->device()->devicePixelRatioF() : 1.0;
+    const double wanted = std::max(on_device.width(), on_device.height()) * ratio;
+    const int side_pixels = std::max(1, static_cast<int>(std::ceil(wanted)));
+    if (cache_.width() != side_pixels) {
+        cache_ = tinted(side_pixels);
+    }
+    painter->save();
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter->drawImage(box, cache_);
+    painter->restore();
+}
+
+QImage glyph_item::tinted(int side_pixels) {
+    QImage image(side_pixels, side_pixels, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    const QRectF& ink = source_->ink;
+    const double box = side_pixels;
+    const double drawn = box / std::max(ink.width(), ink.height());
+    const double left = -ink.x() * drawn + ((box - (ink.width() * drawn)) / 2.0);
+    const double top = -ink.y() * drawn + ((box - (ink.height() * drawn)) / 2.0);
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    source_->renderer->render(&painter, QRectF(left, top, drawn, drawn));
+    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    painter.fillRect(image.rect(), ink_);
+    painter.end();
+    return image;
+}
+
 node_item::node_item(std::string child_name, bool is_group, double height, const canvas_palette& colors)
     : QGraphicsRectItem(0, 0, node_width, height)
     , child_name_(std::move(child_name))
@@ -189,13 +318,19 @@ stub_item::stub_item(bool is_output,
                      std::string alias,
                      const std::optional<std::type_index>& type,
                      const canvas_palette& colors)
-    : is_output_(is_output), alias_(std::move(alias)) {
+    : is_output_(is_output)
+    , alias_(std::move(alias))
+    , idle_(universal_input(type, is_output) ? colors.universal_ink : type_color(type, colors))
+    , hot_(colors.link_hot) {
     setFlag(ItemIsSelectable);
-    setPen(QPen(universal_input(type, is_output) ? colors.universal_ink : type_color(type, colors), idle_link_width,
-                Qt::DashLine));
+    set_hot(false);
     label_ = new QGraphicsSimpleTextItem(this);
     label_->setBrush(QBrush(colors.stub_label));
     label_->setText(QString::fromStdString(alias_));
+}
+
+void stub_item::set_hot(bool hot) {
+    setPen(QPen(hot ? hot_ : idle_, hot ? hot_link_width : idle_link_width, Qt::DashLine));
 }
 
 int stub_item::type() const {

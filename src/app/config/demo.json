@@ -1,5 +1,5 @@
 {
-    "version": "3.3",
+    "version": "1.0",
     "plugins": ["../plugins/atp_demo_plugin"],
     "configs": {
         "printing": {

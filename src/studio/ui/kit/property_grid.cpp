@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "kit/property_grid.hpp"
 
+#include <cmath>
+#include <cstdint>
 #include <exception>
 #include <optional>
 #include <string>
@@ -16,7 +18,7 @@
 #include <QStringList>
 
 #include <atp/config/node.hpp>
-#include <atp/runtime/json_codec.hpp>
+#include <atp/io/property_codec.hpp>
 #include <atp/runtime/property_override.hpp>
 #include <atp/studio/node_ref.hpp>
 
@@ -27,15 +29,22 @@ namespace {
 atp::config::node editor_to_value(const property_editor& e) {
     std::string text = e.text();
     switch (e.kind) {
-        case io::property_kind::number: {
-            const std::optional<atp::config::node> parsed = runtime::try_json_parse(text);
-            if (!parsed || !(parsed->is_int() || parsed->is_double())) {
+        case io::property_kind::integer: {
+            const std::optional<std::int64_t> whole = io::property_codec<std::int64_t>::from_string(text);
+            if (!whole) {
+                throw runtime::config_error("'" + text + "' is not a whole number");
+            }
+            return {*whole};
+        }
+        case io::property_kind::real: {
+            const std::optional<double> real = io::property_codec<double>::from_string(text);
+            if (!real || !std::isfinite(*real)) {
                 throw runtime::config_error("'" + text + "' is not a number");
             }
-            return *parsed;
+            return {*real};
         }
         case io::property_kind::boolean:
-            return atp::config::node(text == "true");
+            return {text == "true"};
         case io::property_kind::text:
             break;
     }

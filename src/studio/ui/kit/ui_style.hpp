@@ -4,12 +4,14 @@
 
 #include <QAbstractItemModel>
 #include <QAbstractItemView>
+#include <QBoxLayout>
 #include <QColor>
 #include <QEvent>
 #include <QFont>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QObject>
 #include <QPaintEvent>
@@ -76,7 +78,6 @@ inline constexpr char16_t add = u'+';
 inline constexpr char16_t drop = 0x2212;
 inline constexpr char16_t reset = 0x21ba;
 inline constexpr char16_t rescan = 0x21bb;
-inline constexpr char16_t clear = 0x2715;
 }  // namespace glyph
 
 /// Paints a label in the palette's placeholder colour: for text that is there to be found when
@@ -149,7 +150,7 @@ struct section {
     return {box, form};
 }
 
-/// A small glyph button — the panels' only button shape, so that add, drop and reset read as one
+/// A small glyph button — the panels' usual button shape, so that add, drop and reset read as one
 /// family wherever they appear.
 /// @param g one of the glyph constants
 /// @param tip what the button does
@@ -162,13 +163,27 @@ struct section {
     return button;
 }
 
-/// A strip of glyph buttons under a view — where a panel keeps the actions on what the view shows.
+/// The same button wearing artwork instead of a letter — for a strip whose actions no glyph says.
+/// See icons::soft_wrap for when that is the case and why the whole strip then changes together.
+/// @param artwork one of the icons:: family
+/// @param tip what the button does
+/// @param parent widget the button belongs to
+[[nodiscard]] inline QToolButton* tool_button(const QIcon& artwork, const QString& tip, QWidget* parent) {
+    auto* button = new QToolButton(parent);
+    button->setIcon(artwork);
+    button->setToolTip(tip);
+    button->setAutoRaise(true);
+    return button;
+}
+
+/// A strip of buttons along a view — where a panel keeps the actions on what the view shows. Under
+/// it when the panel has the height to spare, beside it when the view is the panel.
 struct button_bar {
     QWidget* box = nullptr;
-    QHBoxLayout* row = nullptr;
+    QBoxLayout* row = nullptr;
 };
 
-/// Builds an empty button strip.
+/// Builds an empty button strip, running across under a view.
 /// @param parent widget the strip belongs to
 /// @return the strip and its layout
 [[nodiscard]] inline button_bar make_button_bar(QWidget* parent) {
@@ -177,6 +192,19 @@ struct button_bar {
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(2);
     return {box, row};
+}
+
+/// The same strip stood on end, to run down beside a view rather than across under it. A dock whose
+/// whole body is one view has no row to spare — a strip under it is a strip taken off the text —
+/// while a column costs width the text was not using anyway.
+/// @param parent widget the strip belongs to
+/// @return the strip and its layout
+[[nodiscard]] inline button_bar make_button_column(QWidget* parent) {
+    auto* box = new QWidget(parent);
+    auto* column = new QVBoxLayout(box);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(2);
+    return {box, column};
 }
 
 /// Puts a sentence over a view that has no rows, and takes it away as soon as it has one.

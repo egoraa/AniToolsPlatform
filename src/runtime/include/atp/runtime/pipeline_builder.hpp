@@ -24,6 +24,7 @@
 #include <atp/runtime/module_loader.hpp>
 #include <atp/runtime/pipeline.hpp>
 #include <atp/runtime/pipeline_runner.hpp>
+#include <atp/runtime/utf8_path.hpp>
 
 namespace atp::runtime {
 
@@ -287,7 +288,7 @@ inline void build_pipeline(pipeline& pipe,
 inline void build(application& app, const config& cfg, const std::filesystem::path& base_dir) {
     std::vector<std::filesystem::path> loaded;
     for (const std::string& p : cfg.plugins) {
-        const std::filesystem::path entry = base_dir / p;
+        const std::filesystem::path entry = base_dir / path_from_utf8(p);
         const bool is_dir = std::filesystem::is_directory(entry);
         for (const std::filesystem::path& file :
              is_dir ? detail::plugin_files_in(entry) : std::vector<std::filesystem::path>{entry}) {

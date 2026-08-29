@@ -57,7 +57,7 @@ class attach_sink : public atp::module<atp::ports<number_inputs>, "attach_sink">
 };
 
 constexpr const char* attach_config = R"({
-    "version": "3.0",
+    "version": "1.0",
     "pipeline": {
         "modules": [
             {"module": "attach_source", "name": "src", "properties": {"step": 4}},

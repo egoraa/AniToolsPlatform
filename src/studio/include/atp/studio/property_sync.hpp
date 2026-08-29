@@ -2,32 +2,47 @@
 #ifndef ATP_STUDIO_PROPERTY_SYNC_HPP
 #define ATP_STUDIO_PROPERTY_SYNC_HPP
 
+#include <cmath>
+#include <cstdint>
 #include <optional>
 #include <string>
 
 #include <atp/config/node.hpp>
+#include <atp/io/property_codec.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/group.hpp>
-#include <atp/runtime/json_codec.hpp>
 #include <atp/studio/project.hpp>
 
 namespace atp::studio {
 
 namespace detail {
 
+/// The value of a property as the node a project stores.
+///
+/// A real that is not finite stays text on purpose: nlohmann writes an infinity or a NaN as null,
+/// and a saved null is a value the pipeline then refuses to start with. The property's own printed
+/// form ("inf", "nan") survives the round trip, since from_string reads back exactly what
+/// to_string wrote.
 [[nodiscard]] inline atp::config::node property_value_of(const io::property_base& p) {
+    const std::string text = p.to_string();
     switch (p.kind()) {
-        case io::property_kind::number:
-            if (const std::optional<atp::config::node> parsed = runtime::try_json_parse(p.to_string())) {
-                return *parsed;
+        case io::property_kind::integer:
+            if (const std::optional<std::int64_t> whole = io::property_codec<std::int64_t>::from_string(text)) {
+                return {*whole};
+            }
+            break;
+        case io::property_kind::real:
+            if (const std::optional<double> real = io::property_codec<double>::from_string(text);
+                real && std::isfinite(*real)) {
+                return {*real};
             }
             break;
         case io::property_kind::boolean:
-            return atp::config::node(p.to_string() == "true");
+            return {text == "true"};
         case io::property_kind::text:
             break;
     }
-    return atp::config::node(p.to_string());
+    return {text};
 }
 
 inline void sync_group(project& proj,

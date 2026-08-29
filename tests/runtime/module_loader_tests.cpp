@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <filesystem>
+#include <initializer_list>
 #include <memory>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -11,10 +13,19 @@
 
 #include <atp/module.hpp>
 #include <atp/runtime/module_loader.hpp>
+#include <atp/runtime/utf8_path.hpp>
 
 namespace {
 
 class host_module : public atp::module<atp::ports<>, "", atp::version{1, 0}> {};
+
+std::filesystem::path unicode_path(std::initializer_list<char32_t> points, std::string_view suffix) {
+    std::u32string name(points);
+    for (const char c : suffix) {
+        name.push_back(static_cast<char32_t>(c));
+    }
+    return {name};
+}
 
 }  // namespace
 
@@ -152,4 +163,49 @@ TEST(ModuleLoader, MoveAssignmentUnloadsTarget) {
     target = std::move(source);
     EXPECT_EQ(second_registry.find("plugin_module"), nullptr);
     EXPECT_NE(first_registry.find("plugin_module"), nullptr);
+}
+
+TEST(ModuleLoader, NamesAMissingPluginInUtf8) {
+    atp::module_registry registry;
+    const std::filesystem::path missing =
+        std::filesystem::temp_directory_path() / unicode_path({0x043d, 0x0435, 0x0442, 0x0443}, ".dll");
+    try {
+        const atp::runtime::module_loader loader{missing, registry};
+        FAIL() << "a missing plugin must throw";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find(atp::runtime::path_to_utf8(missing.filename())), std::string::npos)
+            << "path::string() spells the name in the process code page, and every string here is UTF-8";
+    }
+}
+
+TEST(ModuleLoader, ForeignLibraryNamedOutsideAsciiStaysNotAPlugin) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_loader_utf8";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path copy =
+        dir / unicode_path({0x0447, 0x0443, 0x0436, 0x0430, 0x044f}, atp::runtime::plugin_extension);
+    std::filesystem::copy_file(ATP_TEST_PLUGIN_EMPTY, copy);
+
+    atp::module_registry registry;
+    try {
+        const atp::runtime::module_loader loader{copy, registry};
+        FAIL() << "a library exporting neither entry point is not a plugin";
+    } catch (const atp::runtime::not_a_plugin& error) {
+        EXPECT_NE(std::string(error.what()).find(atp::runtime::path_to_utf8(copy.filename())), std::string::npos);
+    }
+}
+
+TEST(ModuleLoader, RegistrationFailureNamesThePluginFile) {
+    atp::module_registry registry;
+    const atp::runtime::module_loader first{ATP_TEST_PLUGIN, registry};
+    try {
+        const atp::runtime::module_loader second{ATP_TEST_PLUGIN, registry};
+        FAIL() << "the same plugin twice in one registry is a duplicate registration";
+    } catch (const std::runtime_error& error) {
+        const std::string text = error.what();
+        EXPECT_NE(text.find("duplicate"), std::string::npos);
+        EXPECT_NE(text.find(atp::runtime::path_to_utf8(std::filesystem::path(ATP_TEST_PLUGIN).filename())),
+                  std::string::npos)
+            << "the C++ path used to drop the file name that the C path adds";
+    }
 }

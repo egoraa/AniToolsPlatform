@@ -59,9 +59,9 @@ TEST(McpArguments, BuildsObjectSchemasWithRequiredNames) {
 }
 
 TEST(McpModuleJson, TurnsPropertyKindsAndOptionsIntoSchema) {
-    const atp::studio::property_info number{"limit", atp::io::property_kind::number, "10", {}, true};
+    const atp::studio::property_info number{"limit", atp::io::property_kind::integer, "10", {}, true};
     const nlohmann::json number_schema = atp::mcp::property_schema(number);
-    EXPECT_EQ(number_schema.at("type"), "number");
+    EXPECT_EQ(number_schema.at("type"), "integer");
     EXPECT_EQ(number_schema.at("default"), "10");
     EXPECT_FALSE(number_schema.contains("enum"));
 
@@ -79,7 +79,7 @@ TEST(McpModuleJson, SerialisesAModuleWithItsPortsAndBrokenFlag) {
     atp::studio::module_info info{"demo", atp::version{1, 2}, {}, {}, {}, false, {}, {}};
     info.inputs.push_back({"in", std::type_index(typeid(int))});
     info.outputs.push_back({"out", std::type_index(typeid(double))});
-    info.properties.push_back({"limit", atp::io::property_kind::number, "10", {}, true});
+    info.properties.push_back({"limit", atp::io::property_kind::integer, "10", {}, true});
 
     const nlohmann::json json = atp::mcp::to_json(info);
     EXPECT_EQ(json.at("name"), "demo");
@@ -91,7 +91,15 @@ TEST(McpModuleJson, SerialisesAModuleWithItsPortsAndBrokenFlag) {
     EXPECT_EQ(json.at("outputs").at(0).at("name"), "out");
     EXPECT_EQ(json.at("properties").at(0).at("name"), "limit");
     EXPECT_EQ(json.at("properties").at(0).at("persistent"), true);
-    EXPECT_EQ(json.at("properties").at(0).at("schema").at("type"), "number");
+    EXPECT_EQ(json.at("properties").at(0).at("schema").at("type"), "integer");
 }
 
 }  // namespace
+
+TEST(McpModuleJson, IntegerAndRealDifferInTheSchema) {
+    const atp::studio::property_info whole{"limit", atp::io::property_kind::integer, "10", {}, true};
+    EXPECT_EQ(atp::mcp::property_schema(whole).at("type"), "integer");
+
+    const atp::studio::property_info fractional{"gain", atp::io::property_kind::real, "0.5", {}, true};
+    EXPECT_EQ(atp::mcp::property_schema(fractional).at("type"), "number");
+}

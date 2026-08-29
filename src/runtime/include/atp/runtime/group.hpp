@@ -361,11 +361,6 @@ class group : public module_base {
         return pass;
     }
 
-    /// Per-module cost of everything under this group, depth first, in cascade order.
-    ///
-    /// This is the answer to "which module is costing the time", which the per-thread pass counters
-    /// of pipeline_runner cannot give: a thread runs an ordered list of groups and one slow iterate
-    /// among twenty looks exactly like twenty slightly slow ones. Reading while running is fine.
     /// Turns the per-module timing on or off for this group and, by default, everything under it.
     ///
     /// Off by default, and that is a measured decision rather than caution: timing every child's
@@ -390,6 +385,12 @@ class group : public module_base {
         return metrics_enabled_.load(std::memory_order_relaxed);
     }
 
+    /// Per-module cost of everything under this group, depth first, in cascade order.
+    ///
+    /// This is the answer to "which module is costing the time", which the per-thread pass counters
+    /// of pipeline_runner cannot give: a thread runs an ordered list of groups and one slow iterate
+    /// among twenty looks exactly like twenty slightly slow ones. Reading while running is fine.
+    /// The counters are monotonic for the life of the group, like the runner's own.
     [[nodiscard]] std::vector<module_stats> metrics() const {
         std::vector<module_stats> out;
         collect_metrics(std::string(), out);

@@ -74,7 +74,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # /Z7 rather than /Zi: a compile PDB is a type server CMake names per target only for a static library,
 # so everything else shares cl's default one, and an object whose (GUID, age) stops matching it links
 # under LNK4099 — public symbols kept, types, locals and line tables gone. Embedded also puts a static
-# library's debug information inside the .lib. Rationale in full: docs/architecture.md.
+# library's debug information inside the .lib. Rationale in full: docs/architecture/cmake.md.
 set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 
 # A plugin is the one target that does not follow CMAKE_LIBRARY_OUTPUT_DIRECTORY: it is loaded by

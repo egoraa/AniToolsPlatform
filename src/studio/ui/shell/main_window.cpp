@@ -21,6 +21,7 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
@@ -31,20 +32,19 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
-#include <QVBoxLayout>
+#include <QToolButton>
 #include <QWidget>
 #include <QtVersion>
 
 #include <atp/plugin.hpp>
 #include <atp/runtime/config_model.hpp>
-#include <atp/runtime/log_pump.hpp>
 #include <atp/studio/property_sync.hpp>
 #include <atp/studio/settings.hpp>
 
 namespace atp::studio::ui {
 namespace {
 
-constexpr int window_state_version = 2;
+constexpr int window_state_version = 1;
 
 /// Fraction of the window the bottom row of docks starts at, as a divisor. A share rather than the
 /// pixel count it replaced: the canvas is what a taller screen should give the room to, and a
@@ -147,6 +147,8 @@ void main_window::build_toolbar() {
     toolbar_->addSeparator();
     toolbar_->addAction(run_action_);
     toolbar_->addAction(stop_action_);
+    toolbar_->addSeparator();
+    toolbar_->addAction(attach_action_);
 }
 
 void main_window::build_status_bar() {
@@ -217,7 +219,7 @@ void main_window::refresh_all() {
     // someone else. Save As stays on: the mirror is a valid config, so exporting it is free.
     save_action_->setEnabled(!attached);
     save_as_action_->setEnabled(true);
-    attach_action_->setEnabled(!attached);
+    attach_action_->setEnabled(!attached && !locked);
     detach_action_->setEnabled(attached);
     refresh_mirror_action_->setEnabled(attached);
     stop_remote_action_->setEnabled(attached);
@@ -259,6 +261,7 @@ void main_window::attach_dialog_flow() {
     }
     try {
         state_.attach(dialog.host().toStdString(), static_cast<std::uint16_t>(dialog.port()));
+        canvas_->scene().forget_stacking();
         state_.settings.attach_host = dialog.host().toStdString();
         state_.settings.attach_port = dialog.port();
         save_settings(state_.settings, state_.settings_file);
@@ -275,6 +278,7 @@ void main_window::detach(const QString& reason) {
     }
     const QString endpoint = QString::fromStdString(state_.endpoint());
     state_.detach();
+    canvas_->scene().forget_stacking();
     report(reason.isEmpty() ? QString("detached from %1").arg(endpoint)
                             : QString("detached from %1: %2").arg(endpoint, reason),
            reason.isEmpty() ? atp::log_level::info : atp::log_level::warning);
@@ -282,9 +286,7 @@ void main_window::detach(const QString& reason) {
 }
 
 void main_window::report(const QString& text, atp::log_level level) {
-    const QString stamp = QString::fromStdString(atp::runtime::format_log_time(std::chrono::system_clock::now()));
-    const QString name = QString::fromStdString(std::string(atp::runtime::level_name(level)));
-    log_->append(stamp + " [" + name + "] " + text, level);
+    log_->append({std::chrono::system_clock::now(), level, log_origin::system, QString(), text, false});
 }
 
 void main_window::report(const std::string& context, const std::exception& e) {
@@ -293,7 +295,8 @@ void main_window::report(const std::string& context, const std::exception& e) {
 
 void main_window::drain_logs() {
     for (const atp::runtime::log_line& line : state_.run.collect_logs()) {
-        log_->append(QString::fromStdString(atp::runtime::format_log_line(line)), line.level);
+        log_->append({line.at, line.level, log_origin::module, QString::fromStdString(line.path),
+                      QString::fromStdString(line.text), line.truncated});
     }
 }
 
@@ -302,6 +305,7 @@ void main_window::open_path(const std::filesystem::path& path) {
         state_.doc = project::open(path);
         state_.doc_path = path;
         state_.reset_view();
+        canvas_->scene().forget_stacking();
         if (state_.doc.had_includes()) {
             report(QString("%1 uses $include — saving will write a flattened file")
                        .arg(QString::fromStdWString(path.wstring())),
@@ -329,6 +333,7 @@ void main_window::build_menus() {
         state_.doc = project::create();
         state_.doc_path.reset();
         state_.reset_view();
+        canvas_->scene().forget_stacking();
         refresh_all();
     });
     new_action_->setObjectName("action.new");
@@ -367,10 +372,12 @@ void main_window::build_menus() {
         host->addAction(icons::stop(), "S&top", QKeySequence(Qt::SHIFT | Qt::Key_F5), [this] { runtime_->stop_run(); });
     stop_action_->setObjectName("action.stop");
     host->addSeparator();
-    attach_action_ = host->addAction("&Attach to a running host...", [this] { attach_dialog_flow(); });
+    attach_action_ = host->addAction(icons::attach(), "&Attach to a running host...", [this] { attach_dialog_flow(); });
+    attach_action_->setObjectName("action.attach");
     refresh_mirror_action_ = host->addAction("&Refresh the mirror", [this] {
         try {
             state_.refresh_mirror();
+            canvas_->scene().forget_stacking();
             report(QString("re-read the pipeline of %1").arg(QString::fromStdString(state_.endpoint())));
         } catch (const std::exception& e) {
             report("refresh", e);
@@ -548,22 +555,16 @@ void main_window::rebuild_recent_menu() {
 QDockWidget* main_window::build_log_dock() {
     auto* dock = new QDockWidget("Log", this);
     dock->setObjectName("dock.log");
-    auto* body = new QWidget(dock);
-    auto* layout = new QVBoxLayout(body);
-    layout->setSpacing(style::row_spacing);
-
-    log_ = new log_widget(body);
-    log_->setObjectName("log.lines");
-    layout->addWidget(log_, 1);
-
-    const style::button_bar bar = style::make_button_bar(body);
-    auto* clear = style::tool_button(style::glyph::clear, "clear the log", bar.box);
-    QObject::connect(clear, &QToolButton::clicked, body, [this] { log_->clear(); });
-    bar.row->addWidget(clear);
-    bar.row->addStretch(1);
-    layout->addWidget(bar.box);
-
-    dock->setWidget(body);
+    log_ = new log_panel(state_.settings.log_soft_wrap, state_.settings.log_follow_tail, dock);
+    log_->on_soft_wrap_changed([this](bool on) {
+        state_.settings.log_soft_wrap = on;
+        store_settings();
+    });
+    log_->on_follow_tail_changed([this](bool on) {
+        state_.settings.log_follow_tail = on;
+        store_settings();
+    });
+    dock->setWidget(log_);
     addDockWidget(Qt::BottomDockWidgetArea, dock);
     return dock;
 }

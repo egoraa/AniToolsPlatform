@@ -19,7 +19,11 @@ namespace atp::mcp {
 /// specification requires the server to answer with a version it supports, and it supports one.
 inline constexpr const char* protocol_version = "2025-11-25";
 inline constexpr const char* server_name = "atp-studio";
-inline constexpr const char* server_version = "0.1.0";
+
+/// The project's version, handed in by CMake as ATP_MCP_VERSION so that it cannot drift from
+/// project(): a unit that reaches this header without atp_mcp_lib fails to compile rather than
+/// reporting a number nobody maintains.
+inline constexpr const char* server_version = ATP_MCP_VERSION;
 
 /// The MCP layer: it turns decoded JSON-RPC messages into calls on the registries and back. It knows
 /// nothing about the studio, which is what makes it testable against stub tools.

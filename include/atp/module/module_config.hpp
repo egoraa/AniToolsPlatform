@@ -157,6 +157,11 @@ class module_config {
         }
 
         /// Writes the field and marks it set.
+        ///
+        /// For the string kind this is **not** the door a host uses: an enumeration holds a value of
+        /// its own type rather than a name, so set(std::string) on one throws, and from_string() is
+        /// the call that both parses the name and checks the declared set. It also answers false
+        /// instead of throwing, which is what lets load_fields report a problem line.
         /// @throws config::access_error naming the field, the form it holds and the form asked for, or
         ///         saying that the value is outside the declared set
         template <field_value T>
@@ -509,8 +514,10 @@ class module_config {
     ///
     /// The records live in a vector, unlike every other container here, because nothing binds a
     /// reference to them: an heir's references point into the value storage, not into an entry. A
-    /// pointer into this span stays valid once construction is over, which is the only time entries
-    /// are added.
+    /// pointer into this span stays valid until the next declaration, which for an heir of this class
+    /// means "once the constructor is over" and for dynamic_config means "once the host has finished
+    /// declaring into it" — c_config declares from data after construction and hands the object out
+    /// only afterwards.
     [[nodiscard]] std::span<entry> entries() noexcept {
         return entries_;
     }
@@ -561,8 +568,11 @@ class module_config {
     /// Attaches the bytes this config was read from.
     ///
     /// Separate from filling the fields because the two are done by different people: the fields by
-    /// whoever walks the document, the source by whoever read the file. A config that came from no file
-    /// simply never has this called on it.
+    /// whoever walks the document, the source by whoever read the file. A config that came from no
+    /// file simply never has this called on it. Public rather than protected because the caller is
+    /// the host — runtime::load_fields and raw_config::adopt — and neither can be named from this
+    /// header without dragging the runtime into the SDK; a module calling it on its own config
+    /// rewrites only what it is about to read.
     /// @param text bytes of the file, verbatim
     /// @param origin path of that file, named in the module's own messages
     /// @param opaque whether the text is all there is

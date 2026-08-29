@@ -211,6 +211,36 @@ TEST(StudioSettings, AProfileWithoutTheEditorCommandReadsItEmpty) {
     EXPECT_EQ(loaded.search_dirs.size(), 1u);
 }
 
+TEST(StudioSettings, RoundTripsHowTheLogIsDrawn) {
+    const auto file = temp_file("settings.json");
+    atp::studio::studio_settings s;
+    s.log_soft_wrap = true;
+    s.log_follow_tail = false;
+    atp::studio::save_settings(s, file);
+
+    const atp::studio::studio_settings loaded = atp::studio::load_settings(file);
+    EXPECT_TRUE(loaded.log_soft_wrap);
+    EXPECT_FALSE(loaded.log_follow_tail);
+}
+
+TEST(StudioSettings, AProfileWithoutTheLogKeysWrapsNothingAndFollowsTheEnd) {
+    const auto file = temp_file("settings.json");
+    std::ofstream(file) << R"({"theme": "dark"})";
+
+    const atp::studio::studio_settings loaded = atp::studio::load_settings(file);
+    EXPECT_FALSE(loaded.log_soft_wrap);
+    EXPECT_TRUE(loaded.log_follow_tail);
+}
+
+TEST(StudioSettings, LogKeysOfTheWrongFormAreIgnoredRatherThanCoerced) {
+    const auto file = temp_file("settings.json");
+    std::ofstream(file) << R"({"log_soft_wrap": "yes", "log_follow_tail": 0})";
+
+    const atp::studio::studio_settings loaded = atp::studio::load_settings(file);
+    EXPECT_FALSE(loaded.log_soft_wrap);
+    EXPECT_TRUE(loaded.log_follow_tail);
+}
+
 TEST(NoteRecent, NormalizesRelativePath) {
     atp::studio::studio_settings s;
     atp::studio::note_recent(s, "sub/../x.json");

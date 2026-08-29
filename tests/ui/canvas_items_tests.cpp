@@ -1,29 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <algorithm>
 #include <any>
+#include <cmath>
 #include <optional>
 #include <string>
 #include <typeindex>
+#include <vector>
 
 #include <gtest/gtest.h>
 
+#include <QApplication>
 #include <QBrush>
 #include <QColor>
+#include <QFont>
+#include <QFontMetricsF>
 #include <QGraphicsItem>
 #include <QGraphicsSimpleTextItem>
+#include <QImage>
+#include <QPainter>
 #include <QPainterPath>
 #include <QPalette>
 #include <QPen>
 #include <QPointF>
 #include <QRectF>
 
+#include <atp/studio/languages.hpp>
+
 #include "canvas/canvas_items.hpp"
 #include "canvas/canvas_palette.hpp"
+#include "kit/icons.hpp"
 #include "ui/qt_app.hpp"
 
 namespace {
 
 using atp::studio::ui::canvas_colors;
 using atp::studio::ui::canvas_palette;
+using atp::studio::ui::glyph_item;
 using atp::studio::ui::link_item;
 using atp::studio::ui::node_item;
 using atp::studio::ui::pin_item;
@@ -269,6 +281,24 @@ TEST(UiCanvasItems, AStubStillClaimsTheWholeSegmentItPaints) {
     EXPECT_TRUE(bounds.contains(stub.shape().controlPointRect())) << "Qt requires shape() inside boundingRect()";
 }
 
+TEST(UiCanvasItems, AHotStubTakesTheFlowColourAndStaysDashed) {
+    (void)atp_ui_tests::ensure_app();
+    const canvas_palette dark = canvas_colors(dark_scheme());
+
+    stub_item stub(as_output, "measures", std::type_index(typeid(int)), dark);
+    const QColor idle = stub.pen().color();
+    ASSERT_EQ(stub.pen().style(), Qt::DashLine);
+
+    stub.set_hot(true);
+    EXPECT_EQ(stub.pen().color(), dark.link_hot);
+    EXPECT_GT(stub.pen().widthF(), 1.5);
+    EXPECT_EQ(stub.pen().style(), Qt::DashLine) << "a hot stub is still not a link";
+
+    stub.set_hot(false);
+    EXPECT_EQ(stub.pen().color(), idle) << "the port type comes back the moment the flow pauses";
+    EXPECT_DOUBLE_EQ(stub.pen().widthF(), 1.5);
+}
+
 TEST(UiCanvasItems, AHotLinkTakesTheFlowColourAndGoesBack) {
     (void)atp_ui_tests::ensure_app();
     const canvas_palette dark = canvas_colors(dark_scheme());
@@ -280,6 +310,116 @@ TEST(UiCanvasItems, AHotLinkTakesTheFlowColourAndGoesBack) {
     link.set_hot(false);
     EXPECT_EQ(link.pen().color(), dark.link);
     EXPECT_DOUBLE_EQ(link.pen().widthF(), 1.5);
+}
+
+TEST(UiCanvasItems, AMarkKeepsTheInkItWasGivenRatherThanReadingAPalette) {
+    (void)atp_ui_tests::ensure_app();
+    const QColor ink(200, 30, 90);
+    glyph_item glyph(nullptr, QStringLiteral(":/icons/module.svg"), ink, 14.0);
+
+    EXPECT_EQ(glyph.ink(), ink);
+    EXPECT_EQ(glyph.boundingRect(), QRectF(0.0, 0.0, 14.0, 14.0));
+    EXPECT_TRUE(glyph.valid());
+}
+
+TEST(UiCanvasItems, TheMarkIsCentredOnTheCapitalsRatherThanOnTheEmBox) {
+    (void)atp_ui_tests::ensure_app();
+    const QFont font = QApplication::font();
+    const QFontMetricsF metrics(font);
+    const double text_top = 4.0;
+    const atp::studio::ui::glyph_layout mark = atp::studio::ui::node_glyph_layout(font, text_top, 8.0);
+
+    const double baseline = text_top + metrics.ascent();
+    EXPECT_NEAR(mark.top + (mark.side / 2.0), baseline - (metrics.capHeight() / 2.0), 0.001);
+    EXPECT_NEAR(mark.side, std::round(metrics.capHeight() * atp::studio::ui::node_glyph_over_cap), 0.001);
+    EXPECT_NEAR(mark.text_left, 8.0 + mark.side + atp::studio::ui::node_glyph_gap, 0.001);
+}
+
+TEST(UiCanvasItems, TheMarksOfOneFamilyShareTheirLargestExtent) {
+    (void)atp_ui_tests::ensure_app();
+    const double side = 24.0;
+    std::vector<double> extents;
+    for (const char* artwork :
+         {":/icons/module.svg", ":/icons/group.svg", ":/icons/script.svg", ":/icons/python.svg", ":/icons/lua.svg"}) {
+        glyph_item glyph(nullptr, QString::fromLatin1(artwork), QColor(0, 0, 0), side);
+        ASSERT_TRUE(glyph.valid()) << artwork;
+
+        QImage surface(static_cast<int>(side), static_cast<int>(side), QImage::Format_ARGB32_Premultiplied);
+        surface.fill(Qt::transparent);
+        QPainter painter(&surface);
+        glyph.paint(&painter, nullptr, nullptr);
+        painter.end();
+
+        int left = surface.width();
+        int top = surface.height();
+        int right = -1;
+        int bottom = -1;
+        for (int y = 0; y < surface.height(); ++y) {
+            for (int x = 0; x < surface.width(); ++x) {
+                if (qAlpha(surface.pixel(x, y)) == 0) {
+                    continue;
+                }
+                left = std::min(left, x);
+                top = std::min(top, y);
+                right = std::max(right, x);
+                bottom = std::max(bottom, y);
+            }
+        }
+        ASSERT_GE(right, left) << artwork;
+        extents.push_back(std::max(right - left, bottom - top) + 1.0);
+    }
+    for (double extent : extents) {
+        EXPECT_NEAR(extent, extents.front(), 1.5);
+    }
+}
+
+TEST(UiCanvasItems, PaintingTheMarkLeavesThePainterAsItFoundIt) {
+    (void)atp_ui_tests::ensure_app();
+    QImage surface(32, 32, QImage::Format_ARGB32_Premultiplied);
+    surface.fill(Qt::transparent);
+    QPainter painter(&surface);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+    glyph_item glyph(nullptr, QStringLiteral(":/icons/module.svg"), QColor(10, 20, 30), 14.0);
+    glyph.paint(&painter, nullptr, nullptr);
+
+    EXPECT_FALSE(painter.testRenderHint(QPainter::SmoothPixmapTransform));
+}
+
+TEST(UiCanvasItems, TheMarkDoesNotTakeThePressAwayFromTheNodeItSitsOn) {
+    (void)atp_ui_tests::ensure_app();
+    glyph_item glyph(nullptr, QStringLiteral(":/icons/module.svg"), QColor(0, 0, 0), 14.0);
+
+    EXPECT_EQ(glyph.acceptedMouseButtons(), Qt::NoButton);
+}
+
+TEST(UiCanvasItems, ArtworkThatIsNotThereIsAnswerableRatherThanSilent) {
+    (void)atp_ui_tests::ensure_app();
+    glyph_item glyph(nullptr, QStringLiteral(":/icons/no_such_language.svg"), QColor(0, 0, 0), 14.0);
+
+    EXPECT_FALSE(glyph.valid());
+}
+
+TEST(UiCanvasItems, EveryLanguageTheStudioAuthorsInHasArtworkThatParses) {
+    (void)atp_ui_tests::ensure_app();
+    for (const atp::studio::script_language& lang : atp::studio::languages()) {
+        const QString artwork = atp::studio::ui::icons::script_artwork(lang.id);
+        glyph_item glyph(nullptr, artwork, QColor(0, 0, 0), 14.0);
+        EXPECT_TRUE(glyph.valid()) << artwork.toStdString();
+    }
+    glyph_item binary(nullptr, atp::studio::ui::icons::binary_module_artwork(), QColor(0, 0, 0), 14.0);
+    EXPECT_TRUE(binary.valid());
+    glyph_item group(nullptr, atp::studio::ui::icons::group_artwork(), QColor(0, 0, 0), 14.0);
+    EXPECT_TRUE(group.valid());
+}
+
+TEST(UiCanvasItems, ALanguageWithNoArtworkOfItsOwnFallsBackToTheScriptSheet) {
+    (void)atp_ui_tests::ensure_app();
+    EXPECT_EQ(atp::studio::ui::icons::script_artwork("brainfuck"), QStringLiteral(":/icons/script.svg"));
+    EXPECT_EQ(atp::studio::ui::icons::script_artwork(""), QStringLiteral(":/icons/script.svg"));
+
+    glyph_item glyph(nullptr, atp::studio::ui::icons::script_artwork("brainfuck"), QColor(0, 0, 0), 14.0);
+    EXPECT_TRUE(glyph.valid());
 }
 
 }  // namespace

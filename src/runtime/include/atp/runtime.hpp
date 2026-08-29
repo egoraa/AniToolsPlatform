@@ -27,6 +27,7 @@
 #include <atp/runtime/config_file.hpp>
 #include <atp/runtime/config_loader.hpp>
 #include <atp/runtime/config_model.hpp>
+#include <atp/runtime/config_path.hpp>
 #include <atp/runtime/config_source.hpp>
 #include <atp/runtime/config_tree_source.hpp>
 #include <atp/runtime/config_validator.hpp>

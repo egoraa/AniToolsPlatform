@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <stop_token>
@@ -176,6 +177,22 @@ TEST_F(McpExecutionTools, ExposesTheDocumentAndCatalogAsResources) {
     const atp::mcp::resource* docs = resources_.find("atp://docs/architecture");
     ASSERT_NE(docs, nullptr);
     EXPECT_FALSE(docs->read().empty());
+}
+
+TEST_F(McpExecutionTools, TheArchitectureResourceCarriesTheHubAndItsChapters) {
+    const std::filesystem::path docs_dir = root_ / "docs";
+    std::filesystem::create_directories(docs_dir / "architecture");
+    std::ofstream(docs_dir / "architecture.md") << "the hub";
+    std::ofstream(docs_dir / "architecture" / "sdk.md") << "the sdk chapter";
+    std::ofstream(docs_dir / "architecture" / "studio.md") << "the studio chapter";
+
+    const atp::mcp::resource* docs = resources_.find("atp://docs/architecture");
+    ASSERT_NE(docs, nullptr);
+    const std::string body = docs->read();
+    EXPECT_NE(body.find("the hub"), std::string::npos);
+    EXPECT_NE(body.find("the sdk chapter"), std::string::npos);
+    EXPECT_NE(body.find("the studio chapter"), std::string::npos);
+    EXPECT_LT(body.find("the sdk chapter"), body.find("the studio chapter"));
 }
 
 }  // namespace

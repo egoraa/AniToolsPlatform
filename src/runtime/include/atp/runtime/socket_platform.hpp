@@ -2,6 +2,15 @@
 #ifndef ATP_RUNTIME_SOCKET_PLATFORM_HPP
 #define ATP_RUNTIME_SOCKET_PLATFORM_HPP
 
+/// @file
+/// Platform sockets in one place: the types and calls that differ between Winsock and POSIX, so that
+/// the ones who open a socket carry no ifdefs of their own.
+///
+/// It lives in the runtime rather than beside the MCP server because the studio's client needs the
+/// same names, and atp_mcp_lib already links atp_studio_lib — a header both sides need has to sit
+/// below both, or the dependency turns into a cycle. Everything here is deliberately thin: it
+/// renames, it does not wrap.
+
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -16,13 +25,6 @@
 
 namespace atp::runtime::detail {
 
-/// Platform sockets in one place: the types and calls that differ between Winsock and POSIX, so that
-/// the ones who open a socket carry no ifdefs of their own.
-///
-/// It lives in the runtime rather than beside the MCP server because the studio's client needs the
-/// same names, and atp_mcp_lib already links atp_studio_lib — a header both sides need has to sit
-/// below both, or the dependency turns into a cycle. Everything here is deliberately thin: it
-/// renames, it does not wrap.
 #if defined(_WIN32)
 using socket_t = SOCKET;
 using address_length_t = int;

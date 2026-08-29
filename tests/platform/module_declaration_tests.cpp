@@ -52,7 +52,7 @@ TEST(ModuleDeclaration, PropertiesCarryDefaultKindAndPersistence) {
 
     ASSERT_EQ(decl.properties.size(), 2u);
     EXPECT_EQ(decl.properties[0].name, "limit");
-    EXPECT_EQ(decl.properties[0].kind, atp::io::property_kind::number);
+    EXPECT_EQ(decl.properties[0].kind, atp::io::property_kind::integer);
     EXPECT_EQ(decl.properties[0].default_value, "10");
     EXPECT_TRUE(decl.properties[0].options.empty());
     EXPECT_TRUE(decl.properties[0].persistent);

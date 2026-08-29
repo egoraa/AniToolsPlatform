@@ -109,6 +109,12 @@ class io_registry {
     }
 
     /// Every entry, owned and aliased alike, in declaration order.
+    ///
+    /// The three enumerators below hand out three different element types, and the difference is the
+    /// audience rather than an oversight: list() is for looking (a description, a count), so its
+    /// elements are const, while entries() and owned() are what the wiring works through — the
+    /// runner's port-to-thread map and the connect machinery both need the port itself. Making those
+    /// two const would only push a cast to the caller.
     [[nodiscard]] std::vector<const TBase*> list() const {
         std::vector<const TBase*> result;
         result.reserve(registry_.size());

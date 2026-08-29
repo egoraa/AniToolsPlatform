@@ -14,3 +14,14 @@ process CWD, not the root — they come from the operator, not the client. Unlik
 no settings file, so search dirs added at runtime via `add_plugin_search_dir` do not survive a restart;
 `--scan-dir` is the persistent form. `server::handle` is a pure `json → json` function, which is how the whole
 protocol is tested without spawning a process.
+
+**The `"config"` key is printed on `module_info::takes_config` alone**, and filled by walking
+`module_config::entry` — there is no `module_declaration::config_schema` to read. So an empty
+`"fields"` means "takes a config it does not describe" (a `raw_config`, or
+`using config_type = atp::module_config;`), and no key at all means it takes none.
+
+Naming trap: the object studio edits is `atp::studio::project` (`studio/project.hpp`), but the **wire
+vocabulary here is "document"** — tools
+`new_document`/`open_document`/`save_document`/`get_document`, the `"document"` result key, the
+`atp://document` resource and `mcp/document_tools.hpp` all keep their names, while `workspace` exposes
+the object as `project()` with its path as `project_path()`/`project_dir()`.

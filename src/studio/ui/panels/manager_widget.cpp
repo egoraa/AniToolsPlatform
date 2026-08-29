@@ -158,7 +158,7 @@ void manager_widget::refresh() {
             for (const module_info& m : p.modules) {
                 auto* child = new QTreeWidgetItem(item);
                 child->setText(0, QString::fromStdString(m.name + " " + m.ver.to_string()));
-                child->setIcon(0, module_icon_);
+                child->setIcon(0, module_icons_.of_source(m.source));
                 child->setText(1, m.broken ? "broken" : "ok");
                 if (m.broken) {
                     child->setToolTip(1, QString::fromStdString(m.error));

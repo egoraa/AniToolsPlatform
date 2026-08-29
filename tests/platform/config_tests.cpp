@@ -139,13 +139,13 @@ TEST(Config, EqualityIsRecursiveAndOrderSensitiveForObjects) {
 
 TEST(Config, SubscriptBuildsAnObjectOutOfNull) {
     cv doc;
-    doc["version"] = cv("3.3");
+    doc["version"] = cv("1.0");
     doc["count"] = cv(2);
     ASSERT_TRUE(doc.is_object());
     ASSERT_EQ(doc.size(), 2U);
     EXPECT_EQ(doc.key_at(0), "version");
     EXPECT_EQ(doc.key_at(1), "count");
-    EXPECT_EQ(doc.string_at("version"), "3.3");
+    EXPECT_EQ(doc.string_at("version"), "1.0");
     EXPECT_EQ(doc.int_at("count"), 2);
 }
 
@@ -247,4 +247,14 @@ TEST(Config, EntriesAndElementsAreEmptyForEveryOtherForm) {
     EXPECT_TRUE(cv::object({{"a", 1}}).elements().empty());
     EXPECT_TRUE(cv().entries().empty());
     EXPECT_TRUE(cv().elements().empty());
+}
+
+TEST(ConfigNode, KindValuesAreTheOrderTheCAbiSpells) {
+    EXPECT_EQ(static_cast<int>(atp::config::kind::null), 0);
+    EXPECT_EQ(static_cast<int>(atp::config::kind::boolean), 1);
+    EXPECT_EQ(static_cast<int>(atp::config::kind::integer), 2);
+    EXPECT_EQ(static_cast<int>(atp::config::kind::real), 3);
+    EXPECT_EQ(static_cast<int>(atp::config::kind::string), 4);
+    EXPECT_EQ(static_cast<int>(atp::config::kind::array), 5);
+    EXPECT_EQ(static_cast<int>(atp::config::kind::object), 6);
 }

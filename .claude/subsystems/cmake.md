@@ -9,7 +9,7 @@ plus the template `cmake/AniToolsPlatformConfig.cmake.in`; `ATP_INSTALL` default
 runtime handshake failure; the number is parsed out of `include/atp/plugin/abi.hpp` at configure time, so
 the header stays the single source of truth. `atp_runtime` is deliberately **not** exported — a plugin
 must not link the host runtime, and it would drag the FetchContent'd nlohmann/json along; the reasons
-are written out in `cmake/Install.cmake` and `docs/architecture.md`.
+are written out in `cmake/Install.cmake` and `docs/architecture/cmake.md`.
 
 **Packaging**: the same `ATP_INSTALL` switch also installs `atp_studio`/`atp_app`/`atp_mcp` into
 `bin/`, the sample configs into `bin/config/` and everything loadable — both demo plugins, the Python

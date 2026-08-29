@@ -53,7 +53,7 @@ class project {
 
     /// Builds a project from a config document already in memory. Shared with open(), and the entry
     /// point for a document nobody wrote to disk — the mirror of a remote pipeline.
-    /// @param doc config document, schema 2.0
+    /// @param doc config document of the supported schema
     /// @throws runtime::config_error with every validation error aggregated into one message
     [[nodiscard]] static project from_document(const atp::config::node& doc) {
         throw_if_invalid(doc, "invalid config");

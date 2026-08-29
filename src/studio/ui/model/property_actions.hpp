@@ -25,6 +25,9 @@ namespace atp::studio::ui {
 /// property's value is always inside its own set), spell the same setting as another kind, or keep
 /// it out of the project altogether. Any of those written through would leave the project in a state
 /// no editor can produce and only Run would complain about, long after the gesture.
+/// A whole number fits a real property and never the other way round — the same widening rule
+/// runtime::detail::read_scalar keeps for a config, and the reason the two kinds are asked about
+/// separately at all.
 /// @param declared the target's own declaration of the property
 /// @param value the value the clipboard carries
 /// @return true if the value is one the target could have been given by hand
@@ -33,7 +36,12 @@ namespace atp::studio::ui {
         return false;
     }
     switch (declared.kind) {
-        case io::property_kind::number:
+        case io::property_kind::integer:
+            if (!value.is_int()) {
+                return false;
+            }
+            break;
+        case io::property_kind::real:
             if (!value.is_int() && !value.is_double()) {
                 return false;
             }

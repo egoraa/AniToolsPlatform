@@ -40,9 +40,8 @@ inline void collect_connections(const group& g, const std::string& path, std::ve
 
 }  // namespace detail
 
-/// Samples every connection of a tree: the last value that travelled it and how many writes it has
-/// seen. A free function rather than a method of session, because two hosts need the same walk and
-/// only one of them owns a session.
+/// Samples every connection of a tree: how many writes each has seen. A free function rather than a
+/// method of session, because two hosts need the same walk and only one of them owns a session.
 /// @param root group to walk, its subgroups included
 /// @return one entry per connection, a group's own connections before those of its children
 [[nodiscard]] inline std::vector<connection_sample> sample_connections(const group& root) {

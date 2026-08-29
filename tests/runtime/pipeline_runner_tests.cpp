@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <latch>
 #include <stdexcept>
 #include <stop_token>
@@ -386,6 +387,43 @@ TEST(PipelineRunner, StatsCountPassesPerThread) {
     EXPECT_LE(stats[0].busy_passes, stats[0].passes);
     EXPECT_GE(stats[1].passes, 1u);
     EXPECT_EQ(stats[1].busy_passes, 0u);
+}
+
+TEST(PipelineRunner, StatsAreMonotonicAcrossRestarts) {
+    atp::runtime::pipeline pipe;
+
+    class ticking_module : public atp::module<> {
+       public:
+        std::latch* first = nullptr;
+        atp::work_status iterate(std::stop_token) override {
+            if (first != nullptr) {
+                first->count_down();
+                first = nullptr;
+            }
+            return atp::work_status::busy;
+        }
+    };
+
+    ticking_module& ticking = pipe.root().make<ticking_module>("ticking");
+    atp::runtime::pipeline_runner runner;
+    runner.add_thread("t", {atp::runtime::thread_mode::throttled, std::chrono::milliseconds(1000)});
+
+    std::latch first_pass(1);
+    ticking.first = &first_pass;
+    runner.start(pipe);
+    first_pass.wait();
+    runner.stop();
+    const std::uint64_t after_first_run = runner.stats().front().passes;
+    ASSERT_GE(after_first_run, 1u);
+
+    std::latch second_pass(1);
+    ticking.first = &second_pass;
+    runner.start(pipe);
+    second_pass.wait();
+    runner.stop();
+
+    EXPECT_GT(runner.stats().front().passes, after_first_run)
+        << "the pass counters are monotonic for the life of the runner, like every other counter here";
 }
 
 TEST(PipelineRunner, ThrottledPacesIterations) {

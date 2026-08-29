@@ -13,10 +13,14 @@
 namespace atp::io {
 
 /// Kind of a property value — a hint for the serialisers living above the string form, so that the
-/// runtime writes a number into the config rather than "number". It is the JSON type and nothing
-/// else: "one of a set" is an orthogonal trait (see property_base::options()) that constrains
-/// numbers, strings and enums alike without changing how they are written.
-enum class property_kind { number, boolean, text };
+/// runtime writes a number into the config rather than "number", and the right kind of number.
+///
+/// It is the form of the value and nothing else: "one of a set" is an orthogonal trait (see
+/// property_base::options()) that constrains integers, reals, strings and enums alike without
+/// changing how they are written. Integer and real are separate for the same reason config::kind
+/// keeps them apart — a setting that says 3 means a count, not 3.0 — and keeping them together is
+/// what used to make a host recover the form by re-parsing the printed string.
+enum class property_kind { integer, real, boolean, text };
 
 /// Trait converting a property value to a string and back. There is no primary definition, so a
 /// type without a specialisation is a compile error rather than a silent degradation. from_string
@@ -52,7 +56,7 @@ std::string print_number(T value) {
 template <std::integral T>
     requires(!std::same_as<T, bool>)
 struct property_codec<T> {
-    static constexpr property_kind kind = property_kind::number;
+    static constexpr property_kind kind = property_kind::integer;
     static std::string to_string(const T& value) {
         return detail::print_number(value);
     }
@@ -64,7 +68,7 @@ struct property_codec<T> {
 /// Codec of the floating-point types; to_chars yields the shortest string that round-trips exactly.
 template <std::floating_point T>
 struct property_codec<T> {
-    static constexpr property_kind kind = property_kind::number;
+    static constexpr property_kind kind = property_kind::real;
     static std::string to_string(const T& value) {
         return detail::print_number(value);
     }

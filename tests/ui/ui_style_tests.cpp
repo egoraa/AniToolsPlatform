@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <QApplication>
+#include <QBoxLayout>
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
@@ -12,14 +13,17 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPalette>
+#include <QToolButton>
 #include <QWidget>
 
+#include "kit/icons.hpp"
 #include "kit/ui_style.hpp"
 #include "ui/qt_app.hpp"
 
 namespace {
 
 namespace style = atp::studio::ui::style;
+namespace icons = atp::studio::ui::icons;
 
 constexpr double text_contrast = 4.5;
 
@@ -151,6 +155,36 @@ TEST(UiStyle, ErrorTextIsReReadWhenTheSchemeChanges) {
 
     EXPECT_NE(label.palette().color(QPalette::WindowText), pale)
         << "a red pinned under one scheme sits below the contrast it was written to guarantee under the other";
+}
+
+TEST(UiStyle, AButtonStripRunsAcrossAndAButtonColumnDownTheSameWay) {
+    (void)atp_ui_tests::ensure_app();
+    QWidget host;
+
+    const style::button_bar across = style::make_button_bar(&host);
+    const style::button_bar down = style::make_button_column(&host);
+
+    ASSERT_NE(across.row, nullptr);
+    ASSERT_NE(down.row, nullptr);
+    EXPECT_EQ(across.row->direction(), QBoxLayout::LeftToRight);
+    EXPECT_EQ(down.row->direction(), QBoxLayout::TopToBottom);
+    EXPECT_EQ(across.row->spacing(), down.row->spacing());
+    EXPECT_EQ(across.row->contentsMargins(), down.row->contentsMargins());
+}
+
+TEST(UiStyle, AToolButtonWearsEitherAGlyphOrArtworkAndIsFlatEitherWay) {
+    (void)atp_ui_tests::ensure_app();
+    QWidget host;
+
+    QToolButton* lettered = style::tool_button(style::glyph::add, QStringLiteral("add one"), &host);
+    QToolButton* drawn = style::tool_button(icons::soft_wrap(), QStringLiteral("wrap long lines"), &host);
+
+    EXPECT_EQ(lettered->text(), QStringLiteral("+"));
+    EXPECT_TRUE(lettered->icon().isNull());
+    EXPECT_TRUE(drawn->text().isEmpty());
+    EXPECT_FALSE(drawn->icon().isNull());
+    EXPECT_TRUE(lettered->autoRaise());
+    EXPECT_TRUE(drawn->autoRaise());
 }
 
 }  // namespace

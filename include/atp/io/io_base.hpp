@@ -53,7 +53,14 @@ class io_base {
         return locking_;
     }
 
-    /// Drops the accumulated state, returning the element to its just-constructed condition.
+    /// Drops the accumulated state: an input forgets what it holds and its counters, an output its
+    /// write count, a property returns to its default.
+    ///
+    /// **Not "as if just constructed"** — a property additionally raises its changed flag, because a
+    /// module has to learn about the rollback, and that is the whole point of resetting one. The
+    /// platform itself calls this nowhere: the runtime keeps its counters monotonic across runs on
+    /// purpose (see pipeline_runner::stats), so this exists for a host or a test that means to start
+    /// a port over.
     virtual void reset() = 0;
 
    protected:

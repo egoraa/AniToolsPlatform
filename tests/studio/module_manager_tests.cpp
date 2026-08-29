@@ -171,7 +171,7 @@ TEST(StudioModuleManager, DescribeListsPropertyOptions) {
 
     const auto channels = by_name("channels");
     ASSERT_NE(channels, info.properties.end());
-    EXPECT_EQ(channels->kind, atp::io::property_kind::number);
+    EXPECT_EQ(channels->kind, atp::io::property_kind::integer);
     EXPECT_EQ(channels->options, (std::vector<std::string>{"1", "2", "6"}));
 
     EXPECT_TRUE(by_name("limit")->options.empty());
@@ -247,7 +247,7 @@ TEST(StudioModuleManager, DescribeListsProperties) {
     ASSERT_EQ(info.properties.size(), 4u);
     const auto limit = std::ranges::find_if(info.properties, [](const auto& p) { return p.name == "limit"; });
     ASSERT_NE(limit, info.properties.end());
-    EXPECT_EQ(limit->kind, atp::io::property_kind::number);
+    EXPECT_EQ(limit->kind, atp::io::property_kind::integer);
     EXPECT_EQ(limit->default_value, "10");
     EXPECT_TRUE(limit->persistent);
     const auto tmp = std::ranges::find_if(info.properties, [](const auto& p) { return p.name == "tmp"; });

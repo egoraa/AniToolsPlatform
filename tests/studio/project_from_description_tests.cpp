@@ -33,7 +33,7 @@ class mirror_source
 class mirror_sink : public atp::module<atp::ports<number_inputs>, "mirror_sink"> {};
 
 constexpr const char* mirror_config = R"({
-    "version": "3.0",
+    "version": "1.0",
     "pipeline": {
         "modules": [
             {"module": "mirror_source", "name": "src", "properties": {"step": 7, "tag": "loud"}},

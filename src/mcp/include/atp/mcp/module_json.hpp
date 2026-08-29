@@ -22,7 +22,10 @@ namespace atp::mcp {
 [[nodiscard]] inline nlohmann::json property_schema(const studio::property_info& p) {
     nlohmann::json schema;
     switch (p.kind) {
-        case io::property_kind::number:
+        case io::property_kind::integer:
+            schema["type"] = "integer";
+            break;
+        case io::property_kind::real:
             schema["type"] = "number";
             break;
         case io::property_kind::boolean:

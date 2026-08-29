@@ -71,7 +71,7 @@ class manager_widget final : public QWidget {
 
     QIcon directory_icon_ = icons::directory();
     QIcon plugin_icon_ = icons::plugin();
-    QIcon module_icon_ = icons::module();
+    icons::module_icons module_icons_;
 };
 
 }  // namespace atp::studio::ui

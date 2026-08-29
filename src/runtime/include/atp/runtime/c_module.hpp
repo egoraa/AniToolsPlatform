@@ -326,11 +326,47 @@ template <typename T>
     return {desc.config_fields, desc.config_field_count};
 }
 
+/// The kind field of a descriptor as the integer it may not be a value of.
+///
+/// Copied out rather than read: atp_kind names 1 to 6, so its value range is 0 to 7, and a plugin
+/// that wrote anything else into the field makes an ordinary load of it undefined — which is the
+/// very case this validation exists to catch, and one -fsanitize=undefined reports. The enumeration
+/// cannot be given a fixed underlying type instead, because plugin_c.h has to keep compiling as C99.
+[[nodiscard]] inline int c_kind_value(const atp_kind& kind) noexcept {
+    static_assert(sizeof(atp_kind) == sizeof(int));
+    int value = 0;
+    std::memcpy(&value, &kind, sizeof(value));
+    return value;
+}
+
+/// Whether @p kind is one of the six values atp_kind names.
+///
+/// Takes the integer rather than the enumeration, and that is the whole point: the value being
+/// checked is one atp_kind does not name, so a switch over the enumeration is exhaustive as far as
+/// the compiler is concerned and the "none of them" branch is dead code it may fold away. The six
+/// values are still spelled out one by one, because they are the contract of a separate C header.
+[[nodiscard]] inline bool is_c_kind(int kind) noexcept {
+    switch (kind) {
+        case ATP_KIND_I32:
+        case ATP_KIND_I64:
+        case ATP_KIND_F64:
+        case ATP_KIND_BOOL:
+        case ATP_KIND_TEXT:
+        case ATP_KIND_BLOB:
+            return true;
+        default:
+            return false;
+    }
+}
+
 /// Rejects a descriptor that cannot be turned into a module, before anything is built from it.
 ///
 /// The checks are all of the "a C struct cannot express this" kind: a required function pointer left
 /// null, a count without an array, a kind outside the enumeration. They run at load time, so a
-/// malformed plugin fails while the host is setting up rather than on the first pass.
+/// malformed plugin fails while the host is setting up rather than on the first pass. The kinds
+/// checked here are the ports' own; the kind of a config field is checked where the config is built
+/// (c_config::to_field_kind), because reaching it from here would mean walking the whole field tree
+/// twice.
 /// @throws std::runtime_error naming the field
 inline void validate_c_desc(const atp_module_desc& desc) {
     if (desc.struct_size < ATP_MODULE_DESC_SIZE_V1) {
@@ -352,7 +388,25 @@ inline void validate_c_desc(const atp_module_desc& desc) {
         (desc.property_count > 0 && desc.properties == nullptr)) {
         throw std::runtime_error(where + "a non-zero port count with a null array");
     }
+    for (std::uint32_t i = 0; i < desc.input_count; ++i) {
+        if (!is_c_kind(c_kind_value(desc.inputs[i].kind))) {
+            throw std::runtime_error(where + "input '" + std::string(c_text(desc.inputs[i].name)) + "' has kind " +
+                                     std::to_string(c_kind_value(desc.inputs[i].kind)) + ", which is outside atp_kind");
+        }
+    }
+    for (std::uint32_t i = 0; i < desc.output_count; ++i) {
+        if (!is_c_kind(c_kind_value(desc.outputs[i].kind))) {
+            throw std::runtime_error(where + "output '" + std::string(c_text(desc.outputs[i].name)) + "' has kind " +
+                                     std::to_string(c_kind_value(desc.outputs[i].kind)) +
+                                     ", which is outside atp_kind");
+        }
+    }
     for (std::uint32_t i = 0; i < desc.property_count; ++i) {
+        if (!is_c_kind(c_kind_value(desc.properties[i].kind))) {
+            throw std::runtime_error(where + "property '" + std::string(c_text(desc.properties[i].name)) +
+                                     "' has kind " + std::to_string(c_kind_value(desc.properties[i].kind)) +
+                                     ", which is outside atp_kind");
+        }
         if (desc.properties[i].kind == ATP_KIND_BLOB) {
             throw std::runtime_error(where + "property '" + std::string(c_text(desc.properties[i].name)) +
                                      "' is a blob; a property is a scalar edited as text");
@@ -987,8 +1041,9 @@ class c_module_factory final : public module_factory_base {
    public:
     /// @param desc descriptor to build modules from
     /// @throws std::runtime_error if the descriptor is malformed
-    explicit c_module_factory(const atp_module_desc& desc) : desc_(&desc), name_(detail::c_text(desc.name)) {
+    explicit c_module_factory(const atp_module_desc& desc) : desc_(&desc) {
         detail::validate_c_desc(desc);
+        name_ = detail::c_text(desc.name);
         for (std::uint32_t i = 0; i < desc.version_count; ++i) {
             version_.parts[i] = desc.version[i];
         }

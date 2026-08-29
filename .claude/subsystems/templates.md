@@ -3,7 +3,7 @@
 `templates/plugin/` is a plugin project **outside** this build — it is not `add_subdirectory`'d and
 reaches the SDK only through `find_package`. It doubles as the fixture of the `out-of-tree plugin` CI
 job, the one place where both ends of a connection come from different libraries. It names the ABI it
-targets (`atp_require_plugin_abi(15)`), so **bumping `plugin_abi` means editing that file too** or the
+targets (`atp_require_plugin_abi(1)`), so **bumping `plugin_abi` means editing that file too** or the
 job stops configuring — which is the intended feedback, not breakage. That feedback only exists while
 CI runs: the templates are not `add_subdirectory`'d, so nothing in a local build ever compiles them,
 and a change to what a module writes against — the shape of `atp::ports`, how sections are reached —

@@ -22,8 +22,17 @@
 #include <atp/runtime/config_validator.hpp>
 #include <atp/runtime/json_codec.hpp>
 #include <atp/runtime/pipeline_builder.hpp>
+#include <atp/runtime/utf8_path.hpp>
 
 namespace {
+
+std::filesystem::path unicode_path(std::initializer_list<char32_t> points, std::string_view suffix) {
+    std::u32string name(points);
+    for (const char c : suffix) {
+        name.push_back(static_cast<char32_t>(c));
+    }
+    return {name};
+}
 
 struct feed_outputs : atp::io::outputs {
     atp::io::output<int>& value = make<atp::io::output<int>>("value");
@@ -190,7 +199,7 @@ std::string build_error(const atp::runtime::config& cfg, const std::filesystem::
 
 TEST(PipelineBuilder, BuildsTreePropertiesAndRuns) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {
             "modules": [
                 {"group": "left", "modules": [{"module": "one_shot", "name": "src"}],
@@ -227,7 +236,7 @@ TEST(PipelineBuilder, BuildsTreePropertiesAndRuns) {
 
 TEST(PipelineBuilder, UnknownPropertyIsConfigError) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "recorder", "properties": {"ghost": 1}}]}
     })");
     atp::runtime::application app;
@@ -243,7 +252,7 @@ TEST(PipelineBuilder, UnknownPropertyIsConfigError) {
 
 TEST(PipelineBuilder, UnparsableValueIsConfigError) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"limit": "abc"}}]}
     })");
     atp::runtime::application app;
@@ -259,7 +268,7 @@ TEST(PipelineBuilder, UnparsableValueIsConfigError) {
 
 TEST(PipelineBuilder, EnumPropertyComesFromConfigAsName) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"on_overflow": "block"}}]}
     })");
     atp::runtime::application app;
@@ -272,7 +281,7 @@ TEST(PipelineBuilder, EnumPropertyComesFromConfigAsName) {
 
 TEST(PipelineBuilder, UnknownEnumNameListsOptions) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"on_overflow": "explode"}}]}
     })");
     atp::runtime::application app;
@@ -288,7 +297,7 @@ TEST(PipelineBuilder, UnknownEnumNameListsOptions) {
 
 TEST(PipelineBuilder, AWholeValuedRealReachesARealProperty) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"gain": 48000.0}}]}
     })");
     atp::runtime::application app;
@@ -301,7 +310,7 @@ TEST(PipelineBuilder, AWholeValuedRealReachesARealProperty) {
 
 TEST(PipelineBuilder, AWholeValuedRealDoesNotSatisfyAnIntegerProperty) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"limit": 5.0}}]}
     })");
     atp::runtime::application app;
@@ -316,7 +325,7 @@ TEST(PipelineBuilder, AWholeValuedRealDoesNotSatisfyAnIntegerProperty) {
 
 TEST(PipelineBuilder, ANonScalarPropertyValueNamesThePropertyAndTheForm) {
     const atp::runtime::config cfg = atp::runtime::decode(atp::runtime::json_parse(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"limit": [1, 2]}}]}
     })"));
     atp::runtime::application app;
@@ -335,7 +344,7 @@ TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
     atp::runtime::application app;
     app.registry.add<limit_sink>();
     const atp::runtime::config ok = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"channels": 6}}]}
     })");
     atp::runtime::build(app, ok, ".");
@@ -344,7 +353,7 @@ TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
     atp::runtime::application other;
     other.registry.add<limit_sink>();
     const atp::runtime::config bad = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "limiter", "properties": {"channels": 3}}]}
     })");
     try {
@@ -357,7 +366,7 @@ TEST(PipelineBuilder, NumericOptionSetIsCheckedToo) {
 
 TEST(PipelineBuilder, WrapsPlatformErrorsWithConfigContext) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "no_such_module"}]}
     })");
 
@@ -373,7 +382,7 @@ TEST(PipelineBuilder, WrapsPlatformErrorsWithConfigContext) {
 
 TEST(PipelineBuilder, UnknownAssignPathIsConfigError) {
     atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"group": "g", "modules": []}]},
         "threads": [{"name": "t"}]
     })");
@@ -395,7 +404,7 @@ std::filesystem::path make_plugin_dir(const std::string& name, std::initializer_
 
 atp::runtime::config config_with_plugins(std::vector<std::string> plugins) {
     atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": []},
         "threads": [{"name": "t"}]
     })");
@@ -462,7 +471,7 @@ TEST(PipelineBuilder, DirectoryDoesNotDescendIntoSubdirectories) {
 
 TEST(PipelineBuilder, BuildsIntoPrefilledRegistry) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "one_shot"}]},
         "threads": [{"name": "t"}]
     })");
@@ -480,7 +489,7 @@ TEST(PipelineBuilder, BuildsIntoPrefilledRegistry) {
 
 TEST(PipelineBuilder, InlineConfigReachesTheModule) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.2",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": {"channels": 6}}]}
     })");
 
@@ -495,7 +504,7 @@ TEST(PipelineBuilder, InlineConfigReachesTheModule) {
 
 TEST(PipelineBuilder, ReferencedConfigReachesTheModule) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.2",
+        "version": "1.0",
         "configs": {"rig": {"channels": 6}},
         "pipeline": {"modules": [{"module": "config_reader", "config": "rig"}]}
     })");
@@ -511,7 +520,7 @@ TEST(PipelineBuilder, ReferencedConfigReachesTheModule) {
 
 TEST(PipelineBuilder, AnAbsentConfigLeavesEveryFieldUnwritten) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.2",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_probe"}]}
     })");
 
@@ -552,7 +561,7 @@ TEST(PipelineBuilderFileConfig, ParsesAJsonFile) {
     const std::filesystem::path dir = make_temp_dir("json");
     write_text(dir / "rig.json", R"({"channels": 6})");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
     })");
 
@@ -571,7 +580,7 @@ TEST(PipelineBuilderFileConfig, HandsAnUnknownFormatOverAsText) {
     const std::filesystem::path dir = make_temp_dir("opaque");
     write_text(dir / "rig.ini", "rate = 48000\n");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_text", "config": "file:rig.ini"}]}
     })");
 
@@ -592,7 +601,7 @@ TEST(PipelineBuilderFileConfig, AParsedJsonFileIsNotOpaqueAndStillCarriesItsText
     const std::filesystem::path dir = make_temp_dir("both");
     write_text(dir / "rig.json", R"({"channels": 6})");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_text", "config": "file:rig.json"}]}
     })");
 
@@ -611,7 +620,7 @@ TEST(PipelineBuilderFileConfig, AParsedJsonFileIsNotOpaqueAndStillCarriesItsText
 TEST(PipelineBuilderFileConfig, MissingFileIsConfigError) {
     const std::filesystem::path dir = make_temp_dir("missing");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:absent.json"}]}
     })");
     const std::string message = build_error(cfg, dir);
@@ -623,7 +632,7 @@ TEST(PipelineBuilderFileConfig, ADirectoryIsConfigError) {
     const std::filesystem::path dir = make_temp_dir("dir");
     std::filesystem::create_directories(dir / "rig.json");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
     })");
     EXPECT_NE(build_error(cfg, dir).find("is a directory"), std::string::npos);
@@ -633,7 +642,7 @@ TEST(PipelineBuilderFileConfig, BrokenJsonIsConfigErrorNamingThePosition) {
     const std::filesystem::path dir = make_temp_dir("broken");
     write_text(dir / "rig.json", R"({"channels": 6,})");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
     })");
     const std::string message = build_error(cfg, dir);
@@ -645,7 +654,7 @@ TEST(PipelineBuilderFileConfig, AJsonRootThatIsNotAnObjectIsConfigError) {
     const std::filesystem::path dir = make_temp_dir("array");
     write_text(dir / "rig.json", "[1, 2, 3]");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
     })");
     EXPECT_NE(build_error(cfg, dir).find("root of a config must be an object"), std::string::npos);
@@ -653,7 +662,7 @@ TEST(PipelineBuilderFileConfig, AJsonRootThatIsNotAnObjectIsConfigError) {
 
 TEST(PipelineBuilderFileConfig, ARelativePathWithoutABaseDirSaysSo) {
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
     })");
     EXPECT_NE(build_error(cfg, {}).find("needs the document's directory"), std::string::npos);
@@ -663,7 +672,7 @@ TEST(PipelineBuilderFileConfig, AnAbsolutePathNeedsNoBaseDir) {
     const std::filesystem::path dir = make_temp_dir("absolute");
     write_text(dir / "rig.json", R"({"channels": 6})");
     atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": ""}]}
     })");
     doc["pipeline"]["modules"][0]["config"] = "file:" + atp::runtime::path_to_utf8(dir / "rig.json");
@@ -682,7 +691,7 @@ TEST(PipelineBuilderFileConfig, ASharedFileEntryFeedsTwoModules) {
     const std::filesystem::path dir = make_temp_dir("shared");
     write_text(dir / "rig.json", R"({"channels": 6})");
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "configs": {"rig": "file:rig.json"},
         "pipeline": {"modules": [{"module": "config_reader", "name": "a", "config": "rig"},
                                  {"module": "config_reader", "name": "b", "config": "rig"}]}
@@ -703,7 +712,7 @@ TEST(PipelineBuilderFileConfig, ACyrillicFileNameIsRead) {
     const std::filesystem::path dir = make_temp_dir("cyrillic");
     write_text(dir / atp::runtime::path_from_utf8(utf8_name), R"({"channels": 6})");
     atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": ""}]}
     })");
     doc["pipeline"]["modules"][0]["config"] = "file:" + utf8_name;
@@ -722,7 +731,7 @@ TEST(PipelineBuilderFileConfig, AFileConfigInsideAnIncludedDocument) {
     const std::filesystem::path dir = make_temp_dir("include");
     write_text(dir / "rig.json", R"({"channels": 6})");
     write_text(dir / "modules.json", R"({"modules": [{"module": "config_reader", "config": "file:rig.json"}]})");
-    write_text(dir / "top.json", R"({"version": "3.3", "pipeline": {"$include": "modules.json"}})");
+    write_text(dir / "top.json", R"({"version": "1.0", "pipeline": {"$include": "modules.json"}})");
 
     const atp::config::node doc = atp::runtime::load_config(dir / "top.json");
     ASSERT_TRUE(atp::runtime::validate((doc)).empty());
@@ -739,7 +748,7 @@ TEST(PipelineBuilderFileConfig, AFileConfigInsideAnIncludedDocument) {
 
 TEST(PipelineBuilder, DanglingConfigReferenceIsConfigError) {
     atp::runtime::config cfg = make_config(R"({
-        "version": "3.2",
+        "version": "1.0",
         "configs": {"rig": {"channels": 6}},
         "pipeline": {"modules": [{"module": "config_reader", "config": "rig"}]}
     })");
@@ -758,6 +767,22 @@ TEST(PipelineBuilder, ARealPropertyValueKeepsItsPrecisionThroughScalarToString) 
     EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node(std::int64_t{48000})), "48000");
     EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node("rig")), "rig");
     EXPECT_EQ(atp::runtime::detail::scalar_to_string(atp::config::node(true)), "true");
+}
+
+TEST(PipelineBuilder, PluginDirectoryNamedOutsideAsciiIsResolvedAsUtf8) {
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "atp_dir_utf8_root";
+    std::filesystem::remove_all(root);
+    const std::filesystem::path dir = root / unicode_path({0x043f, 0x043b, 0x0430, 0x0433}, "");
+    std::filesystem::create_directories(dir);
+    std::filesystem::copy_file(ATP_TEST_PLUGIN, dir / std::filesystem::path(ATP_TEST_PLUGIN).filename());
+
+    atp::runtime::application app;
+    const std::string entry = atp::runtime::path_to_utf8(dir.filename());
+    ASSERT_NO_THROW(atp::runtime::build(app, config_with_plugins({entry}), root))
+        << "a plugins entry is UTF-8 text of the document, and base_dir / p read it as the code page";
+
+    EXPECT_EQ(app.plugins.size(), 1u);
+    EXPECT_FALSE(app.registry.versions("plugin_module").empty());
 }
 
 }  // namespace

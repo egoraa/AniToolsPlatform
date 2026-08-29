@@ -360,3 +360,23 @@ TEST(ModuleRegistrar, OffersTheSameAddSpellingsAsTheRegistry) {
     EXPECT_EQ(registrar.registered()[0].first, "named");
     EXPECT_EQ(registrar.registered()[1].first, "alias");
 }
+
+TEST(ModuleRegistry, ListIsOrderedByNameThenVersion) {
+    atp::module_registry registry;
+    registry.add<beta_module>("zebra");
+    registry.add<gamma_module>("alpha");
+    registry.add<alpha_v2_module>("middle");
+    registry.add<alpha_module>("middle");
+
+    std::vector<std::string> names;
+    std::vector<atp::version> versions;
+    for (const atp::module_factory_base* factory : registry.list()) {
+        names.emplace_back(factory->name());
+        versions.push_back(factory->get_version());
+    }
+
+    const std::vector<std::string> expected{"alpha", "middle", "middle", "zebra"};
+    EXPECT_EQ(names, expected) << "the only enumeration of this registry must not depend on a hash";
+    ASSERT_EQ(versions.size(), 4u);
+    EXPECT_LT(versions[1], versions[2]) << "inside one name the versions come out ascending";
+}

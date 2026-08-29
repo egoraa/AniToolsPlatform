@@ -5,6 +5,8 @@ build/
 external/
 .claude/*
 !.claude/CLAUDE.md
+!.claude/subsystems/
+!.claude/subsystems/**
 !.claude/skills/
 !.claude/skills/**
 CLAUDE.local.md

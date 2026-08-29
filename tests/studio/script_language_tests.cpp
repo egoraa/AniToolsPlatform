@@ -208,3 +208,34 @@ TEST_P(script_language_test, KeepingOneBridgeIsNotALanguageTrait) {
 }
 
 }  // namespace
+
+TEST(LanguageOfSource, AScriptIsRecognisedByTheExtensionOfItsFile) {
+    for (const script_language& lang : atp::studio::languages()) {
+        const std::string file = "/home/user/modules/my_filter" + std::string(lang.file_extension);
+        EXPECT_EQ(atp::studio::language_of_source(file), &lang);
+    }
+}
+
+TEST(LanguageOfSource, TheExtensionIsMatchedWhateverCaseItIsWrittenIn) {
+    EXPECT_EQ(atp::studio::language_of_source("C:\\modules\\my_filter.PY"), atp::studio::language_by_id("python"));
+    EXPECT_EQ(atp::studio::language_of_source("C:\\modules\\my_filter.Lua"), atp::studio::language_by_id("lua"));
+}
+
+TEST(LanguageOfSource, AModuleThatNamesNoFileOrAnUnknownOneIsNotAScript) {
+    EXPECT_EQ(atp::studio::language_of_source(""), nullptr);
+    EXPECT_EQ(atp::studio::language_of_source("atp_demo_plugin.dll"), nullptr);
+    EXPECT_EQ(atp::studio::language_of_source("/opt/atp/plugins/atp_demo_plugin.so"), nullptr);
+    EXPECT_EQ(atp::studio::language_of_source("plugin"), nullptr);
+}
+
+TEST(LanguageOfSource, ADotInADirectoryNameIsNotAnExtension) {
+    EXPECT_EQ(atp::studio::language_of_source("/home/user/atp.modules/my_filter"), nullptr);
+    EXPECT_EQ(atp::studio::language_of_source("C:\\atp.modules\\my_filter"), nullptr);
+    EXPECT_EQ(atp::studio::language_of_source("/home/user/atp.py/my_filter"), nullptr);
+}
+
+TEST(LanguageOfSource, ANonAsciiPathIsReadAsTheBytesItIs) {
+    const std::string cyrillic =
+        "/\xd0\xbc\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd0\xb8/\xd1\x84\xd0\xb8\xd0\xbb\xd1\x8c\xd1\x82\xd1\x80.py";
+    EXPECT_EQ(atp::studio::language_of_source(cyrillic), atp::studio::language_by_id("python"));
+}

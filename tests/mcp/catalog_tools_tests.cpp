@@ -164,7 +164,7 @@ TEST_F(McpCatalogTools, ListsARegisteredModuleWithItsPortsAndPropertySchema) {
     EXPECT_EQ(module.at("broken"), false);
     EXPECT_EQ(module.at("outputs").at(0).at("name"), "value");
     EXPECT_EQ(module.at("properties").at(0).at("name"), "limit");
-    EXPECT_EQ(module.at("properties").at(0).at("schema").at("type"), "number");
+    EXPECT_EQ(module.at("properties").at(0).at("schema").at("type"), "integer");
 }
 
 TEST_F(McpCatalogTools, LoadsTheTestPluginAndReportsIt) {

@@ -25,7 +25,7 @@ class noisy_module : public atp::module<atp::ports<>, "noisy"> {
 
 atp::runtime::config one_module_config() {
     const atp::config::node proj = atp::runtime::json_parse(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {
             "modules": [{"module": "noisy", "name": "talker"}]
         }

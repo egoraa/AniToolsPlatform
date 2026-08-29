@@ -14,6 +14,7 @@
 #include <atp/hosting/module_registry.hpp>
 #include <atp/plugin.hpp>
 #include <atp/runtime/c_module.hpp>
+#include <atp/runtime/utf8_path.hpp>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -53,7 +54,7 @@ namespace detail {
 inline void* open_library(const std::filesystem::path& path) {
     void* handle = ::LoadLibraryW(path.c_str());
     if (!handle) {
-        throw std::runtime_error("cannot load plugin '" + path.string() +
+        throw std::runtime_error("cannot load plugin '" + path_to_utf8(path) +
                                  "': " + std::system_category().message(static_cast<int>(::GetLastError())));
     }
     return handle;
@@ -77,7 +78,8 @@ inline void* open_library(const std::filesystem::path& path) {
     if (!handle) {
         // NOLINTNEXTLINE(concurrency-mt-unsafe)
         const char* error = ::dlerror();
-        throw std::runtime_error("cannot load plugin '" + path.string() + "': " + (error ? error : "unknown error"));
+        throw std::runtime_error("cannot load plugin '" + path_to_utf8(path) +
+                                 "': " + (error ? error : "unknown error"));
     }
     return handle;
 }
@@ -148,8 +150,14 @@ class module_loader {
     /// Loads a plugin and registers its modules.
     /// @param library path to the plugin; the platform extension may be omitted
     /// @param registry registry the factories go into; it must outlive this loader
-    /// @throws std::runtime_error on any failure — the library is closed again and a partial
+    /// @throws not_a_plugin if the file exports neither entry point
+    /// @throws std::runtime_error on any other failure — the library is closed again and a partial
     ///         registration is withdrawn
+    ///
+    /// Every failure but not_a_plugin comes out as a plain std::runtime_error naming this file, and
+    /// flattening the type that way is deliberate: the caller tells apart exactly two cases — a
+    /// foreign library, which a directory scan skips, and a broken plugin, which stops the host. The
+    /// file name is added here and only here, so no message carries it twice.
     module_loader(const std::filesystem::path& library, module_registry& registry)
         : path_(detail::with_plugin_extension(library)), registry_(&registry) {
         library_ = std::make_shared<detail::plugin_library>(path_);
@@ -158,8 +166,8 @@ class module_loader {
             const bool speaks_c = library_->find(c_abi_version_symbol) != nullptr;
             const bool speaks_cxx = library_->find(abi_version_symbol) != nullptr;
             if (!speaks_c && !speaks_cxx) {
-                throw not_a_plugin("plugin '" + path_.string() + "' exports neither '" + abi_version_symbol +
-                                   "' nor '" + c_abi_version_symbol + "'");
+                throw not_a_plugin("plugin '" + shown() + "' exports neither '" + abi_version_symbol + "' nor '" +
+                                   c_abi_version_symbol + "'");
             }
             std::vector<c_registration> from_c;
             if (speaks_c) {
@@ -181,12 +189,12 @@ class module_loader {
             for (const auto& [name, ver] : registrar.registered()) {
                 registry.remove(name, ver);
             }
-            throw std::runtime_error(e.what());
+            throw std::runtime_error("plugin '" + shown() + "': " + e.what());
         } catch (...) {
             for (const auto& [name, ver] : registrar.registered()) {
                 registry.remove(name, ver);
             }
-            throw std::runtime_error("plugin '" + path_.string() + "' registration failed");
+            throw std::runtime_error("plugin '" + shown() + "' registration failed");
         }
     }
 
@@ -225,17 +233,19 @@ class module_loader {
     }
 
    private:
-    /// Registers the modules of a plugin that is not C++. Adds the plugin's path to whatever went
-    /// wrong: the C side of the boundary knows the descriptor it choked on but not which file it came
-    /// from.
+    /// This loader's file as UTF-8, for the messages. Never path::string(): that conversion goes
+    /// through the process code page, which spells a non-ASCII name in bytes nothing downstream
+    /// expects and throws outright for a character the page cannot represent — inside the very
+    /// message that was reporting the real failure.
+    [[nodiscard]] std::string shown() const {
+        return path_to_utf8(path_);
+    }
+
+    /// Registers the modules of a plugin that is not C++.
     [[nodiscard]] std::vector<c_registration> register_c_path(module_registrar& registrar) const {
-        try {
-            return register_c_modules(registrar, load_symbol<c_abi_version_fn>(c_abi_version_symbol),
-                                      load_symbol<c_module_count_fn>(c_module_count_symbol),
-                                      load_symbol<c_module_desc_at_fn>(c_module_desc_at_symbol));
-        } catch (const std::exception& e) {
-            throw std::runtime_error("plugin '" + path_.string() + "': " + e.what());
-        }
+        return register_c_modules(registrar, load_symbol<c_abi_version_fn>(c_abi_version_symbol),
+                                  load_symbol<c_module_count_fn>(c_module_count_symbol),
+                                  load_symbol<c_module_desc_at_fn>(c_module_desc_at_symbol));
     }
 
     [[nodiscard]] static std::string source_of(const std::vector<c_registration>& from_c,
@@ -252,8 +262,8 @@ class module_loader {
     void register_cxx_path(module_registrar& registrar) const {
         const auto abi = load_symbol<abi_version_fn>(abi_version_symbol);
         if (const unsigned plugin_version = abi(); plugin_version != plugin_abi) {
-            throw std::runtime_error("plugin '" + path_.string() + "' has ABI " + std::to_string(plugin_version) +
-                                     ", host expects " + std::to_string(plugin_abi));
+            throw std::runtime_error("ABI is " + std::to_string(plugin_version) + ", host expects " +
+                                     std::to_string(plugin_abi));
         }
         check_build_id();
         load_symbol<register_modules_fn>(register_modules_symbol)(registrar);
@@ -274,16 +284,15 @@ class module_loader {
         if (id != nullptr && std::strcmp(id, plugin_build_id) == 0) {
             return;
         }
-        throw std::runtime_error("plugin '" + path_.string() + "' was built as '" + (id == nullptr ? "<none>" : id) +
-                                 "', host as '" + plugin_build_id +
-                                 "'; host and plugin must share one toolchain and one C++ runtime");
+        throw std::runtime_error("was built as '" + std::string(id == nullptr ? "<none>" : id) + "', host as '" +
+                                 plugin_build_id + "'; host and plugin must share one toolchain and one C++ runtime");
     }
 
     template <typename TFn>
     TFn* load_symbol(const char* name) const {
         void* symbol = library_->find(name);
         if (!symbol) {
-            throw std::runtime_error("plugin '" + path_.string() + "' has no symbol '" + name + "'");
+            throw std::runtime_error("no symbol '" + std::string(name) + "'");
         }
         return reinterpret_cast<TFn*>(symbol);
     }

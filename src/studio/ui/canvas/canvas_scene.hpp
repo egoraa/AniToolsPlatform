@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -53,6 +55,13 @@ class canvas_scene final : public QGraphicsScene {
     /// to select — a paste, a copy-drag — is left alone, since it knows better than the selection it
     /// is replacing.
     void rebuild();
+
+    /// Drops what the scene remembers about node stacking, for a project it has not seen before.
+    ///
+    /// The order nodes are piled in belongs to the project on screen: without this, opening another
+    /// project would leave a node whose name happens to match one raised in the previous one sitting
+    /// on top for no reason its author could see.
+    void forget_stacking();
 
     /// Sets the colour scheme the next rebuild draws in. The scene does not read a palette itself:
     /// whose palette a scene belongs to is the holding widget's question, and answering it here
@@ -170,6 +179,45 @@ class canvas_scene final : public QGraphicsScene {
 
     [[nodiscard]] node_item* node_by_name(const std::string& name) const;
 
+    /// Puts the nodes a drag has picked up in front of every other node of the group, and remembers
+    /// that they are there.
+    ///
+    /// A node is raised when it is grabbed, because a node dragged out from under another and left
+    /// under it is the gesture failing in the only place it can be seen. Which is why a press alone
+    /// does not call this on the Ctrl path: that press becomes a copying drag or a selection toggle,
+    /// and a node struck off the selection has been grabbed by nothing. The order is remembered
+    /// rather than applied to the items once: the scene is rebuilt whole on every change to the
+    /// project, so a stacking that lived in the items alone would come back as the document's order
+    /// the next time a property was edited.
+    ///
+    /// Among themselves the nodes keep the order they already had, which is what makes raising a
+    /// selection of overlapping nodes look like lifting the pile rather than shuffling it.
+    void raise_moving();
+
+    /// Puts the nodes this level did not have the last time it was built in front of the rest.
+    ///
+    /// Which is how every way of making a node — a drop from the palette, Ctrl+V, the New group
+    /// entry, a copying drag, a rename, an undone deletion — lands on top without any of them
+    /// saying so: three of those paths cannot reach the scene at all, and a fourth would have to be
+    /// remembered by whoever adds the fifth. A node arriving under one that was dragged out of the
+    /// pile earlier is the same complaint the raising answers.
+    ///
+    /// The first build of a level raises nothing and only takes note of what is there: everything
+    /// is new to a scene that has never drawn this group, and remembering all of it as raised would
+    /// freeze today's document order into the pile, so nothing the document later says about that
+    /// order could show through it. It draws the same picture either way, the last child on top.
+    /// @param g the group being built
+    void raise_new_nodes(const runtime::group_node& g);
+
+    /// Gives every node of the scene the z it holds in the remembered order: the raised ones first,
+    /// in the order they were raised, then the rest as they stand now — which right after a rebuild
+    /// is the document's order.
+    ///
+    /// The whole band is **negative**, counting down from -1, so that links and stubs, which carry
+    /// no z of their own, stay above every node however tall the pile grows. A positive band would
+    /// need a ceiling to put them over, and a ceiling is a number that can be reached.
+    void apply_stacking();
+
     [[nodiscard]] describe_fn describer();
 
     void build_node(const runtime::child_node& c, const std::unordered_map<std::string, node_position>& fallback);
@@ -182,6 +230,23 @@ class canvas_scene final : public QGraphicsScene {
 
     void reposition_stubs();
 
+    /// Every connection that carries an exported port of the group on screen, as the (group path,
+    /// index) pairs a monitoring sample is addressed by.
+    ///
+    /// A stub is not a connection and nothing counts writes through it: the port it marks is one end
+    /// of a connection declared in an outer group, and that is where its activity is read. The walk
+    /// goes up rather than one level, because a port exported again by the parent is carried by a
+    /// connection further out still, and stopping at the parent would leave those stubs dead.
+    ///
+    /// Several answers rather than the first one, because several outputs may feed one input: pinning
+    /// the stub to the first connection named would leave it dark while a second, busy one delivered
+    /// through it — which is the very "a running pipeline looks stopped" this mark exists against.
+    /// @param alias name the port is exported under
+    /// @param is_output whether it is an output, which is the end of the outer connection to match
+    /// @return the pairs, empty when nothing out there connects to the port
+    [[nodiscard]] std::vector<std::pair<std::string, std::size_t>> outer_connections(const std::string& alias,
+                                                                                     bool is_output) const;
+
     /// Appends the view entries to a menu, when the widget gave the scene any.
     /// @param menu the menu being built
     /// @return the two actions, either of which may be null
@@ -193,7 +258,7 @@ class canvas_scene final : public QGraphicsScene {
     std::unordered_map<std::string, pin_item*> pins_;
     std::vector<link_item*> links_;
     std::vector<stub_item*> stubs_;
-    std::unordered_map<std::size_t, std::uint64_t> prev_writes_;
+    std::map<std::pair<std::string, std::size_t>, std::uint64_t> prev_writes_;
     pin_item* drag_from_ = nullptr;
     QGraphicsLineItem* temp_link_ = nullptr;
     struct dragged {
@@ -209,6 +274,16 @@ class canvas_scene final : public QGraphicsScene {
     node_item* pressed_node_ = nullptr;
     node_item* drop_target_ = nullptr;
     std::vector<std::string> select_after_rebuild_;
+
+    /// Nodes raised by hand, front first, per group path. Kept per group because a name means
+    /// nothing outside its own level, and left out of the `.layout.json` sidecar on purpose: which
+    /// node is on top is only worth a memory while the pile is being sorted out, and a position is
+    /// worth one for good.
+    std::map<std::string, std::vector<std::string>> raised_;
+
+    /// What each level held the last time it was built, so that a node nobody has seen before can be
+    /// told from one that was merely redrawn.
+    std::map<std::string, std::set<std::string>> built_;
     bool rebuilding_ = false;
 };
 

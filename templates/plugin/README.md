@@ -14,7 +14,7 @@ cmake --build build-plugin
 ```
 
 `CMakeLists.txt` comes down to three substantive lines: `find_package(AniToolsPlatform)`,
-`atp_require_plugin_abi(15)` and `atp_add_plugin()`. The second one is not a formality: when the
+`atp_require_plugin_abi(1)` and `atp_add_plugin()`. The second one is not a formality: when the
 platform raises `plugin_abi`, configuration here has to fail until the plugin has been revisited.
 Everything else — hidden visibility, the file name, the target type, linking `atp::platform` alone —
 is set by `atp_add_plugin`, and those properties are not meant to be written out by hand.

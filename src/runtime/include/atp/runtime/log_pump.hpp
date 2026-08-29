@@ -19,7 +19,9 @@
 
 namespace atp::runtime {
 
-/// Where drained lines go. Called on the pump's thread, one line at a time.
+/// Where drained lines go. Called on the pump's thread, one line at a time — and once more on the
+/// thread that destroys the pump, which drains what the last scheduled pass did not see. A sink
+/// bound to one thread has to tolerate that call.
 using log_sink = std::function<void(const log_line&)>;
 
 /// Where they come from. A function rather than a pipeline reference, because atp_mcp has no

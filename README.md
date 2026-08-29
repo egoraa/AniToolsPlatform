@@ -11,6 +11,50 @@ and **C** against the SDK's own headers, **Rust** as a `cdylib` with no SDK at a
 **Lua** as a script the platform's bridge reads. A module written in any of them connects to a module written in
 any other with nothing in between: the host builds the same typed ports on both sides.
 
+## What it is for
+
+An algorithm that is a flow of data through stages — a signal filtered, decimated and measured; frames
+transformed and fused; telemetry folded into a control loop — is seldom hard because of the mathematics
+inside any one stage. It is hard because of everything around them. The stages have to be wired
+together and run at the right rates on the right threads; you have to see what is actually flowing
+before you can tell a wrong result from a stage that is quietly starving; and the parameter values
+that make the whole thing work are rarely known in advance and are found by trying them.
+
+This platform is the environment for that middle part, and for shipping what comes out of it.
+
+**The graph is a document, not code.** Each stage is a module with typed ports, and how the modules
+connect, which thread runs which part of the graph and at what pace, is a JSON config. Trying a
+different topology is editing that document and running it again — by hand, on the studio's canvas, or
+from an agent over MCP — rather than rewriting a `main()` and rebuilding. Groups nest, so a subsystem
+that grew too large becomes one node in a larger graph without any of its internals changing.
+
+**Debugging a flow means being able to watch it.** The canvas shows the graph as it runs, with a
+connection lighting up when something travelled it. Underneath, the runtime counts what actually
+happened: per-module time (calls, busy calls, total, worst case) answers which stage is eating the
+budget, and per-input counters — received, discarded, pending, peak pending, capacity — answer the
+question no amount of staring at code will, namely whether a stage is silently dropping data because a
+producer outruns it. Every log line carries the instance path of the module that wrote it, so in a
+graph with four copies of the same filter it is clear which one is complaining.
+
+**Parameters are tuned on the running thing.** A module's settings are declared as typed properties
+with defaults, and they are edited live: a new value reaches a running module without a restart, let
+alone a rebuild. That works from the studio's inspector, from the command line at launch
+(`atp_app -p stage.gain=0.8`, repeatable), and over the control channel on a host that is already
+deployed somewhere else — which is what `set_live_property` is for. For the measurement between two
+attempts, `--run-for` bounds the run and `--metrics` prints the per-module table at the end, so a
+comparison is reproducible instead of being a feeling.
+
+**A stage can be a script while its shape is still in doubt.** A module in Python or Lua is a file
+the bridge reads at load time, with no build step anywhere — so trying a different filter costs a save
+and a reload rather than a compile. When the shape has settled, the same module is rewritten in C++ or
+Rust behind the same ports, and nothing else in the graph notices.
+
+**The result is something you can ship, not only experiment with.** The same core is the runtime:
+`atp_app <config.json>` runs the graph headless with no GUI and no editor anywhere near it, and the
+modules come from plugins that are built separately against a versioned ABI. Different parts of a
+system can therefore be written by different people, in different languages, and be loaded into one
+process without any of them being recompiled together — which is the other half of what this is for.
+
 ## Targets
 
 | Target | What it is |
@@ -71,10 +115,11 @@ The studio can attach to a host that is already running and mirror its pipeline:
 1. start the host with a control channel — `atp_app config/demo.json --control 7777`;
 2. in the studio, `Host > Attach to a running host...` and give it the address.
 
-The canvas then shows the remote graph, with live values on the connections and the Runtime dock
-reporting its threads and per-module cost. The structure is read-only — you are looking at something
-you did not build — but properties can still be edited on the fly, which is the point: this is how a
-deployed pipeline gets tuned. `Host > Detach` brings your own project back exactly as you left it.
+The canvas then shows the remote graph, with the connections lighting up as they carry data and the
+Runtime dock reporting its threads and per-module cost. The structure is read-only — you are looking
+at something you did not build — but properties can still be edited on the fly, which is the point:
+this is how a deployed pipeline gets tuned. `Host > Detach` brings your own project back exactly as
+you left it.
 
 The mirror is a real config, so `Save As...` exports it. It carries the graph and nothing else: the
 plugins the modules came from and the thread layout are not part of a running pipeline in any
@@ -126,7 +171,7 @@ cmake --build <plugin-build>
 
 ```cmake
 find_package(AniToolsPlatform REQUIRED)
-atp_require_plugin_abi(14)
+atp_require_plugin_abi(1)
 atp_add_plugin(my_plugin SOURCES plugin.cpp)
 ```
 
@@ -262,8 +307,10 @@ groups.
 
 ## Reading further
 
-- [`docs/architecture.md`](docs/architecture.md) — the design digest, with the rationale behind the io
-  layer, the execution platform, the config schema, the studio core and the packaging (in Russian).
+- [`docs/architecture.md`](docs/architecture.md) — the design digest (in Russian): a hub over
+  [`docs/architecture/`](docs/architecture), one chapter per subsystem — the SDK and its io layer,
+  the execution platform and `atp_app`, the script bridges, the studio, the module config and the
+  document model, and the packaging.
 - [`docs/code_style.md`](docs/code_style.md) — the style spec that `.clang-format` and `.clang-tidy`
   enforce.
 - [`docs/benchmarks.md`](docs/benchmarks.md) — measured cost of the io and runtime hot paths, how to

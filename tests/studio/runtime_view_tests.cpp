@@ -52,7 +52,7 @@ class view_sink : public atp::module<atp::ports<number_inputs>, "view_sink"> {
 };
 
 constexpr const char* view_config = R"({
-    "version": "3.0",
+    "version": "1.0",
     "pipeline": {
         "modules": [
             {"module": "view_source", "name": "src", "properties": {"step": 2}},
@@ -77,7 +77,7 @@ void check_view(atp::studio::runtime_view_base& view) {
     const std::vector<atp::studio::live_property> properties = view.live_properties("src");
     ASSERT_EQ(properties.size(), 1u);
     EXPECT_EQ(properties[0].info.name, "step");
-    EXPECT_EQ(properties[0].info.kind, atp::io::property_kind::number);
+    EXPECT_EQ(properties[0].info.kind, atp::io::property_kind::integer);
     EXPECT_EQ(properties[0].info.default_value, "1");
     EXPECT_EQ(properties[0].value, "2");
 

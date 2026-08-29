@@ -26,5 +26,5 @@
     "plugins": [
         "../plugins/atp_demo_plugin"
     ],
-    "version": "3.0"
+    "version": "1.0"
 }

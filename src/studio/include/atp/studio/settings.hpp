@@ -80,6 +80,17 @@ struct studio_settings {
     /// retyping a port every time is the kind of friction that stops people from looking.
     std::string attach_host = "127.0.0.1";
     int attach_port = 0;
+
+    /// How the Log dock draws itself: whether long lines wrap, and whether the view follows the end
+    /// of the log as it grows. Kept here rather than in the window state blob, which is Qt's and
+    /// holds where the docks are, not what is inside one — and a soft wrap that has to be switched
+    /// on again at every launch is a setting nobody uses twice.
+    ///
+    /// Only what the reader asked for is written: following also turns itself off when the reader
+    /// scrolls away from the end, and that is a position in a view rather than a decision, so it
+    /// leaves this alone.
+    bool log_soft_wrap = false;
+    bool log_follow_tail = true;
 };
 
 /// How many projects the MRU list keeps.
@@ -174,6 +185,12 @@ inline void note_recent(studio_settings& s, const std::filesystem::path& file) {
         if (const auto it = doc.find("window_state"); it != doc.end() && it->is_string()) {
             s.window_state = it->get<std::string>();
         }
+        if (const auto it = doc.find("log_soft_wrap"); it != doc.end() && it->is_boolean()) {
+            s.log_soft_wrap = it->get<bool>();
+        }
+        if (const auto it = doc.find("log_follow_tail"); it != doc.end() && it->is_boolean()) {
+            s.log_follow_tail = it->get<bool>();
+        }
     } catch (const nlohmann::json::parse_error&) {  // NOLINT(bugprone-empty-catch)
     }
     return s;
@@ -194,6 +211,8 @@ inline void save_settings(const studio_settings& s, const std::filesystem::path&
     doc["window_state"] = s.window_state;
     doc["attach_host"] = s.attach_host;
     doc["attach_port"] = s.attach_port;
+    doc["log_soft_wrap"] = s.log_soft_wrap;
+    doc["log_follow_tail"] = s.log_follow_tail;
     std::ofstream out(file);
     if (!out) {
         throw std::runtime_error("cannot write settings '" + file.string() + "'");

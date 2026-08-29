@@ -419,7 +419,32 @@ class node {
                            " (found " + std::string(kind_name(found.kind())) + ")");
     }
 
-    std::variant<std::monostate, bool, std::int64_t, double, std::string, array_type, object_type> storage_;
+    /// The one implicit mapping in this class, made explicit: kind() answers the variant's index, so
+    /// the enumeration and the alternative order are one contract. c_module.hpp spells the same seven
+    /// forms out as a switch precisely so that a reordering of the C header fails to compile here;
+    /// these do the same for a reordering of the alternatives, which would otherwise silently rename
+    /// every form and leave that switch faithfully translating the wrong answer.
+    ///
+    /// The marker below answers a false positive rather than a finding: clang-tidy 23 reads the call
+    /// in the template argument as a C-style cast and offers to wrap it in a static_cast, which is
+    /// exactly what to_underlying is there to avoid spelling.
+    using storage_type = std::variant<std::monostate, bool, std::int64_t, double, std::string, array_type, object_type>;
+
+    template <config::kind K, typename T>
+    static constexpr bool alternative_is =
+        // NOLINTNEXTLINE(modernize-avoid-c-style-cast)
+        std::same_as<std::variant_alternative_t<std::to_underlying(K), storage_type>, T>;
+
+    static_assert(alternative_is<config::kind::null, std::monostate>);
+    static_assert(alternative_is<config::kind::boolean, bool>);
+    static_assert(alternative_is<config::kind::integer, std::int64_t>);
+    static_assert(alternative_is<config::kind::real, double>);
+    static_assert(alternative_is<config::kind::string, std::string>);
+    static_assert(alternative_is<config::kind::array, array_type>);
+    static_assert(alternative_is<config::kind::object, object_type>);
+    static_assert(std::variant_size_v<storage_type> == 7);
+
+    storage_type storage_;
 };
 
 }  // namespace atp::config

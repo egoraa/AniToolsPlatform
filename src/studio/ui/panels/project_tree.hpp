@@ -92,7 +92,7 @@ class project_tree final : public QTreeWidget {
     std::optional<QString> drop_path_;
 
     QIcon group_icon_ = icons::group();
-    QIcon module_icon_ = icons::module();
+    icons::module_icons module_icons_;
 };
 
 }  // namespace atp::studio::ui

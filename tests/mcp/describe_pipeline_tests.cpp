@@ -92,7 +92,7 @@ TEST_F(McpDescribePipeline, ReportsThePropertyKindSoAClientCanPickAnEditor) {
     const nlohmann::json properties = describe().at("modules").at(0).at("properties");
     ASSERT_EQ(properties.size(), 3u);
     EXPECT_EQ(properties.at(0).at("name"), "count");
-    EXPECT_EQ(properties.at(0).at("kind"), "number");
+    EXPECT_EQ(properties.at(0).at("kind"), "integer");
     EXPECT_EQ(properties.at(1).at("name"), "loud");
     EXPECT_EQ(properties.at(1).at("kind"), "boolean");
     EXPECT_EQ(properties.at(2).at("name"), "tag");

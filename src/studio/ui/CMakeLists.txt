@@ -33,7 +33,12 @@ foreach (icon IN LISTS ATP_STUDIO_ICONS)
     cmake_path(GET icon FILENAME icon_name)
     set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS icons/${icon_name})
 endforeach ()
-qt_add_resources(atp_studio "icons" PREFIX "/" FILES ${ATP_STUDIO_ICONS})
+# The icons ride on the library rather than on the executable, because the code that reads them does:
+# kit/icons.cpp is compiled into atp_studio_ui, and so is every panel and the canvas. Left on
+# atp_studio, the artwork was absent from atp_ui_tests — which links the library alone — and a missing
+# resource costs no error anywhere: QSvgRenderer simply draws nothing, so the suite would have been
+# green over a canvas with no marks on it at all.
+qt_add_resources(atp_studio_ui "icons" PREFIX "/" FILES ${ATP_STUDIO_ICONS})
 
 atp_deploy_qt(atp_studio)
 

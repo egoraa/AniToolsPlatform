@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -189,7 +190,7 @@ TEST_F(c_module_test, BuildsDeclaredProperties) {
     load(ATP_TEST_PLUGIN_C);
     create("c_probe");
     const atp::io::property_base& gain = module_->properties().at("gain");
-    EXPECT_EQ(gain.kind(), atp::io::property_kind::number);
+    EXPECT_EQ(gain.kind(), atp::io::property_kind::real);
     EXPECT_EQ(gain.default_string(), "1.5");
     EXPECT_EQ(gain.to_string(), "1.5");
     EXPECT_TRUE(gain.options().empty());
@@ -200,7 +201,7 @@ TEST_F(c_module_test, BuildsDeclaredProperties) {
     EXPECT_EQ(mode.options(), (std::vector<std::string>{"plain", "verbose"}));
 
     const atp::io::property_base& count = module_->properties().at("count");
-    EXPECT_EQ(count.kind(), atp::io::property_kind::number);
+    EXPECT_EQ(count.kind(), atp::io::property_kind::integer);
     EXPECT_EQ(count.options(), (std::vector<std::string>{"1", "2", "3"}));
     EXPECT_EQ(count.default_string(), "3");
 
@@ -626,4 +627,50 @@ TEST_F(c_module_test, AnOpaqueFileLeavesEveryFieldAtItsDefaultAndStillDeliversTh
     EXPECT_EQ(cfg->origin(), "rig.ini");
     EXPECT_TRUE(cfg->is_opaque());
     EXPECT_EQ(cfg->find("engine")->value<std::string>(), "fm");
+}
+
+TEST(CModuleDescriptor, RefusesAnInputKindOutsideTheEnumeration) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    const std::array<atp_input_desc, 1> bad{{{"in", static_cast<atp_kind>(99), ATP_STATE, 0, ATP_DROP_OLDEST}}};
+    atp_module_desc desc{};
+    desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc));
+    desc.name = "c_bad_input_kind";
+    fill_callbacks(desc);
+    desc.inputs = bad.data();
+    desc.input_count = 1;
+
+    try {
+        const atp::runtime::c_module_factory factory{desc};
+        FAIL() << "a kind outside the enumeration must be refused at load time";
+    } catch (const std::runtime_error& error) {
+        const std::string text = error.what();
+        EXPECT_NE(text.find("c_bad_input_kind"), std::string::npos);
+        EXPECT_NE(text.find("'in'"), std::string::npos);
+    }
+}
+
+TEST(CModuleDescriptor, RefusesAnOutputKindOutsideTheEnumeration) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    const std::array<atp_output_desc, 1> bad{{{"out", static_cast<atp_kind>(0)}}};
+    atp_module_desc desc{};
+    desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc));
+    desc.name = "c_bad_output_kind";
+    fill_callbacks(desc);
+    desc.outputs = bad.data();
+    desc.output_count = 1;
+
+    EXPECT_THROW(const atp::runtime::c_module_factory factory{desc}, std::runtime_error);
+}
+
+TEST(CModuleDescriptor, RefusesAPropertyKindOutsideTheEnumeration) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    const std::array<atp_property_desc, 1> bad{{{"p", static_cast<atp_kind>(7), "0", nullptr, 0, 1}}};
+    atp_module_desc desc{};
+    desc.struct_size = static_cast<std::uint32_t>(sizeof(atp_module_desc));
+    desc.name = "c_bad_property_kind";
+    fill_callbacks(desc);
+    desc.properties = bad.data();
+    desc.property_count = 1;
+
+    EXPECT_THROW(const atp::runtime::c_module_factory factory{desc}, std::runtime_error);
 }

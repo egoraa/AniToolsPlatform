@@ -11,10 +11,13 @@
 #include <typeindex>
 
 #include <QColor>
+#include <QFont>
 #include <QGraphicsEllipseItem>
+#include <QGraphicsItem>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsSimpleTextItem>
+#include <QImage>
 #include <QPainterPath>
 #include <QPointF>
 #include <QRectF>
@@ -22,11 +25,45 @@
 
 namespace atp::studio::ui {
 
+/// One parsed artwork and the box its drawing actually occupies, as a fraction of the viewBox.
+struct artwork_source;
+
 /// Node geometry, sized for 8 to 10 ports without scrolling.
 inline constexpr double node_width = 180.0;
 inline constexpr double node_header = 34.0;
 inline constexpr double pin_row = 18.0;
 inline constexpr double pin_radius = 5.0;
+
+/// Gap between the mark a node wears and the name beside it.
+inline constexpr double node_glyph_gap = 5.0;
+
+/// How much taller than the capital letters beside it the mark is drawn. Matching the cap height
+/// exactly leaves the mark looking smaller than the text — line art is thinner than a letter — and
+/// anything above about a third starts to read as a second piece of content rather than a label.
+inline constexpr double node_glyph_over_cap = 1.3;
+
+/// Where the mark sits on a line of text, and where the text starts because of it.
+struct glyph_layout {
+    /// Side of the square the mark is drawn in.
+    double side;
+    /// Top of that square, in the same coordinates as the text item's own top.
+    double top;
+    /// Left of the text, measured from the same left inset the mark starts at.
+    double text_left;
+};
+
+/// Places the mark against a line of text of this font.
+///
+/// Both numbers come from the font and not from constants, because the thing being aligned is not
+/// the text item's rectangle: that rectangle is an em box, taller than the letters and asymmetric
+/// around them, so a mark centred in it sits visibly high — measured, about three quarters of a
+/// pixel at the studio's own size, and worse in a font with deeper descenders. What the eye lines
+/// the mark up with is the band the capitals occupy, from the baseline up by the cap height, so
+/// that band is what the mark is centred on.
+/// @param font the font the line is drawn in
+/// @param text_top top of the text item, in node coordinates
+/// @param inset left inset the mark starts at
+[[nodiscard]] glyph_layout node_glyph_layout(const QFont& font, double text_top, double inset);
 
 /// Length of the segment a stub reaches out from its pin. A short mark beside the port rather than a
 /// line across the level: an exported port is a fact about that port, and it is read next to it.
@@ -99,6 +136,68 @@ class pin_item final : public QGraphicsEllipseItem {
     std::string port_path_;
     bool output_;
     std::optional<std::type_index> port_type_;
+};
+
+/// The mark beside a node's name: a binary module, a script of one language or another, a subgroup.
+///
+/// It is drawn here rather than through QIcon because of the colour. The icon family's engine paints
+/// its artwork in the colour the widget palette gives text, which is the right answer on a menu and
+/// the wrong one on a node: what sits on the node body is judged against node_fill, and that is how
+/// the light scheme once ended up with labels nobody could read. So the item is handed both the
+/// artwork and the ink, and takes nothing from the application.
+///
+/// The artwork is rendered into an image at the resolution the painter is actually working at and
+/// tinted there, which is what keeps the mark crisp at any zoom — SourceIn needs a surface of its
+/// own, and a pixmap sized once would be the one thing on the canvas that blurs when everything else
+/// is vector. The image is kept until the size changes, so panning costs nothing.
+///
+/// The mark answers no mouse button. It lies over the node's own header, and an item that takes a
+/// press keeps it: dragging a node by the fourteen pixels its mark occupies would do nothing at all,
+/// which is the kind of dead spot nobody reports and everybody feels.
+///
+/// The parsed artwork is **shared and not owned**: the scene is rebuilt whole on every change to the
+/// project — every drag that ends, every property edited — so an owned renderer would mean parsing
+/// the same handful of files once per node per rebuild. The set of files is fixed and tiny, so they
+/// are parsed once each and kept; nothing is ever evicted, which is also why the pointer cannot go
+/// stale under an item.
+///
+/// **The margins a file leaves around its own drawing are ignored.** Each mark is measured once —
+/// what it actually paints, not what its viewBox declares — and then drawn so that measurement fills
+/// the square, aspect kept. Without it the marks of one family differ in height by half again
+/// (measured: 7.25 px against 11.75 for the same 14 px box), because a folder, a box of ports and a
+/// sheet of paper were each drawn to look right on their own. It is also what makes "drop in
+/// <language>.svg" a real promise: whoever draws the next one does not have to guess this family's
+/// padding.
+class glyph_item final : public QGraphicsItem {
+   public:
+    enum { Type = UserType + 5 };
+
+    /// @param parent the node the mark belongs to
+    /// @param artwork resource path of the SVG, as the icons:: artwork functions answer it
+    /// @param ink colour to paint it in, from the canvas scheme
+    /// @param side width and height in scene units
+    glyph_item(QGraphicsItem* parent, QString artwork, QColor ink, double side);
+
+    [[nodiscard]] int type() const override;
+    [[nodiscard]] QRectF boundingRect() const override;
+
+    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) override;
+
+    /// Whether the artwork was found and parsed. False means the mark paints nothing at all, which
+    /// is exactly the silent failure a missing resource would otherwise be.
+    [[nodiscard]] bool valid() const;
+
+    [[nodiscard]] const QString& artwork() const;
+    [[nodiscard]] const QColor& ink() const;
+
+   private:
+    QImage tinted(int side_pixels);
+
+    QString artwork_;
+    QColor ink_;
+    double side_;
+    artwork_source* source_;
+    QImage cache_;
 };
 
 /// A module or subgroup node on the canvas.
@@ -180,6 +279,13 @@ class stub_item final : public QGraphicsPathItem {
     /// @param pin_scene_pos scene position of the child pin this stub belongs to
     void set_anchor(QPointF pin_scene_pos);
 
+    /// Highlights the stub when the connection carrying its exported port has grown since the last
+    /// poll. That connection lives one level up, which is the whole point of the mark: from inside
+    /// the group the flow through an exported port is visible nowhere else. The dash stays, so a
+    /// hot stub is still not read as a link, and the port type stays readable at the pin the
+    /// segment starts from.
+    void set_hot(bool hot);
+
     /// The arrow end and its alias, and not the segment leading to them.
     ///
     /// What a stub can be pointed at is the head it ends in — that is where its name is written and
@@ -202,6 +308,8 @@ class stub_item final : public QGraphicsPathItem {
     std::string alias_;
     QGraphicsSimpleTextItem* label_ = nullptr;
     QPointF outer_;
+    QColor idle_;
+    QColor hot_;
 };
 
 }  // namespace atp::studio::ui

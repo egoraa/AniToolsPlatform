@@ -15,6 +15,7 @@
 #include <atp/runtime/config_error.hpp>
 #include <atp/runtime/config_model.hpp>
 #include <atp/runtime/json_codec.hpp>
+#include <atp/runtime/utf8_path.hpp>
 
 namespace atp::runtime {
 
@@ -25,13 +26,13 @@ inline constexpr std::size_t max_include_depth = 16;
 inline atp::config::node read_json(const std::filesystem::path& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
-        throw config_error("cannot open config file '" + path.string() + "'");
+        throw config_error("cannot open config file '" + path_to_utf8(path) + "'");
     }
     const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     try {
         return json_parse(text);
     } catch (const config_error& e) {
-        throw config_error("cannot parse '" + path.string() + "': " + e.what());
+        throw config_error("cannot parse '" + path_to_utf8(path) + "': " + e.what());
     }
 }
 
@@ -44,13 +45,13 @@ inline atp::config::node load_fragment(const std::filesystem::path& path, std::v
     if (std::ranges::find(stack, canonical) != stack.end()) {
         std::string chain;
         for (const std::filesystem::path& p : stack) {
-            chain += p.string() + " -> ";
+            chain += path_to_utf8(p) + " -> ";
         }
-        throw config_error("include cycle: " + chain + canonical.string());
+        throw config_error("include cycle: " + chain + path_to_utf8(canonical));
     }
     if (stack.size() >= max_include_depth) {
-        throw config_error("include depth exceeds " + std::to_string(max_include_depth) + " at '" + canonical.string() +
-                           "'");
+        throw config_error("include depth exceeds " + std::to_string(max_include_depth) + " at '" +
+                           path_to_utf8(canonical) + "'");
     }
     stack.push_back(canonical);
     atp::config::node fragment = read_json(canonical);
@@ -71,7 +72,7 @@ inline void expand_includes(atp::config::node& node,
                 throw config_error("$include path must be a string");
             }
             const std::string named = include->as_string();
-            atp::config::node fragment = load_fragment(dir / named, stack);
+            atp::config::node fragment = load_fragment(dir / path_from_utf8(named), stack);
             if (fragment.is_object() && fragment.find("version") != nullptr) {
                 throw config_error("'version' is allowed only in the root config, found in included '" + named + "'");
             }

@@ -25,13 +25,12 @@ namespace atp::runtime {
 /// must not exceed ours, so that fields "from the future" are rejected rather than silently
 /// ignored. The "version" field is the first thing checked.
 ///
-/// 3.2 added a module's "config" and the document's "configs": a minor step, because keys are added
-/// while the shape of the existing ones does not change, so a 3.1 document still reads unaltered.
-///
-/// 3.3 added the "file:" source of a config, allowed both on a module and as an entry of "configs" —
-/// minor by the same argument, since no key changed shape and only which strings inside one are legal
-/// did.
-inline constexpr version config_schema_version{3, 3};
+/// The number starts at 1.0 because no config written outside this repository exists yet. What
+/// earns which half of it: a key added while every existing key keeps its shape is a minor step,
+/// since a document of the older minor still reads unaltered; a key that disappears or changes
+/// shape is a major one, and then a document naming the old major is rejected whole rather than
+/// read with a key quietly ignored.
+inline constexpr version config_schema_version{1, 0};
 
 /// A plain module within a group.
 ///
@@ -253,7 +252,10 @@ inline atp::config::node encode_group_body(const group_node& g) {
 
 /// Converts a document into the typed model.
 /// @param doc document that has already passed validate() — that is the contract
-/// @throws std::logic_error if the document turns out not to match the schema after all
+/// @throws std::logic_error if a version string that validate() accepted does not parse after all
+/// @throws atp::config::access_error if the document does not match the schema in any other way: a
+///         missing key, a value of another form. Both mean the contract above was broken, and the
+///         two differ only in which layer noticed — a caller that catches one owes the other.
 [[nodiscard]] inline config decode(const atp::config::node& doc) {
     config cfg;
     const std::optional<version> schema = try_parse_version(doc.string_at("version"));

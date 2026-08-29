@@ -1,149 +1,136 @@
-# Спецификация стиля кода
+# Code style specification
 
-Единые правила оформления кода AniToolsPlatform. Источник форматирования —
-`.clang-format` в корне репозитория; этот документ фиксирует то, что
-автоформат проверить не может: именование, структуру файлов и идиомы.
+The common rules for how AniToolsPlatform's code is written. Formatting comes from `.clang-format` at
+the repository root; this document records what the formatter cannot check: naming, file structure and
+idioms.
 
-## Глоссарий
+## Glossary
 
-Два слова, которые легко перепутать, и от которых зависят имена файлов,
-целей и ключей конфига.
+Two words that are easy to confuse, and on which the names of files, targets and config keys depend.
 
-- **plugin** — файл, который грузит хост (`.dll`/`.so`/`.dylib`) и который
-  регистрирует модули. Это то, что перечисляет ключ `"plugins"` в конфиге
-  и что объявляет `atp_add_plugin()`. Линковать его нельзя: тип цели
-  `MODULE` делает попытку ошибкой конфигурации, а не нарушением
-  соглашения.
-- **module** — единица работы внутри плагина: то, что реализует
-  `module_base`, что называет `"module": "counter"` и что видит пайплайн.
-  Группа — тоже модуль (`group : module_base`).
-- Пример и шаблон именуются `plugin_*` — **по плагину, через который код
-  попадает в хост**, а не по тому, что набирает автор. В `templates/plugin`
-  и `templates/plugin_rust` плагин собирает сам автор; в
-  `templates/plugin_python` его код едет внутрь `atp_python_bridge`,
-  который поставляет платформа. Загрузить что-либо мимо плагина нельзя,
-  поэтому имя каталога всегда есть чему дать.
-- Модуль представляется в логах **своим именем**, а не именем плагина,
-  который его принёс.
+- **plugin** — the file the host loads (`.dll`/`.so`/`.dylib`) and that registers modules. It is what
+  the `"plugins"` key in a config lists and what `atp_add_plugin()` declares. It must not be linked:
+  the `MODULE` target type makes the attempt a configuration error rather than a broken convention.
+- **module** — a unit of work inside a plugin: what implements `module_base`, what
+  `"module": "counter"` names, and what a pipeline sees. A group is a module too
+  (`group : module_base`).
+- An example and a template are named `plugin_*` — **after the plugin through which the code reaches
+  the host**, not after what the author types. In `templates/plugin` and `templates/plugin_rust` the
+  author builds the plugin themselves; in `templates/plugin_python` their code rides inside
+  `atp_python_bridge`, which the platform ships. Nothing can be loaded except through a plugin, so
+  there is always something for the directory name to name.
+- A module presents itself in the log **by its own name**, not by the name of the plugin that brought
+  it.
 
-## Язык и структура проекта
+## Language and project structure
 
-- C++23, платформа header-only: весь код — заголовки в `include/atp/`,
-  цель `atp_platform` — INTERFACE-таргет.
-- Один класс на заголовок; имя файла = имя класса
-  (`queued_input.hpp` → `queued_input`). Допустимое исключение — тесная
-  пара «база + шаблон» рядом, если база нужна только этому шаблону.
-- Канонический стиль включений — `<atp/...>` в угловых скобках, в том числе
-  между заголовками самой библиотеки.
-- **Подсистема SDK — это папка плюс зонтичный заголовок с её именем**:
-  `io/` + `io.hpp`, `module/` + `module.hpp`, `hosting/` + `hosting.hpp`,
-  `config/` + `config.hpp`, `plugin/` + `plugin.hpp`. Зонтик **не несёт
-  содержания** — только объявляет заголовки своей папки; новый заголовок
-  подсистемы в него дописывается.
-  - Папка — ящик, **зонтик — аудитория**, и выбор зонтика есть решение, кому
-    заголовок показывать: `module.hpp` — то, против чего пишет автор модуля,
-    `hosting.hpp` — то, что нужно поверх этого только хосту и загрузчику.
-  - `support/` зонтика **не имеет намеренно**: это не подсистема, а утилиты
-    без общей аудитории, их включают поимённо.
-  - Хост-рантайм устроен так же одним уровнем наружу:
-    `src/runtime/include/atp/runtime/` плюс `<atp/runtime.hpp>`. В зонтик не
-    входит `runtime/socket_platform.hpp` — он существует ради `<winsock2.h>`, и
-    заголовок, доходящий до каждого потребителя, не должен тащить сокетный стек
-    в единицу трансляции, которой нужен был пайплайн.
-- **Include guard образуется от пути и различает экспортируемое и внутреннее**:
-  `ANITOOLSPLATFORM_<СЕГМЕНТЫ_ПОСЛЕ_atp>_HPP` для `include/atp/**` (SDK, который
-  видит чужой плагин), `ATP_<СЕГМЕНТЫ_ПОСЛЕ_atp>_HPP` для подсистем внутри
-  `src/` (`runtime/`, `studio/`, `mcp/`). Граница ровно там, где проходит
-  экспорт, и держится она соблюдением, а не проверкой.
-- Заголовок обязан быть самодостаточным: `tests/CMakeLists.txt` собирает по
-  единице трансляции на каждый заголовок `include/atp/**` и
-  `src/runtime/include/atp/**`, включающей только его. Правило «включай то, чем
-  пользуешься» этим не заменяется — страж ловит лишь тот инклюд, за которым не
-  стоит вообще никто.
-- В `CMakeLists.txt` заголовки подбираются `file(GLOB_RECURSE ...
-  CONFIGURE_DEPENDS)` — руками их туда вносить не нужно.
+- C++23, a header-only platform: all the code is headers under `include/atp/`, and the target
+  `atp_platform` is an INTERFACE target.
+- One class per header; the file name is the class name (`queued_input.hpp` → `queued_input`). The
+  admissible exception is a tight "base plus template" pair kept together, when the base is needed by
+  that template alone.
+- The canonical include style is `<atp/...>` in angle brackets, between the library's own headers
+  included.
+- **An SDK subsystem is a folder plus an umbrella header named after it**: `io/` + `io.hpp`,
+  `module/` + `module.hpp`, `hosting/` + `hosting.hpp`, `config/` + `config.hpp`,
+  `plugin/` + `plugin.hpp`. An umbrella **carries no content** — it only declares the headers of its
+  folder, and a new header of the subsystem is added to it.
+  - The folder is the box, **the umbrella is the audience**, and choosing an umbrella is a decision
+    about whom to show the header to: `module.hpp` is what a module author writes against,
+    `hosting.hpp` is what only a host and a loader need on top of that.
+  - `support/` **deliberately has no umbrella**: it is not a subsystem but utilities with no common
+    audience, included by name.
+  - The host runtime has the same shape one level out: `src/runtime/include/atp/runtime/` plus
+    `<atp/runtime.hpp>`. Two headers stay out of that umbrella, both for one reason — a header that
+    reaches every consumer must drag neither the socket stack nor a document library into a
+    translation unit that only wanted a pipeline: `runtime/socket_platform.hpp` exists for
+    `<winsock2.h>`, and `runtime/config_value_json.hpp` names `nlohmann::json` in its signatures.
+- **The include guard is formed from the path and distinguishes what is exported from what is
+  internal**: `ANITOOLSPLATFORM_<SEGMENTS_AFTER_atp>_HPP` for `include/atp/**` (the SDK somebody
+  else's plugin sees), `ATP_<SEGMENTS_AFTER_atp>_HPP` for the subsystems inside `src/` (`runtime/`,
+  `studio/`, `mcp/`). The boundary is exactly where the export runs, and it holds by observance rather
+  than by a check.
+- A header must be self-contained: `tests/CMakeLists.txt` builds one translation unit per header of
+  `include/atp/**` and `src/runtime/include/atp/**`, including that header alone. This does not
+  replace the "include what you use" rule — the guard catches only an include that nothing at all
+  stands behind.
+- In `CMakeLists.txt` the headers are picked up by `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)`, so
+  there is no need to list them by hand.
 
-## Форматирование
+## Formatting
 
-Задаётся `.clang-format`: база Chromium, отступ 4 пробела, без табов,
-лимит 120 колонок; тела `if` и циклов всегда в скобках (`InsertBraces`),
-короткие функции в одну строку — только пустые. Не переопределять локально,
-спорные случаи решает автоформат.
+Set by `.clang-format`: the Chromium base, four-space indent, no tabs, a 120-column limit; the bodies
+of `if` and of loops are always braced (`InsertBraces`), and the only short functions put on one line
+are empty ones. Do not override it locally — the formatter settles the arguable cases.
 
-## Именование
+## Naming
 
-Стиль STL-подобный, единый по всей кодовой базе.
+STL-like style, uniform across the codebase.
 
-| Сущность | Правило | Пример |
+| Entity | Rule | Example |
 |---|---|---|
-| Файлы | snake_case | `module_factory_base.hpp` |
-| Типы, функции, переменные | snake_case | `module_registry`, `try_pop` |
-| Поля класса | snake_case с хвостовым `_` | `value_`, `name_` |
-| Type-erased/абстрактные базы | суффикс `_base` | `io_base`, `module_factory_base` |
-| Типизированный класс над базой | «голое» имя без префиксов | `input<T>`, `module_factory<M>` |
-| Tag-типы | `name_t` + строчный `inline constexpr` экземпляр | `safe`/`unsafe`, `throttled_t`/`throttled` |
-| Типовые параметры шаблонов | PascalCase с префиксом `T` | `TBase`, `TItem`, `TInputs` |
-| Нетиповые параметры шаблонов | PascalCase без префикса | `Name`, `Version`, `N` |
+| Files | snake_case | `module_factory_base.hpp` |
+| Types, functions, variables | snake_case | `module_registry`, `try_pop` |
+| Class members | snake_case with a trailing `_` | `value_`, `name_` |
+| Type-erased/abstract bases | `_base` suffix | `io_base`, `module_factory_base` |
+| A typed class over a base | the bare name, no prefix | `input<T>`, `module_factory<M>` |
+| Tag types | `name_t` plus a lowercase `inline constexpr` instance | `safe`/`unsafe`, `throttled_t`/`throttled` |
+| Type template parameters | PascalCase with a `T` prefix | `TBase`, `TItem`, `TInputs` |
+| Non-type template parameters | PascalCase with no prefix | `Name`, `Version`, `N` |
+| Non-throwing variants of a method | `try_` prefix | `try_pop` |
+| Private virtuals behind an NVI wrapper | `do_` prefix | `do_connect` |
+| gtest suite and test names | PascalCase (googletest's own convention) | `ModuleRegistry.AddAndCreate` |
 
-Единственное исключение из префикса `T` — голое `T` у шаблона, параметризованного
-ровно одним типом значения (`input<T>`, `output<T>`, `property<T>`): имя без
-уточнения там читается лучше любого `TValue`. Всё остальное уточняется:
-`TEnum`, `TModule`, `TArg`. Правило проверяется `.clang-tidy`
-(`readability-identifier-naming`), а не только глазами.
-| Немечущие варианты методов | префикс `try_` | `try_pop` |
-| Приватные виртуалы за NVI-обёрткой | префикс `do_` | `do_connect` |
-| Имена gtest-сьютов и тестов | PascalCase (конвенция googletest) | `ModuleRegistry.AddAndCreate` |
+The one exception to the `T` prefix is a bare `T` on a template parameterised by exactly one value type
+(`input<T>`, `output<T>`, `property<T>`): an unqualified name reads better there than any `TValue`.
+Everything else is qualified: `TEnum`, `TModule`, `TArg`. The rule is checked by `.clang-tidy`
+(`readability-identifier-naming`) rather than by eye alone.
 
-Из пары «база + шаблон» видно правило распределения имён: суффикс `_base`
-достаётся абстрактному интерфейсу, а короткое имя — конкретному классу,
-которым пользуются чаще (`module_base`/`module<>`,
-`module_factory_base`/`module_factory<M>`).
+The "base plus template" pair shows the rule for distributing names: the `_base` suffix goes to the
+abstract interface and the short name to the concrete class used more often
+(`module_base`/`module<>`, `module_factory_base`/`module_factory<M>`).
 
-## Комментарии
+## Comments
 
-- Все комментарии — на английском языке.
-- Комментарии живут только в заголовках и только как Doxygen `///` у
-  объявления: первая фраза — краткое описание, далее по необходимости
-  `@param`, `@return`, `@throws`. Так документируются типы, функции и поля
-  публичных структур.
-- В `.cpp` комментариев нет — ни в телах функций, ни над ними; файлы тестов
-  это тоже `.cpp` и правило распространяется на них. Закрывающие
-  `}  // namespace x` — разметка, а не комментарий, и остаются; директивы
-  вроде `// NOLINT(...)` — указание инструменту, которое обязано стоять на
-  своей строке, и тоже остаются.
-- В заголовке не бывает висящих блоков `//` над namespace или группой
-  функций: пояснение принадлежит объявлению, к которому относится, иначе
-  Doxygen прикрепляет его в никуда.
-- Комментарий объясняет замысел и причину («почему так»), а не механику
-  («что делает строка»). Комментарий, пересказывающий код, не пишется.
-- Инварианты и контракты, невыводимые из сигнатур (владение, потоко-
-  безопасность, порядок захвата локов), фиксируются в `///` у объявления.
-- Причина, которой негде встать у объявления (почему выбран такой порядок
-  шагов, чем плох очевидный вариант), уходит в `docs/architecture.md`, а не в
-  тело функции и не в коммит: сообщение коммита — одна строка.
+- All comments are written in English.
+- Comments live in headers only, and only as Doxygen `///` blocks on a declaration: the first sentence
+  is a brief description, followed as needed by `@param`, `@return` and `@throws`. That is how types,
+  functions and the members of public structures are documented.
+- There are no comments in `.cpp` files — neither inside function bodies nor above them; test files
+  are `.cpp` too and the rule covers them. A closing `}  // namespace x` is layout rather than a
+  comment and stays; directives such as `// NOLINT(...)` are instructions to a tool that must stand on
+  their own line, and they stay too.
+- A header never has a floating `//` block over a namespace or a group of functions: an explanation
+  belongs to the declaration it is about, or Doxygen attaches it to nothing.
+- A comment explains the intent and the reason ("why it is so"), not the mechanics ("what this line
+  does"). A comment that retells the code is not written.
+- Invariants and contracts that do not follow from the signatures (ownership, thread safety, lock
+  acquisition order) are recorded in the `///` block on the declaration.
+- A reason with no declaration to stand on (why the steps are in this order, what is wrong with the
+  obvious variant) goes into `docs/architecture/`, not into a function body and not into a commit: a
+  commit message is one line.
 
-## Идиомы и запреты
+## Idioms and prohibitions
 
-- Сознательный сброс `[[nodiscard]]`-результата в тестах — приведением `(void)`:
+- A deliberate discard of a `[[nodiscard]]` result in a test is a `(void)` cast:
   `EXPECT_THROW((void)registry.create("missing"), std::runtime_error);`
-- Неброские (`try_`) и бросающие варианты API идут парой в духе
-  `std::map`: `at()` бросает, `find()` возвращает nullptr.
-- Расширение поведения — через приватные виртуалы `do_...` под публичной
-  невиртуальной обёрткой (NVI), а не через публичные виртуалы.
-- Потокобезопасность — свойство экземпляра, выбирается тегом
-  `safe`/`unsafe` при конструировании, а не типом.
+- Non-throwing (`try_`) and throwing variants of an API come in a pair, in the spirit of `std::map`:
+  `at()` throws where `find()` returns nullptr.
+- Behaviour is extended through private `do_...` virtuals under a public non-virtual wrapper (NVI),
+  not through public virtuals.
+- Thread safety is a property of the instance, chosen with the `safe`/`unsafe` tag at construction,
+  rather than by the type.
 
-## Тесты
+## Tests
 
-- googletest; файлы тестов — `snake_case` с суффиксом `_tests.cpp`
-  (`module_registry_tests.cpp`). Файл лежит в каталоге покрываемой
-  подсистемы (`tests/platform/`, `tests/runtime/`, `tests/mcp/`,
-  `tests/studio/`, `tests/ui/`) и приставку подсистемы в имени не
-  повторяет: `runtime/config_loader_tests.cpp`. Источники глобятся —
-  новый файл `tests/CMakeLists.txt` не трогает.
-- Общие для сьютов помощники — в `tests/support/`, подключаются от корня
-  `tests/`: `#include "support/pipeline_test_support.hpp"`.
-- Один сьют на класс/аспект; имя теста — утверждение о поведении
+- googletest; test files are `snake_case` with a `_tests.cpp` suffix (`module_registry_tests.cpp`). A
+  file lives in the directory of the subsystem it covers (`tests/platform/`, `tests/runtime/`,
+  `tests/mcp/`, `tests/studio/`, `tests/ui/`) and does not repeat the subsystem's prefix in its name:
+  `runtime/config_loader_tests.cpp`. The sources are globbed, so a new file does not touch
+  `tests/CMakeLists.txt`.
+- Helpers shared between suites live in `tests/support/` and are included from the `tests/` root:
+  `#include "support/pipeline_test_support.hpp"`.
+- One suite per class or aspect; a test's name is a statement about behaviour
   (`RemoveLastVersionErasesName`).
-- Ожидаемые исключения — `EXPECT_THROW`; проверка текста ошибки — через
-  `try/catch` с `FAIL()` в конце `try`.
+- Expected exceptions use `EXPECT_THROW`; checking an error's text is done with `try`/`catch` and a
+  `FAIL()` at the end of the `try`.

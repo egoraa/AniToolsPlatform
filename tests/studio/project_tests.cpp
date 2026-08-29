@@ -33,7 +33,7 @@ class ProjectFiles : public ::testing::Test {
 };
 
 constexpr const char* sample_config = R"({
-    "version": "3.0",
+    "version": "1.0",
     "pipeline": {
         "modules": [
             {"group": "left", "modules": [{"module": "src"}],
@@ -67,7 +67,7 @@ TEST_F(ProjectFiles, OpenReadsModelAndGroupAtNavigates) {
 }
 
 TEST_F(ProjectFiles, OpenRejectsInvalidConfigWithAggregatedErrors) {
-    const auto file = write("bad.json", R"({"version": "3.0", "pipeline": {"typo": 1}})");
+    const auto file = write("bad.json", R"({"version": "1.0", "pipeline": {"typo": 1}})");
     try {
         (void)atp::studio::project::open(file);
         FAIL() << "expected config_error";
@@ -79,7 +79,7 @@ TEST_F(ProjectFiles, OpenRejectsInvalidConfigWithAggregatedErrors) {
 TEST_F(ProjectFiles, OpenFlagsIncludes) {
     write("part.json", R"({"group": "g", "modules": []})");
     const auto file = write("proj.json", R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"$include": "part.json"}]}
     })");
     const atp::studio::project proj = atp::studio::project::open(file);

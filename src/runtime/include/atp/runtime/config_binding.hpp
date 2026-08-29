@@ -131,10 +131,10 @@ inline void load_text_field(atp::module_config::entry& e,
     }
 }
 
-void load_fields_into(atp::module_config& target,
-                      const atp::config::node& doc,
-                      const std::string& prefix,
-                      std::vector<std::string>& problems);
+inline void load_fields_into(atp::module_config& target,
+                             const atp::config::node& doc,
+                             const std::string& prefix,
+                             std::vector<std::string>& problems);
 
 /// A group is optional on its own: an absent or null key leaves every field inside it at its declared
 /// default, so there is nothing to recurse into. A key that holds something other than an object is
@@ -294,7 +294,7 @@ inline void load_fields_into(atp::module_config& target,
     return atp::config::node();
 }
 
-[[nodiscard]] atp::config::node save_fields_of(const atp::module_config& source);
+[[nodiscard]] inline atp::config::node save_fields_of(const atp::module_config& source);
 
 [[nodiscard]] inline atp::config::node save_list_element(const atp::module_config::entry& e, std::size_t i) {
     if (e.element() == atp::field_kind::object) {
@@ -361,7 +361,7 @@ inline atp::config::node save_fields_of(const atp::module_config& source) {
     return result;
 }
 
-[[nodiscard]] atp::config::node values_of_config(const atp::module_config& source);
+[[nodiscard]] inline atp::config::node values_of_config(const atp::module_config& source);
 
 [[nodiscard]] inline atp::config::node values_of_element(const atp::module_config::entry& e, std::size_t i) {
     if (e.element() == atp::field_kind::object) {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "canvas/canvas_scene.hpp"
 
+#include "kit/icons.hpp"
 #include "model/clipboard_actions.hpp"
 #include "model/create_group.hpp"
 #include "model/drag_payloads.hpp"
@@ -11,9 +12,11 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <set>
+#include <string_view>
 #include <tuple>
 #include <typeindex>
 #include <utility>
@@ -36,6 +39,7 @@
 #include <QTimer>
 
 #include <atp/studio/add_module.hpp>
+#include <atp/studio/languages.hpp>
 #include <atp/studio/node_ref.hpp>
 
 namespace atp::studio::ui {
@@ -61,16 +65,49 @@ constexpr double grid_min_scale = 0.4;
 /// Inset of a node's text from its left edge, and therefore twice over from its width.
 constexpr double node_text_inset = 8.0;
 
+/// Top of the node's name, and of the line the mark shares with it.
+constexpr double node_title_top = 4.0;
+
 /// Sets a node's line of text, shortened to fit the node and carrying the whole of it in a tooltip.
 /// A QGraphicsSimpleTextItem clips nothing of its own, so a long factory name simply ran out past
 /// the node and over whatever was beside it.
-/// @param item the text item
+///
+/// The room is measured from where the item already sits, so it must be **positioned first**: the
+/// name shares its line with the node's mark and starts further in than the line below it, and a
+/// room measured from the left edge for both would let the name run out past the node again.
+/// @param item the text item, already positioned
 /// @param text what it should say
 void set_node_text(QGraphicsSimpleTextItem* item, const QString& text) {
     const QFontMetricsF metrics(item->font());
-    const double room = node_width - (2 * node_text_inset);
+    const double room = node_width - item->pos().x() - node_text_inset;
     item->setText(metrics.elidedText(text, Qt::ElideRight, room));
     item->setToolTip(text);
+}
+
+/// What the mark beside a node's name means, in words: the language a module is written in and the
+/// file it was declared in, or the one fact there is when there is no language to name. A module that
+/// named a file is a script whatever the extension says — naming one is what a bridge does and an
+/// ordinary plugin does not — so an unrecognised extension is a script of no known language here, and
+/// never a binary module.
+/// @param info description of the module, nullptr for a subgroup and for a factory that is not loaded
+/// @param is_module whether the node is a module rather than a subgroup
+/// @param lang the language of the module's source, nullptr when its extension names none
+QString glyph_tooltip(const module_info* info, bool is_module, const script_language* lang) {
+    if (!is_module) {
+        return QStringLiteral("Subgroup");
+    }
+    if (info == nullptr) {
+        return QStringLiteral("Module — its factory is not loaded");
+    }
+    if (info->source.empty()) {
+        return QStringLiteral("Binary module");
+    }
+    QString tip = lang != nullptr ? QString::fromUtf8(lang->label.data(), static_cast<qsizetype>(lang->label.size()))
+                                  : QStringLiteral("Script");
+    tip += QStringLiteral(" module");
+    tip += QStringLiteral("\n");
+    tip += QString::fromStdString(info->source);
+    return tip;
 }
 
 bool drop_allowed(const pin_item& from, const pin_item& to) {
@@ -142,6 +179,8 @@ void canvas_scene::rebuild() {
     }
     rebuild_links(*g);
     build_stubs(*g);
+    raise_new_nodes(*g);
+    apply_stacking();
     rebuilding_ = false;
 
     for (const std::string& name : select_after_rebuild_) {
@@ -177,17 +216,62 @@ void canvas_scene::update_samples() {
             link->set_hot(false);
             link->set_label({});
         }
+        for (stub_item* stub : stubs_) {
+            stub->set_hot(false);
+        }
         prev_writes_.clear();
         return;
     }
+    std::map<std::pair<std::string, std::size_t>, std::uint64_t> writes;
     for (const session::connection_sample& sample : state_.view->sample_connections()) {
-        if (sample.group_path != state_.current_group || sample.index >= links_.size()) {
+        writes.emplace(std::pair{sample.group_path, sample.index}, sample.writes);
+    }
+    const auto grew = [this, &writes](const std::pair<std::string, std::size_t>& key) {
+        const auto now = writes.find(key);
+        if (now == writes.end()) {
+            return false;
+        }
+        const auto before = prev_writes_.find(key);
+        return before != prev_writes_.end() && before->second != now->second;
+    };
+    for (std::size_t i = 0; i < links_.size(); ++i) {
+        links_[i]->set_hot(grew({state_.current_group, i}));
+    }
+    for (stub_item* stub : stubs_) {
+        stub->set_hot(std::ranges::any_of(outer_connections(stub->alias(), stub->is_output()), grew));
+    }
+    prev_writes_ = std::move(writes);
+}
+
+std::vector<std::pair<std::string, std::size_t>> canvas_scene::outer_connections(const std::string& alias,
+                                                                                 bool is_output) const {
+    std::vector<std::pair<std::string, std::size_t>> found;
+    std::vector<std::pair<std::string, std::string>> ports{{state_.current_group, alias}};
+    while (!ports.empty()) {
+        const auto [path, name] = ports.back();
+        ports.pop_back();
+        if (path.empty()) {
             continue;
         }
-        link_item* link = links_[sample.index];
-        link->set_hot(sample.writes != prev_writes_[sample.index]);
-        prev_writes_[sample.index] = sample.writes;
+        const std::size_t dot = path.rfind('.');
+        const std::string parent = dot == std::string::npos ? std::string() : path.substr(0, dot);
+        const std::string endpoint = (dot == std::string::npos ? path : path.substr(dot + 1)) + "." + name;
+        const runtime::group_node* g = state_.doc.group_at(parent);
+        if (g == nullptr) {
+            continue;
+        }
+        for (std::size_t i = 0; i < g->connections.size(); ++i) {
+            if ((is_output ? g->connections[i].from : g->connections[i].to) == endpoint) {
+                found.emplace_back(parent, i);
+            }
+        }
+        for (const auto& [outer_alias, port_path] : is_output ? g->expose_outputs : g->expose_inputs) {
+            if (port_path == endpoint) {
+                ports.emplace_back(parent, outer_alias);
+            }
+        }
     }
+    return found;
 }
 
 void canvas_scene::drawBackground(QPainter* painter, const QRectF& rect) {
@@ -296,6 +380,7 @@ void canvas_scene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
                 moving_.push_back({node, node->pos()});
             }
         }
+        raise_moving();
     }
 }
 
@@ -335,6 +420,7 @@ void canvas_scene::begin_copy_drag() {
         }
     }
     moving_node_ = moving_.empty() ? nullptr : moving_.front().item;
+    raise_moving();
     drag_copies_ = std::move(copies);
 }
 
@@ -373,6 +459,81 @@ node_item* canvas_scene::node_by_name(const std::string& name) const {
         }
     }
     return nullptr;
+}
+
+void canvas_scene::forget_stacking() {
+    raised_.clear();
+    built_.clear();
+}
+
+void canvas_scene::raise_new_nodes(const runtime::group_node& g) {
+    std::set<std::string> present;
+    for (const runtime::child_node& c : g.modules) {
+        present.insert(c.module ? c.module->name : c.group->name);
+    }
+    auto known = built_.find(state_.current_group);
+    if (known == built_.end()) {
+        built_.emplace(state_.current_group, std::move(present));
+        return;
+    }
+    std::vector<std::string>& order = raised_[state_.current_group];
+    for (const runtime::child_node& c : g.modules) {
+        const std::string& name = c.module ? c.module->name : c.group->name;
+        if (!known->second.contains(name)) {
+            std::erase(order, name);
+            order.insert(order.begin(), name);
+        }
+    }
+    known->second = std::move(present);
+}
+
+void canvas_scene::raise_moving() {
+    if (moving_.empty()) {
+        return;
+    }
+    std::vector<std::string> lifted;
+    for (QGraphicsItem* item : items()) {
+        auto* node = qgraphicsitem_cast<node_item*>(item);
+        if (node == nullptr) {
+            continue;
+        }
+        if (std::ranges::any_of(moving_, [node](const dragged& d) { return d.item == node; })) {
+            lifted.push_back(node->child_name());
+        }
+    }
+    std::vector<std::string>& order = raised_[state_.current_group];
+    std::erase_if(order, [&](const std::string& name) { return std::ranges::find(lifted, name) != lifted.end(); });
+    order.insert(order.begin(), lifted.begin(), lifted.end());
+    apply_stacking();
+}
+
+void canvas_scene::apply_stacking() {
+    std::vector<node_item*> nodes;
+    for (QGraphicsItem* item : items()) {
+        if (auto* node = qgraphicsitem_cast<node_item*>(item)) {
+            nodes.push_back(node);
+        }
+    }
+    auto order = raised_.find(state_.current_group);
+    std::vector<node_item*> front;
+    if (order != raised_.end()) {
+        for (const std::string& name : order->second) {
+            auto found = std::ranges::find_if(nodes, [&](node_item* node) { return node->child_name() == name; });
+            if (found != nodes.end()) {
+                front.push_back(*found);
+                nodes.erase(found);
+            }
+        }
+    }
+    double z = -1.0;
+    for (node_item* node : front) {
+        node->setZValue(z);
+        z -= 1.0;
+    }
+    for (node_item* node : nodes) {
+        node->setZValue(z);
+        z -= 1.0;
+    }
 }
 
 void canvas_scene::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
@@ -864,9 +1025,10 @@ describe_fn canvas_scene::describer() {
 void canvas_scene::build_node(const runtime::child_node& c,
                               const std::unordered_map<std::string, node_position>& fallback) {
     const std::string& name = c.module ? c.module->name : c.group->name;
+    const module_info* info = c.module ? state_.describe_cached(c.module->factory, c.module->factory_version) : nullptr;
     std::vector<std::tuple<std::string, bool, std::optional<std::type_index>>> ports;
     if (c.module) {
-        if (const module_info* info = state_.describe_cached(c.module->factory, c.module->factory_version)) {
+        if (info != nullptr) {
             for (const port_info& p : info->inputs) {
                 ports.emplace_back(p.name, false, p.type);
             }
@@ -887,20 +1049,33 @@ void canvas_scene::build_node(const runtime::child_node& c,
     auto* node = new node_item(name, !c.module, height, colors_);
     addItem(node);
 
+    const script_language* lang = info != nullptr ? language_of_source(info->source) : nullptr;
+    const bool scripted = info != nullptr && !info->source.empty();
+    QString artwork = icons::group_artwork();
+    if (c.module) {
+        artwork = scripted ? icons::script_artwork(lang != nullptr ? lang->id : std::string_view())
+                           : icons::binary_module_artwork();
+    }
     auto* title = new QGraphicsSimpleTextItem(node);
+    const glyph_layout mark = node_glyph_layout(title->font(), node_title_top, node_text_inset);
+
+    auto* glyph = new glyph_item(node, artwork, colors_.node_title, mark.side);
+    glyph->setPos(node_text_inset, mark.top);
+    glyph->setToolTip(glyph_tooltip(info, c.module.has_value(), lang));
+
     title->setBrush(QBrush(colors_.node_title));
+    title->setPos(mark.text_left, node_title_top);
     set_node_text(title, QString::fromStdString(c.module ? name : "[" + name + "]"));
-    title->setPos(node_text_inset, 4);
     if (c.module) {
         auto* subtitle = new QGraphicsSimpleTextItem(node);
         subtitle->setBrush(QBrush(colors_.node_subtitle));
         QString said = QString::fromStdString(c.module->factory);
-        if (state_.describe_cached(c.module->factory, c.module->factory_version) == nullptr) {
+        if (info == nullptr) {
             said += QStringLiteral("  (no factory)");
             subtitle->setBrush(QBrush(colors_.node_alert));
         }
-        set_node_text(subtitle, said);
         subtitle->setPos(node_text_inset, 18);
+        set_node_text(subtitle, said);
     }
 
     double y = node_header;

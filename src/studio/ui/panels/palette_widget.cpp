@@ -54,7 +54,7 @@ class palette_tree final : public QTreeWidget {
             for (const module_info& m : p.modules) {
                 auto* item = new QTreeWidgetItem(root);
                 item->setText(0, QString::fromStdString(m.name + " " + m.ver.to_string()));
-                item->setIcon(0, module_icon_);
+                item->setIcon(0, module_icons_.of_source(m.source));
                 item->setData(0, Qt::UserRole, QString::fromStdString(m.name));
                 item->setData(0, Qt::UserRole + 1, QString::fromStdString(m.ver.to_string()));
                 item->setData(0, Qt::UserRole + 2, QString::fromStdWString(p.path.wstring()));
@@ -128,7 +128,7 @@ class palette_tree final : public QTreeWidget {
 
     QIcon group_icon_ = icons::group();
     QIcon plugin_icon_ = icons::plugin();
-    QIcon module_icon_ = icons::module();
+    icons::module_icons module_icons_;
 };
 
 palette_widget::palette_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent)

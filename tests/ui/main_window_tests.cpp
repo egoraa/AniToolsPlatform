@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -20,6 +22,9 @@
 #include <QTabWidget>
 #include <QToolBar>
 
+#include <atp/runtime/property_override.hpp>
+#include <atp/studio/runtime_view_base.hpp>
+
 #include "model/app_state.hpp"
 #include "shell/main_window.hpp"
 #include "ui/qt_app.hpp"
@@ -28,6 +33,41 @@ namespace {
 
 using atp::studio::ui::app_state;
 using atp::studio::ui::main_window;
+
+/// A view that says the pipeline is running, so the rules the window applies while it is can be
+/// checked without standing a real one up — the arrangement runtime_widget_tests and
+/// config_tree_tests already use.
+class pretend_running final : public atp::studio::runtime_view_base {
+   public:
+    [[nodiscard]] bool running() const override {
+        return true;
+    }
+    [[nodiscard]] std::string error_text() const override {
+        return {};
+    }
+    [[nodiscard]] std::vector<atp::runtime::pipeline_runner::thread_stats> stats() const override {
+        return {};
+    }
+    [[nodiscard]] std::vector<atp::runtime::connection_sample> sample_connections() const override {
+        return {};
+    }
+    [[nodiscard]] std::vector<atp::runtime::group::module_stats> module_metrics() const override {
+        return {};
+    }
+    [[nodiscard]] std::vector<atp::runtime::group::port_stats> input_metrics() const override {
+        return {};
+    }
+    [[nodiscard]] bool metrics_enabled() const override {
+        return false;
+    }
+    bool set_metrics_enabled(bool) override {
+        return false;
+    }
+    [[nodiscard]] std::vector<atp::studio::live_property> live_properties(const std::string&) const override {
+        return {};
+    }
+    void set_property(const atp::runtime::property_override&) override {}
+};
 
 TEST(UiMainWindow, ClosingWithASelectedNodeDoesNotReachTheDeadInspector) {
     (void)atp_ui_tests::ensure_app();
@@ -62,7 +102,7 @@ TEST(UiMainWindow, TheToolbarCarriesTheActionsAPersonReachesFor) {
         }
     }
     for (const QString& wanted : {"action.new", "action.open", "action.save", "action.undo", "action.redo",
-                                  "action.new_group", "action.run", "action.stop"}) {
+                                  "action.new_group", "action.run", "action.stop", "action.attach"}) {
         EXPECT_TRUE(names.contains(wanted)) << wanted.toStdString();
     }
 }
@@ -84,7 +124,7 @@ TEST(UiMainWindow, TheToolbarGroupsAreDividedByPlainSeparators) {
             ++nameless;
         }
     }
-    EXPECT_EQ(separators, 3) << "file, edit, structure, transport";
+    EXPECT_EQ(separators, 4) << "file, edit, structure, transport, host";
     EXPECT_EQ(nameless, 0) << "the style decides what a separator looks like; padding it puts the groups too far apart";
 }
 
@@ -100,6 +140,20 @@ TEST(UiMainWindow, EveryToolbarActionCarriesAnIcon) {
             EXPECT_FALSE(action->icon().isNull()) << action->objectName().toStdString();
         }
     }
+}
+
+TEST(UiMainWindow, AttachIsRefusedWhileTheLocalPipelineRuns) {
+    (void)atp_ui_tests::ensure_app();
+    app_state state;
+    pretend_running running;
+    state.view = &running;
+    auto window = std::make_unique<main_window>(state);
+
+    auto* attach = window->findChild<QAction*>(QStringLiteral("action.attach"));
+    ASSERT_NE(attach, nullptr);
+    EXPECT_FALSE(attach->isEnabled())
+        << "attaching leaves the local runner spinning and points every control at the remote, so "
+           "the window would hold a running pipeline it can no longer stop";
 }
 
 TEST(UiMainWindow, TheStatusBarSaysWhatThePipelineIsDoingAndWhichFileIsOpen) {

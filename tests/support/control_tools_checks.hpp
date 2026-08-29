@@ -84,7 +84,7 @@ class pipeline_view {
 /// connection, and a property to edit. Written once, because the point of the checks below is that
 /// the two hosts answer identically about the same pipeline.
 inline constexpr const char* control_target_config = R"({
-    "version": "3.0",
+    "version": "1.0",
     "pipeline": {
         "modules": [
             {"module": "control_source", "name": "src"},

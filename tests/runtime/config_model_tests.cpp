@@ -16,7 +16,7 @@ namespace {
 
 TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.0",
+        "version": "1.0",
         "plugins": ["p.dll"],
         "pipeline": {
             "modules": [
@@ -33,7 +33,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
     ASSERT_TRUE(atp::runtime::validate(doc).empty());
 
     const atp::runtime::config cfg = atp::runtime::decode(doc);
-    EXPECT_EQ(cfg.schema, (atp::version{3, 0}));
+    EXPECT_EQ(cfg.schema, (atp::version{1, 0}));
     ASSERT_EQ(cfg.plugins.size(), 1u);
 
     ASSERT_EQ(cfg.pipeline.modules.size(), 2u);
@@ -66,7 +66,7 @@ TEST(ConfigDecode, BuildsTypedModelPreservingOrder) {
 
 TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "counter"}]}
     })");
     ASSERT_TRUE(atp::runtime::validate(doc).empty());
@@ -82,7 +82,7 @@ TEST(ConfigDecode, DefaultsNameToFactoryAndOmittedFields) {
 
 TEST(ConfigEncode, RoundTripsCanonicalDocument) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.0",
+        "version": "1.0",
         "plugins": ["p.dll"],
         "pipeline": {
             "modules": [
@@ -101,7 +101,7 @@ TEST(ConfigEncode, RoundTripsCanonicalDocument) {
 }
 
 TEST(ConfigEncode, RoundTripIsPinnedOnTheTextNotTheTree) {
-    const atp::config::node doc = atp::runtime::json_parse(R"({"version":"3.3","pipeline":{}})");
+    const atp::config::node doc = atp::runtime::json_parse(R"({"version":"1.0","pipeline":{}})");
     const atp::config::node back = atp::runtime::encode(atp::runtime::decode(doc));
     EXPECT_EQ(atp::runtime::json_dump(back), atp::runtime::json_dump(doc));
     EXPECT_EQ(back.key_at(0), "version");
@@ -109,7 +109,7 @@ TEST(ConfigEncode, RoundTripIsPinnedOnTheTextNotTheTree) {
 
 TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {
             "modules": [
                 {"module": "counter", "name": "counter"},
@@ -130,7 +130,7 @@ TEST(ConfigEncode, OmitsDefaultsAndStaysValid) {
 
 TEST(ConfigModel, InlineConfigSurvivesRoundTrip) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.2",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "resampler", "config": {"channels": [1, 2]}}]}
     })");
     EXPECT_EQ(atp::runtime::json_dump(atp::runtime::encode(atp::runtime::decode(doc))), atp::runtime::json_dump(doc));
@@ -138,7 +138,7 @@ TEST(ConfigModel, InlineConfigSurvivesRoundTrip) {
 
 TEST(ConfigModel, ConfigReferenceSurvivesRoundTripUnexpanded) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.2",
+        "version": "1.0",
         "configs": {"rig": {"channels": [1, 2]}},
         "pipeline": {"modules": [{"module": "resampler", "config": "rig"}]}
     })");
@@ -147,14 +147,14 @@ TEST(ConfigModel, ConfigReferenceSurvivesRoundTripUnexpanded) {
     EXPECT_TRUE(back.at("pipeline").at("modules")[0].at("config").is_string());
 }
 
-TEST(ConfigModel, SchemaIsThreeThree) {
-    EXPECT_EQ(atp::runtime::config_schema_version.parts[0], 3U);
-    EXPECT_EQ(atp::runtime::config_schema_version.parts[1], 3U);
+TEST(ConfigModel, SchemaIsOneZero) {
+    EXPECT_EQ(atp::runtime::config_schema_version.parts[0], 1U);
+    EXPECT_EQ(atp::runtime::config_schema_version.parts[1], 0U);
 }
 
 TEST(ConfigModel, AFileConfigSurvivesARoundTripUnexpanded) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.3",
+        "version": "1.0",
         "configs": {"shared": "file:shared.json"},
         "pipeline": {"modules": [{"module": "resampler", "config": "file:rig.yaml"}]}
     })");
@@ -166,7 +166,7 @@ TEST(ConfigModel, AFileConfigSurvivesARoundTripUnexpanded) {
 
 TEST(ConfigModel, AbsentConfigIsNotWrittenBack) {
     const atp::config::node doc = atp::runtime::json_parse(R"({
-        "version": "3.2",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "resampler"}]}
     })");
     const atp::config::node back = atp::runtime::encode(atp::runtime::decode(doc));

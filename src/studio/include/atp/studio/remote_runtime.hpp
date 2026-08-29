@@ -149,9 +149,17 @@ class remote_runtime final : public runtime_view_base {
     /// that one repaint costs one round trip instead of thirty.
     static constexpr std::chrono::milliseconds status_lifetime{100};
 
+    /// The kind a host named, "number" of a host built before the kinds parted included.
+    ///
+    /// That older word maps to real rather than to integer on purpose: a whole number read as a real
+    /// edits and writes back unchanged, while the other way round would put "5.0" into an integer
+    /// property and have it refused.
     [[nodiscard]] io::property_kind kind_of(const std::string& name) const {
-        if (name == "number") {
-            return io::property_kind::number;
+        if (name == "integer") {
+            return io::property_kind::integer;
+        }
+        if (name == "real" || name == "number") {
+            return io::property_kind::real;
         }
         if (name == "boolean") {
             return io::property_kind::boolean;

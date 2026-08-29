@@ -87,7 +87,7 @@ atp::runtime::config make_config(const char* text) {
 
 atp::runtime::config session_config() {
     const atp::config::node proj = atp::runtime::json_parse(R"({
-        "version": "3.0",
+        "version": "1.0",
         "pipeline": {
             "modules": [
                 {"group": "left", "modules": [{"module": "studio_source", "name": "src"}],
@@ -162,7 +162,7 @@ TEST(StudioSession, AFileConfigResolvesAgainstTheProjectDirectory) {
 
     atp::studio::session s(manager.registry());
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
     })");
 
@@ -180,7 +180,7 @@ TEST(StudioSession, AnUnsavedProjectSaysWhyARelativeFileConfigCannotResolve) {
 
     atp::studio::session s(manager.registry());
     const atp::runtime::config cfg = make_config(R"({
-        "version": "3.3",
+        "version": "1.0",
         "pipeline": {"modules": [{"module": "config_reader", "config": "file:rig.json"}]}
     })");
 
@@ -198,7 +198,7 @@ TEST(StudioSession, SetPropertyReachesLiveModule) {
     registry.add<target_module>();
     atp::studio::session s(registry);
     EXPECT_THROW(s.set_property({"target", "limit", "5"}), std::logic_error);
-    s.start(make_config(R"({"version": "3.0", "pipeline": {"modules": [{"module": "target"}]}})"));
+    s.start(make_config(R"({"version": "1.0", "pipeline": {"modules": [{"module": "target"}]}})"));
     s.set_property({"target", "limit", "42"});
     auto* m = s.live_root()->find_module("target");
     ASSERT_NE(m, nullptr);

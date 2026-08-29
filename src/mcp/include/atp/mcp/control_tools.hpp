@@ -60,11 +60,13 @@ namespace detail {
     }
 }
 
-/// JSON name of a property kind, the same three words the catalog uses.
+/// JSON name of a property kind, the same four words the catalog uses.
 [[nodiscard]] inline const char* kind_name(io::property_kind kind) {
     switch (kind) {
-        case io::property_kind::number:
-            return "number";
+        case io::property_kind::integer:
+            return "integer";
+        case io::property_kind::real:
+            return "real";
         case io::property_kind::boolean:
             return "boolean";
         case io::property_kind::text:

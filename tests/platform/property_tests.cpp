@@ -85,7 +85,7 @@ TEST(Property, StringAccessThroughBase) {
     EXPECT_EQ(limit.get(), 77);
     EXPECT_TRUE(limit.changed());
     EXPECT_EQ(base.default_string(), "10");
-    EXPECT_EQ(base.kind(), atp::io::property_kind::number);
+    EXPECT_EQ(base.kind(), atp::io::property_kind::integer);
 }
 
 TEST(Property, FromStringGarbageThrowsWithContext) {
@@ -171,7 +171,7 @@ TEST(Property, EnumWithoutZeroVariantDemandsExplicitDefault) {
 TEST(Property, AllowedRestrictsScalarProperty) {
     atp::io::property<int> channels("channels", 2, atp::io::allowed(1, 2, 6));
     EXPECT_EQ(channels.options(), (std::vector<std::string>{"1", "2", "6"}));
-    EXPECT_EQ(channels.kind(), atp::io::property_kind::number);
+    EXPECT_EQ(channels.kind(), atp::io::property_kind::integer);
     channels(6);
     EXPECT_EQ(channels.get(), 6);
     EXPECT_THROW(channels(3), std::invalid_argument);

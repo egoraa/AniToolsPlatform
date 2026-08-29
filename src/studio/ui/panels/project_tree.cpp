@@ -11,6 +11,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -163,7 +164,8 @@ void project_tree::build_children(QTreeWidgetItem* parent, const runtime::group_
         item->setData(0, group_role, !c.module.has_value());
         item->setFlags(item->flags() | Qt::ItemIsEditable);
         if (c.module) {
-            item->setIcon(0, module_icon_);
+            const module_info* info = state_.describe_cached(c.module->factory, c.module->factory_version);
+            item->setIcon(0, module_icons_.of_source(info != nullptr ? info->source : std::string_view()));
             item->setText(1, QString::fromStdString(c.module->factory));
             item->setToolTip(1, QString::fromStdString(
                                     c.module->factory + "@" +

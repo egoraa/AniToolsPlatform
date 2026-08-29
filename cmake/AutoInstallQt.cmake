@@ -1,8 +1,28 @@
 set(ATP_QT_VERSION 6.10.3)
 
+# The floor is what the sources actually compile against, and it is deliberately not ATP_QT_VERSION:
+# a distribution's own Qt is a legitimate kit, and every step up here takes the GUI away from whoever
+# builds against one — silently, since ATP_AUTO_INSTALL_QT is off by default. So a call that would
+# raise it is worth a second look at the call: log_filter says the same thing with
+# invalidateRowsFilter() as it did with the beginFilterChange()/endFilterChange() pair, which alone
+# would have cost the tree 6.10.
 set(ATP_QT_MINIMUM 6.8)
 
 find_package(Qt6 ${ATP_QT_MINIMUM} COMPONENTS Widgets QUIET)
+
+# Why there is none, for the message src/studio prints. find_package answers a plain "not found" both
+# for a machine with no Qt and for one whose Qt is merely older than the floor, and the second reader
+# is sent looking for an installation that is already there. Qt6_CONSIDERED_VERSIONS is config mode's
+# own record of what it refused, so the reason costs no second search — and a second find_package
+# would be worse than a vague message, since it caches Qt6_DIR on the very kit the version check has
+# just rejected, where the REQUIRED call below would then find it again.
+set(ATP_QT_REJECTED "")
+if (NOT Qt6_FOUND AND Qt6_CONSIDERED_VERSIONS)
+    set(_atp_qt_seen ${Qt6_CONSIDERED_VERSIONS})
+    list(REMOVE_DUPLICATES _atp_qt_seen)
+    list(JOIN _atp_qt_seen ", " ATP_QT_REJECTED)
+    unset(_atp_qt_seen)
+endif ()
 
 if (NOT Qt6_FOUND AND ATP_AUTO_INSTALL_QT)
     if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")

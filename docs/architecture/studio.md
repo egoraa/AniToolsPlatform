@@ -461,6 +461,20 @@ geometry is applied, so the fraction there would be computed against the wrong w
 `restoreState`'s result rather than on "the string is non-empty" — a corrupt or outdated blob would
 pass the second check and fail the first.
 
+**A fraction only holds while nothing in the row insists on pixels.** `resizeDocks` is a request, and
+a dock is never resized below the minimum its content declares, so a panel asking for a number of
+pixels wins over the layout without saying anything. The Runtime panel asked: it stacks three tables —
+threads, module metrics, port metrics — and their minimums, the section headers and the controls row
+came to 438 px against the 300 the fraction gives the bottom row of a 900-pixel window. The row took
+the difference from the canvas, which is how the thing being edited ended up with less room than the
+docks it is edited between. The panel's body therefore sits in a `QScrollArea`, exactly as the
+Inspector's does: the dock's minimum drops to 87 px, the row keeps its fraction, and the section that
+does not fit is reached with the scrollbar rather than every table being squeezed to a header and a
+row. Squeezing them was tried first — a floor of a header and a row instead of `style::embed_view`'s
+four rows — and it does satisfy the invariant, at the price of three tables clipped mid-placeholder in
+the default layout. Recorded by the test `TheDefaultLayoutLeavesTheCanvasMoreRoomThanTheBottomDocks`,
+which reads the two heights at that window size.
+
 ## The Log dock: line order, the side strip and sticking to the tail
 
 **A log reads like a console — old at the top, new at the bottom.** The reverse order works in itself,

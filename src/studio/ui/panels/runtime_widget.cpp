@@ -9,6 +9,7 @@
 
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QScrollArea>
 #include <QString>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
@@ -46,8 +47,18 @@ constexpr int capacity_column = 5;
 
 runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent)
     : QWidget(parent), state_(state), callbacks_(callbacks) {
-    auto* layout = new QVBoxLayout(this);
-    auto* controls = new QWidget(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto* body = new QWidget(scroll);
+    scroll->setWidget(body);
+    outer->addWidget(scroll);
+
+    auto* layout = new QVBoxLayout(body);
+    auto* controls = new QWidget(body);
     auto* controls_layout = new QHBoxLayout(controls);
     controls_layout->setContentsMargins(0, 0, 0, 0);
     run_ = new QPushButton("Run", controls);
@@ -64,17 +75,17 @@ runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidge
     controls_layout->addWidget(updated_);
     layout->addWidget(controls);
 
-    layout->addWidget(style::section_header("threads", this));
-    threads_ = new thread_table(state_, callbacks_, this);
+    layout->addWidget(style::section_header("threads", body));
+    threads_ = new thread_table(state_, callbacks_, body);
     layout->addWidget(threads_, 1);
 
-    layout->addWidget(style::section_header("modules", this));
-    measure_ = new QCheckBox("measure each module's iterate", this);
+    layout->addWidget(style::section_header("modules", body));
+    measure_ = new QCheckBox("measure each module's iterate", body);
     measure_->setToolTip(
         "Times every iterate. Not free — it cost a quarter of the throughput of a two-module "
         "pipeline — so switch it on to find the slow module, then off again.");
     layout->addWidget(measure_);
-    modules_ = new QTableWidget(0, 5, this);
+    modules_ = new QTableWidget(0, 5, body);
     modules_->setObjectName("module_metrics");
     modules_->setHorizontalHeaderLabels({"module", "calls", "busy", "total ms", "max us"});
     modules_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -83,8 +94,8 @@ runtime_widget::runtime_widget(app_state& state, ui_callbacks& callbacks, QWidge
     style::set_placeholder(modules_, "Run the pipeline and switch measuring on to collect timings.");
     layout->addWidget(modules_, 1);
 
-    layout->addWidget(style::section_header("ports", this));
-    ports_ = new QTableWidget(0, 6, this);
+    layout->addWidget(style::section_header("ports", body));
+    ports_ = new QTableWidget(0, 6, body);
     ports_->setObjectName("input_metrics");
     ports_->setHorizontalHeaderLabels({"port", "received", "discarded", "pending", "peak", "capacity"});
     ports_->setEditTriggers(QAbstractItemView::NoEditTriggers);

@@ -25,6 +25,14 @@ namespace atp::studio::ui {
 /// is a real control, not a display preference, and it only means anything while a pipeline runs.
 /// The port table has no such switch: its counters are kept unconditionally, and giving an operator
 /// a way to switch off the only sign of data loss would be a poor kind of choice.
+///
+/// The body scrolls, as the Inspector's does and for the same reason. Three stacked tables ask for
+/// more height than the bottom row is given: the default layout hands that row a fraction of the
+/// window, while a dock is never resized below the minimum its content declares, so a panel
+/// declaring the sum of three tables takes the missing height from the canvas rather than from the
+/// layout — the canvas is left with less room than the docks it is being edited between. Scrolling
+/// returns that decision to the layout: the row keeps its fraction, and what does not fit is
+/// reached with the scrollbar instead of every table being squeezed down to a header and a row.
 class runtime_widget final : public QWidget {
    public:
     runtime_widget(app_state& state, ui_callbacks& callbacks, QWidget* parent = nullptr);

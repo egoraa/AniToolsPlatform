@@ -59,6 +59,11 @@ long long int_at(lua_State* state, int table, int index) {
     return value;
 }
 
+std::string bad_kind(const char* what, const char* name, long long value) {
+    return std::string(what) + " '" + (name == nullptr ? "?" : name) + "' has kind " + std::to_string(value) +
+           ", which is outside atp_kind";
+}
+
 std::optional<atp_kind> kind_at(lua_State* state, int table, int index) {
     switch (int_at(state, table, index)) {
         case ATP_KIND_I32:
@@ -90,7 +95,7 @@ const char* keep_at(lua_State* state, module_slot& slot, int table, int index) {
     return slot.texts.back().c_str();
 }
 
-void read_inputs(lua_State* state, module_slot& slot, int rows) {
+void read_inputs(lua_State* state, module_slot& slot, int rows, std::string& why) {
     const std::size_t count = lua_rawlen(state, rows);
     for (std::size_t i = 1; i <= count; ++i) {
         lua_rawgeti(state, rows, static_cast<lua_Integer>(i));
@@ -99,6 +104,8 @@ void read_inputs(lua_State* state, module_slot& slot, int rows) {
         desc.name = keep_at(state, slot, row, 1);
         if (const std::optional<atp_kind> kind = kind_at(state, row, 2)) {
             desc.kind = *kind;
+        } else if (why.empty()) {
+            why = bad_kind("input", desc.name, int_at(state, row, 2));
         }
         desc.flavor = static_cast<atp_flavor>(int_at(state, row, 3));
         desc.capacity = static_cast<std::uint32_t>(int_at(state, row, 4));
@@ -109,7 +116,7 @@ void read_inputs(lua_State* state, module_slot& slot, int rows) {
     }
 }
 
-void read_outputs(lua_State* state, module_slot& slot, int rows) {
+void read_outputs(lua_State* state, module_slot& slot, int rows, std::string& why) {
     const std::size_t count = lua_rawlen(state, rows);
     for (std::size_t i = 1; i <= count; ++i) {
         lua_rawgeti(state, rows, static_cast<lua_Integer>(i));
@@ -118,6 +125,8 @@ void read_outputs(lua_State* state, module_slot& slot, int rows) {
         desc.name = keep_at(state, slot, row, 1);
         if (const std::optional<atp_kind> kind = kind_at(state, row, 2)) {
             desc.kind = *kind;
+        } else if (why.empty()) {
+            why = bad_kind("output", desc.name, int_at(state, row, 2));
         }
         slot.outputs.push_back(desc);
         slot.output_kinds.push_back(desc.kind);
@@ -125,7 +134,7 @@ void read_outputs(lua_State* state, module_slot& slot, int rows) {
     }
 }
 
-void read_properties(lua_State* state, module_slot& slot, int rows) {
+void read_properties(lua_State* state, module_slot& slot, int rows, std::string& why) {
     const std::size_t count = lua_rawlen(state, rows);
     for (std::size_t i = 1; i <= count; ++i) {
         lua_rawgeti(state, rows, static_cast<lua_Integer>(i));
@@ -134,6 +143,8 @@ void read_properties(lua_State* state, module_slot& slot, int rows) {
         desc.name = keep_at(state, slot, row, 1);
         if (const std::optional<atp_kind> kind = kind_at(state, row, 2)) {
             desc.kind = *kind;
+        } else if (why.empty()) {
+            why = bad_kind("property", desc.name, int_at(state, row, 2));
         }
         desc.default_value = keep_at(state, slot, row, 3);
 
@@ -257,15 +268,21 @@ void build_one(lua_State* state, const std::filesystem::path& script, int row) {
     desc.version_count = static_cast<std::uint32_t>(used);
     lua_pop(state, 1);
 
+    std::string why;
     lua_getfield(state, row, "inputs");
-    read_inputs(state, slot, lua_gettop(state));
+    read_inputs(state, slot, lua_gettop(state), why);
     lua_pop(state, 1);
     lua_getfield(state, row, "outputs");
-    read_outputs(state, slot, lua_gettop(state));
+    read_outputs(state, slot, lua_gettop(state), why);
     lua_pop(state, 1);
     lua_getfield(state, row, "properties");
-    read_properties(state, slot, lua_gettop(state));
+    read_properties(state, slot, lua_gettop(state), why);
     lua_pop(state, 1);
+    if (!why.empty()) {
+        skipped(script, ("module '" + slot.name + "': " + why).c_str());
+        storage().pop_back();
+        return;
+    }
 
     lua_getfield(state, row, "config");
     if (const std::vector<atp_config_field_desc>* fields = read_config_fields(state, slot, lua_gettop(state))) {

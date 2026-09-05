@@ -5,6 +5,17 @@ script. The platform knows nothing about either Python or Lua — both bridges a
 plugins, declared with the same `atp_add_plugin(... C_ABI ...)`, over the path described in `sdk.md`.
 The document map and the tree layout are in `../architecture.md`.
 
+**A descriptor row the C ABI cannot express costs its own module and no more.** Both bridges read the
+port and property rows their package hands over, and a payload type outside `atp_kind` is refused where
+the row is read: the module is dropped with a line naming the script, the module, the port and the value
+the row carried. The alternative is not "the host catches it" — the host does catch it, in
+`validate_c_desc`, but from the constructor of `c_module_factory`, which throws, so the whole plugin
+fails to load and every other script in the process goes down with it. That is the opposite of what the
+rest of discovery does, where an unreadable script is skipped and its neighbours are registered. Both
+packages check the type before it ever reaches a row (`declare` in `atp.lua`, `resolve` in `_kinds.py`),
+so the branch is not reachable by writing an ordinary module; it is reachable by a script that replaces
+the discovery hook, which is a shape the fixtures already cover.
+
 ## The Python bridge (`src/bridges/python/`, target `atp_python_bridge`)
 
 The first consumer of the C path, and one that path foresaw: `plugin_c.h` names "a bridge embedding an

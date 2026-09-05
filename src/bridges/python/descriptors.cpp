@@ -2,6 +2,7 @@
 #include "descriptors.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <optional>
 #include <string>
@@ -72,6 +73,16 @@ long long int_of(PyObject* dict, const char* key) {
     return number;
 }
 
+void skipped(const std::string& source, const char* reason) {
+    std::fprintf(stderr, "atp: %s was not read and is skipped: %s\n", source.empty() ? "?" : source.c_str(),
+                 reason == nullptr ? "?" : reason);
+}
+
+std::string bad_kind(const char* what, const char* name, long long value) {
+    return std::string(what) + " '" + (name == nullptr ? "?" : name) + "' has kind " + std::to_string(value) +
+           ", which is outside atp_kind";
+}
+
 std::optional<atp_kind> kind_at(PyObject* row, Py_ssize_t index) {
     switch (int_at(row, index)) {
         case ATP_KIND_I32:
@@ -120,7 +131,7 @@ const char* keep_at(module_slot& slot, PyObject* row, Py_ssize_t index) {
     return kept;
 }
 
-void read_inputs(module_slot& slot, PyObject* rows) {
+void read_inputs(module_slot& slot, PyObject* rows, std::string& why) {
     const Py_ssize_t count = rows == nullptr ? 0 : PySequence_Size(rows);
     for (Py_ssize_t i = 0; i < count; ++i) {
         PyObject* row = PySequence_GetItem(rows, i);
@@ -131,6 +142,8 @@ void read_inputs(module_slot& slot, PyObject* rows) {
         desc.name = keep_at(slot, row, 0);
         if (const std::optional<atp_kind> kind = kind_at(row, 1)) {
             desc.kind = *kind;
+        } else if (why.empty()) {
+            why = bad_kind("input", desc.name, int_at(row, 1));
         }
         desc.flavor = static_cast<atp_flavor>(int_at(row, 2));
         desc.capacity = static_cast<std::uint32_t>(int_at(row, 3));
@@ -141,7 +154,7 @@ void read_inputs(module_slot& slot, PyObject* rows) {
     }
 }
 
-void read_outputs(module_slot& slot, PyObject* rows) {
+void read_outputs(module_slot& slot, PyObject* rows, std::string& why) {
     const Py_ssize_t count = rows == nullptr ? 0 : PySequence_Size(rows);
     for (Py_ssize_t i = 0; i < count; ++i) {
         PyObject* row = PySequence_GetItem(rows, i);
@@ -152,6 +165,8 @@ void read_outputs(module_slot& slot, PyObject* rows) {
         desc.name = keep_at(slot, row, 0);
         if (const std::optional<atp_kind> kind = kind_at(row, 1)) {
             desc.kind = *kind;
+        } else if (why.empty()) {
+            why = bad_kind("output", desc.name, int_at(row, 1));
         }
         slot.outputs.push_back(desc);
         slot.output_kinds.push_back(desc.kind);
@@ -159,7 +174,7 @@ void read_outputs(module_slot& slot, PyObject* rows) {
     }
 }
 
-void read_properties(module_slot& slot, PyObject* rows) {
+void read_properties(module_slot& slot, PyObject* rows, std::string& why) {
     const Py_ssize_t count = rows == nullptr ? 0 : PySequence_Size(rows);
     for (Py_ssize_t i = 0; i < count; ++i) {
         PyObject* row = PySequence_GetItem(rows, i);
@@ -170,6 +185,8 @@ void read_properties(module_slot& slot, PyObject* rows) {
         desc.name = keep_at(slot, row, 0);
         if (const std::optional<atp_kind> kind = kind_at(row, 1)) {
             desc.kind = *kind;
+        } else if (why.empty()) {
+            why = bad_kind("property", desc.name, int_at(row, 1));
         }
         desc.default_value = keep_at(slot, row, 2);
         PyObject* options = PySequence_GetItem(row, 3);
@@ -256,9 +273,15 @@ void build_one(PyObject* row) {
         }
         desc.version_count = static_cast<std::uint32_t>(used);
     }
-    read_inputs(slot, PyDict_GetItemString(row, "inputs"));
-    read_outputs(slot, PyDict_GetItemString(row, "outputs"));
-    read_properties(slot, PyDict_GetItemString(row, "properties"));
+    std::string why;
+    read_inputs(slot, PyDict_GetItemString(row, "inputs"), why);
+    read_outputs(slot, PyDict_GetItemString(row, "outputs"), why);
+    read_properties(slot, PyDict_GetItemString(row, "properties"), why);
+    if (!why.empty()) {
+        skipped(slot.source, ("module '" + slot.name + "': " + why).c_str());
+        storage().pop_back();
+        return;
+    }
     if (const std::vector<atp_config_field_desc>* fields =
             read_config_fields(slot, PyDict_GetItemString(row, "config"))) {
         desc.config_fields = fields->data();

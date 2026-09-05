@@ -358,6 +358,17 @@ TEST_F(python_bridge_test, SkipsABrokenScriptAndKeepsItsNeighbour) {
     EXPECT_NE(registry_.find("py_neighbour"), nullptr);
 }
 
+TEST_F(python_bridge_test, AModuleWhosePortTypeIsNotAKindIsSkippedRatherThanFatal) {
+    scan(ATP_PYTHON_BRIDGE_SCRIPTS_BROKEN);
+    load();
+
+    EXPECT_EQ(registry_.find("py_bad_kind"), nullptr);
+    EXPECT_NE(registry_.find("py_neighbour"), nullptr)
+        << "a descriptor the C ABI cannot express must cost its own module and no more: validate_c_desc "
+           "throws from the factory's constructor, so a kind the bridge lets through takes the whole "
+           "plugin down and every other script with it";
+}
+
 TEST(PythonBridgeReload, AScriptWrittenAfterTheLoadArrivesWithTheNextReload) {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_studio_new_python_module";
     std::filesystem::remove_all(dir);

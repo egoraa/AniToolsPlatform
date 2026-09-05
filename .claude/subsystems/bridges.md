@@ -18,6 +18,14 @@ on how the source was read — a literal is right only for as long as `/utf-8` i
 that goes quietly vacuous when a build setting slips is the very failure
 `tests/support/source_encoding_tests.cpp` exists to catch.
 
+**A row the C ABI cannot express costs its own module, not the plugin.** A port or property whose
+payload type is outside `atp_kind` is refused where the row is read, with a line naming the script, the
+module, the port and the value; the module is dropped and its neighbours still load. Letting the
+value-initialised zero through instead reaches `validate_c_desc`, which throws from
+`c_module_factory`'s constructor and takes the whole bridge down with every script in it. Both packages
+check the type first, so the branch is reachable only by a script that replaces the discovery hook.
+`docs/architecture/bridges.md`, the paragraph before "The Python bridge".
+
 **Each bridge materialises the config tree once per instance** (`dict`/`list` in Python, a table in
 Lua) and carries three more fields beside it — `config_text`, `config_origin`, `config_opaque` — bound
 where `config` is: before `__init__` in Python, at `atp._instantiate` in Lua. `config_opaque` is not

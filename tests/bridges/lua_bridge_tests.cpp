@@ -376,6 +376,17 @@ TEST_F(lua_bridge_test, AScriptThatReplacesTheDiscoveryHookIsSkippedRatherThanFa
            "_declared returns are read outside any protected frame, and Lua panics the whole process";
 }
 
+TEST_F(lua_bridge_test, AModuleWhosePortTypeIsNotAKindIsSkippedRatherThanFatal) {
+    scan(ATP_LUA_BRIDGE_SCRIPTS_BROKEN);
+    load();
+
+    EXPECT_EQ(registry_.find("lua_bad_kind"), nullptr);
+    EXPECT_NE(registry_.find("lua_neighbour"), nullptr)
+        << "a descriptor the C ABI cannot express must cost its own module and no more: validate_c_desc "
+           "throws from the factory's constructor, so a kind the bridge lets through takes the whole "
+           "plugin down and every other script with it";
+}
+
 TEST(LuaBridgeReload, AScriptWrittenAfterTheLoadArrivesWithTheNextReload) {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "atp_lua_reload";
     std::filesystem::remove_all(dir);

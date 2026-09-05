@@ -32,7 +32,8 @@ double channel(double srgb) {
 }
 
 double luminance(const QColor& c) {
-    return (0.2126 * channel(c.redF())) + (0.7152 * channel(c.greenF())) + (0.0722 * channel(c.blueF()));
+    return (0.2126 * channel(static_cast<double>(c.redF()))) + (0.7152 * channel(static_cast<double>(c.greenF()))) +
+           (0.0722 * channel(static_cast<double>(c.blueF())));
 }
 
 double contrast(const QColor& a, const QColor& b) {

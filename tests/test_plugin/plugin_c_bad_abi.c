@@ -20,8 +20,8 @@ static atp_work refuse_iterate(void* self) {
 }
 
 static const atp_module_desc future_module = {
-    sizeof(atp_module_desc), "c_future",     {1, 0, 0, 0}, 1,    NULL,           0,    NULL, 0, NULL, 0, NULL,
-    refuse_create,           refuse_destroy, NULL,         NULL, refuse_iterate, NULL, NULL,
+    sizeof(atp_module_desc), "c_future",     {1, 0, 0, 0}, 1,    NULL,           0,    NULL, 0,    NULL, 0, NULL,
+    refuse_create,           refuse_destroy, NULL,         NULL, refuse_iterate, NULL, NULL, NULL, 0,
 };
 
 ATP_C_EXPORT unsigned atp_c_abi_version(void) {

@@ -163,6 +163,8 @@ static const atp_module_desc probe_module = {
     probe_iterate,
     probe_stop,
     "c_probe_declared_here.txt",
+    NULL,
+    0,
 };
 
 static const atp_module_desc bare_module = {
@@ -184,6 +186,8 @@ static const atp_module_desc bare_module = {
     probe_iterate,
     NULL,
     NULL,
+    NULL,
+    0,
 };
 
 typedef struct config_state {
@@ -289,8 +293,26 @@ static atp_work config_iterate(void* self) {
 static const atp_output_desc config_outputs[] = {{"report", ATP_KIND_TEXT}};
 
 static const atp_module_desc config_module = {
-    sizeof(atp_module_desc), "c_config",     {1, 0, 0, 0}, 1,    NULL,           0,    config_outputs, 1, NULL, 0, NULL,
-    config_create,           config_destroy, NULL,         NULL, config_iterate, NULL, NULL,
+    sizeof(atp_module_desc),
+    "c_config",
+    {1, 0, 0, 0},
+    1,
+    NULL,
+    0,
+    config_outputs,
+    1,
+    NULL,
+    0,
+    NULL,
+    config_create,
+    config_destroy,
+    NULL,
+    NULL,
+    config_iterate,
+    NULL,
+    NULL,
+    NULL,
+    0,
 };
 
 static void* config_text_create(const atp_api* api, atp_ctx* ctx, void* user_data) {
@@ -365,6 +387,8 @@ static const atp_module_desc config_text_module = {
     config_iterate,
     NULL,
     NULL,
+    NULL,
+    0,
 };
 
 static int config_bad_path_destroys = 0;
@@ -424,6 +448,8 @@ static const atp_module_desc config_bad_path_module = {
     config_iterate,
     NULL,
     NULL,
+    NULL,
+    0,
 };
 
 static const atp_module_desc destroys_taken_module = {
@@ -445,6 +471,8 @@ static const atp_module_desc destroys_taken_module = {
     config_iterate,
     NULL,
     NULL,
+    NULL,
+    0,
 };
 
 typedef struct grown_desc {
@@ -454,24 +482,8 @@ typedef struct grown_desc {
 
 static const grown_desc grown_module = {
     {
-        sizeof(grown_desc),
-        "c_grown",
-        {3, 0, 0, 0},
-        1,
-        NULL,
-        0,
-        NULL,
-        0,
-        NULL,
-        0,
-        NULL,
-        probe_create,
-        probe_destroy,
-        NULL,
-        NULL,
-        probe_iterate,
-        NULL,
-        NULL,
+        sizeof(grown_desc), "c_grown",     {3, 0, 0, 0}, 1,    NULL,          0,    NULL, 0,    NULL, 0, NULL,
+        probe_create,       probe_destroy, NULL,         NULL, probe_iterate, NULL, NULL, NULL, 0,
     },
     0xfeedfaceu,
 };

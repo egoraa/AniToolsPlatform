@@ -76,7 +76,9 @@ TEST(McpModuleJson, TurnsPropertyKindsAndOptionsIntoSchema) {
 }
 
 TEST(McpModuleJson, SerialisesAModuleWithItsPortsAndBrokenFlag) {
-    atp::studio::module_info info{"demo", atp::version{1, 2}, {}, {}, {}, false, {}, {}};
+    atp::studio::module_info info;
+    info.name = "demo";
+    info.ver = atp::version{1, 2};
     info.inputs.push_back({"in", std::type_index(typeid(int))});
     info.outputs.push_back({"out", std::type_index(typeid(double))});
     info.properties.push_back({"limit", atp::io::property_kind::integer, "10", {}, true});

@@ -198,6 +198,8 @@ static const atp_module_desc scaler_module = {
     scaler_iterate,
     NULL,
     NULL,
+    NULL,
+    0,
 };
 
 const atp_module_desc* scaler_desc(void) {

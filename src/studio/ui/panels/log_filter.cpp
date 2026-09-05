@@ -9,7 +9,10 @@ namespace atp::studio::ui {
 
 void log_filter::set_query(const log_query& query) {
     query_ = query;
-    invalidateRowsFilter();
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED
+    invalidateRowsFilter();  // NOLINT(clang-diagnostic-deprecated-declarations)
+    QT_WARNING_POP
 }
 
 bool log_filter::filterAcceptsRow(int row, const QModelIndex& parent) const {

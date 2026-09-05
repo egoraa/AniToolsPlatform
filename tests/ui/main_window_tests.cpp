@@ -101,8 +101,8 @@ TEST(UiMainWindow, TheToolbarCarriesTheActionsAPersonReachesFor) {
             names << action->objectName();
         }
     }
-    for (const QString& wanted : {"action.new", "action.open", "action.save", "action.undo", "action.redo",
-                                  "action.new_group", "action.run", "action.stop", "action.attach"}) {
+    for (const QString wanted : {"action.new", "action.open", "action.save", "action.undo", "action.redo",
+                                 "action.new_group", "action.run", "action.stop", "action.attach"}) {
         EXPECT_TRUE(names.contains(wanted)) << wanted.toStdString();
     }
 }

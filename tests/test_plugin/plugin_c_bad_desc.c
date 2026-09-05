@@ -38,11 +38,13 @@ static const atp_module_desc sound_module = {
     nothing_iterate,
     NULL,
     NULL,
+    NULL,
+    0,
 };
 
 static const atp_module_desc broken_module = {
-    sizeof(atp_module_desc), "c_broken",      {1, 0, 0, 0}, 1,    NULL, 0,    NULL, 0, NULL, 0, NULL,
-    nothing_create,          nothing_destroy, NULL,         NULL, NULL, NULL, NULL,
+    sizeof(atp_module_desc), "c_broken",      {1, 0, 0, 0}, 1,    NULL, 0,    NULL, 0,    NULL, 0, NULL,
+    nothing_create,          nothing_destroy, NULL,         NULL, NULL, NULL, NULL, NULL, 0,
 };
 
 ATP_C_EXPORT unsigned atp_c_abi_version(void) {

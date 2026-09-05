@@ -39,7 +39,10 @@ class log_filter final : public QSortFilterProxyModel {
     ///
     /// invalidateRowsFilter() and not the beginFilterChange()/endFilterChange() pair, which says the
     /// same thing to the proxy at the price of Qt 6.10 for the whole tree — a floor paid by everyone
-    /// building the GUI against a distribution's Qt, for nothing this view asks of it.
+    /// building the GUI against a distribution's Qt, for nothing this view asks of it. Qt 6.10
+    /// deprecates the call, so the definition silences that one diagnostic where it is made: a NOLINT
+    /// reaches clang-tidy alone, and the compiler's own warning is what ATP_WERROR turns into a
+    /// failed build.
     /// @param query the new predicate
     void set_query(const log_query& query);
 

@@ -24,7 +24,7 @@ struct log_line {
     log_level level = log_level::info;
     std::string text;
     bool truncated = false;
-    std::chrono::system_clock::time_point at{};
+    std::chrono::system_clock::time_point at;
 };
 
 /// The runtime's module_host: a log ring plus the notifier of the thread that runs the module.

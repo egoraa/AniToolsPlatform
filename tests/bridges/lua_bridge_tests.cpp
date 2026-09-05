@@ -42,6 +42,7 @@ void set_scan_path(const std::string& value) {
 #ifdef _WIN32
     _putenv_s("ATP_LUA_PATH", value.c_str());
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     setenv("ATP_LUA_PATH", value.c_str(), 1);
 #endif
 }
@@ -50,6 +51,7 @@ void set_scan_path_wide(const std::filesystem::path& dir) {
 #ifdef _WIN32
     _wputenv_s(L"ATP_LUA_PATH", dir.wstring().c_str());
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     setenv("ATP_LUA_PATH", dir.string().c_str(), 1);
 #endif
 }
@@ -76,7 +78,7 @@ std::filesystem::path unicode_name(std::string_view prefix,
     for (const char c : suffix) {
         name.push_back(static_cast<char32_t>(c));
     }
-    return std::filesystem::path(name);
+    return {name};
 }
 
 struct probe_inputs : atp::io::inputs {

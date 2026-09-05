@@ -117,7 +117,7 @@ class log_ring {
         log_level level = log_level::info;
         bool truncated = false;
         std::uint16_t size = 0;
-        std::chrono::system_clock::time_point at{};
+        std::chrono::system_clock::time_point at;
         std::array<char, text_capacity> text{};
     };
 

@@ -12,6 +12,7 @@
 #define ATP_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
 #endif
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
 /// Defines both handshake symbols, which have no plugin-specific content and are the same two
 /// functions in every plugin ever written. Writing them out by hand stays legal — this only takes the
 /// boilerplate away, and it is how a plugin picks up a future handshake symbol without an edit.
@@ -28,5 +29,6 @@
     ATP_PLUGIN_EXPORT const char* atp_build_id() { \
         return atp::plugin_build_id;               \
     }
+// NOLINTEND(cppcoreguidelines-macro-usage)
 
 #endif

@@ -143,6 +143,7 @@ TEST(ModuleLoader, AbiMismatchIsNotAForeignLibrary) {
     } catch (const atp::runtime::not_a_plugin&) {
         FAIL() << "a wrong ABI is a broken plugin, not a foreign library";
     } catch (const std::runtime_error&) {
+        SUCCEED();
     }
 }
 

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -123,10 +124,10 @@ inline void copy_package(const std::filesystem::path& from,
 [[nodiscard]] inline std::optional<std::filesystem::path> last_script_folder(
     const std::vector<std::filesystem::path>& search_dirs,
     const script_language& lang) {
-    for (auto dir = search_dirs.rbegin(); dir != search_dirs.rend(); ++dir) {
+    for (const std::filesystem::path& dir : std::ranges::reverse_view(search_dirs)) {
         std::error_code ec;
-        if (std::filesystem::is_directory(scripts_dir(*dir, lang), ec)) {
-            return *dir;
+        if (std::filesystem::is_directory(scripts_dir(dir, lang), ec)) {
+            return dir;
         }
     }
     return std::nullopt;

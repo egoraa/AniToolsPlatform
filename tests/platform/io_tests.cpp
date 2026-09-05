@@ -42,7 +42,7 @@ class first_byte_input : public atp::io::input<big_payload<N>> {
     std::uint8_t first = 0;
 
    protected:
-    void store(big_payload<N>&& value) override {
+    void store(big_payload<N>&& value) override {  // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
         first = value.bytes[0];
     }
 
@@ -381,7 +381,7 @@ TEST(Watcher, HandlerRunsOnPollingThread) {
 TEST(QueuedInput, ConcurrentProducersLoseNothing) {
     constexpr int thread_count = 4;
     constexpr int per_thread = 1000;
-    atp::io::queued_input<int> in{"q_int", atp::io::drop_oldest(thread_count * per_thread)};
+    atp::io::queued_input<int> in{"q_int", atp::io::drop_oldest(static_cast<std::size_t>(thread_count) * per_thread)};
     {
         std::vector<std::jthread> producers;
         producers.reserve(thread_count);
@@ -727,7 +727,7 @@ TEST(Output, ConcurrentWritersLoseNothingInQueuedTarget) {
     constexpr int thread_count = 4;
     constexpr int per_thread = 1000;
     atp::io::output<int> out{"out_int"};
-    atp::io::queued_input<int> q{"q", atp::io::drop_oldest(thread_count * per_thread)};
+    atp::io::queued_input<int> q{"q", atp::io::drop_oldest(static_cast<std::size_t>(thread_count) * per_thread)};
     out.connect(q);
     {
         std::vector<std::jthread> writers;

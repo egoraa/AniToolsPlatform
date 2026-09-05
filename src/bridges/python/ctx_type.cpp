@@ -16,6 +16,7 @@ struct ctx_object {
     std::string* scratch;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* g_type = nullptr;
 
 bool index_of(const std::vector<atp_kind>& kinds, long long index, atp_kind& kind) {
@@ -160,6 +161,7 @@ void ctx_dealloc(PyObject* self) {
     Py_DECREF(type);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyMethodDef g_methods[] = {
     {"get", &ctx_get, METH_VARARGS, "Read a state input without consuming it."},
     {"take", &ctx_take, METH_VARARGS, "Take the next value of an input."},
@@ -173,14 +175,17 @@ PyMethodDef g_methods[] = {
     {nullptr, nullptr, 0, nullptr},
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyType_Slot g_slots[] = {
     {Py_tp_methods, g_methods},
     {Py_tp_dealloc, reinterpret_cast<void*>(&ctx_dealloc)},
     {0, nullptr},
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyType_Spec g_spec = {"_atp.Ctx", static_cast<int>(sizeof(ctx_object)), 0, Py_TPFLAGS_DEFAULT, g_slots};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyModuleDef g_module_def = {
     PyModuleDef_HEAD_INIT,
     "_atp",

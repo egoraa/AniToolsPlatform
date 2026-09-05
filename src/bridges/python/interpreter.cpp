@@ -11,7 +11,9 @@
 namespace atp::bridge {
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* g_package = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool g_tried = false;
 
 template <typename TChar>
@@ -57,6 +59,7 @@ std::vector<std::filesystem::path> scan_paths() {
         std::free(env);
     }
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     if (const char* env = std::getenv("ATP_PYTHON_PATH"); env != nullptr) {
         split_into(env, ':', paths);
     }

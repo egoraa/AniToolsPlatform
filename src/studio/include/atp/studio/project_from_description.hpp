@@ -57,12 +57,12 @@ namespace detail {
 [[nodiscard]] inline atp::config::node scalar_of(const nlohmann::json& property) {
     auto text = property.at("value").get<std::string>();
     if (property.at("kind").get<std::string>() == "text") {
-        return atp::config::node(std::move(text));
+        return {std::move(text)};
     }
     if (std::optional<atp::config::node> parsed = runtime::try_json_parse(text)) {
         return *std::move(parsed);
     }
-    return atp::config::node(std::move(text));
+    return {std::move(text)};
 }
 
 /// Properties worth writing down: the ones that differ from their default. A value equal to the

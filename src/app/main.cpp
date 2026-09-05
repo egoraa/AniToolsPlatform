@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
         }
         queue.close();
         if (control) {
-            control->stop();
+            control->stop();  // NOLINT(bugprone-unchecked-optional-access)
         }
         app.runner.stop();
         if (metrics) {

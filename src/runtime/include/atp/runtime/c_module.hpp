@@ -96,17 +96,17 @@ template <typename TFn>
 decltype(auto) with_c_kind(atp_kind kind, TFn&& fn) {
     switch (kind) {
         case ATP_KIND_I32:
-            return fn(std::type_identity<c_type<ATP_KIND_I32>::type>{});
+            return std::forward<TFn>(fn)(std::type_identity<c_type<ATP_KIND_I32>::type>{});
         case ATP_KIND_I64:
-            return fn(std::type_identity<c_type<ATP_KIND_I64>::type>{});
+            return std::forward<TFn>(fn)(std::type_identity<c_type<ATP_KIND_I64>::type>{});
         case ATP_KIND_F64:
-            return fn(std::type_identity<c_type<ATP_KIND_F64>::type>{});
+            return std::forward<TFn>(fn)(std::type_identity<c_type<ATP_KIND_F64>::type>{});
         case ATP_KIND_BOOL:
-            return fn(std::type_identity<c_type<ATP_KIND_BOOL>::type>{});
+            return std::forward<TFn>(fn)(std::type_identity<c_type<ATP_KIND_BOOL>::type>{});
         case ATP_KIND_TEXT:
-            return fn(std::type_identity<c_type<ATP_KIND_TEXT>::type>{});
+            return std::forward<TFn>(fn)(std::type_identity<c_type<ATP_KIND_TEXT>::type>{});
         case ATP_KIND_BLOB:
-            return fn(std::type_identity<c_type<ATP_KIND_BLOB>::type>{});
+            return std::forward<TFn>(fn)(std::type_identity<c_type<ATP_KIND_BLOB>::type>{});
     }
     throw std::runtime_error("unknown atp_kind " + std::to_string(static_cast<int>(kind)));
 }
@@ -627,19 +627,19 @@ class c_module final : public module_base {
             const atp_input_desc& d = desc_->inputs[i];
             const std::string name{detail::c_text(d.name)};
             input_entry entry = detail::with_c_kind(d.kind, [&](auto tag) {
-                using T = typename decltype(tag)::type;
+                using payload = decltype(tag)::type;
                 io::input_base* port = nullptr;
                 if (d.flavor != ATP_QUEUE) {
-                    port = &in_.make<io::input<T>>(name);
+                    port = &in_.make<io::input<payload>>(name);
                 } else if (d.capacity == 0) {
-                    port = &in_.make<io::queued_input<T>>(name);
+                    port = &in_.make<io::queued_input<payload>>(name);
                 } else {
                     const io::queue_limit limit{d.capacity, d.overflow == ATP_DROP_INCOMING
                                                                 ? io::overflow_policy::drop_incoming
                                                                 : io::overflow_policy::drop_oldest};
-                    port = &in_.make<io::queued_input<T>>(name, limit);
+                    port = &in_.make<io::queued_input<payload>>(name, limit);
                 }
-                return input_entry{port, &detail::c_input_vtable_of<T>()};
+                return input_entry{port, &detail::c_input_vtable_of<payload>()};
             });
             input_index_.push_back(entry);
         }
@@ -650,8 +650,8 @@ class c_module final : public module_base {
             const atp_output_desc& d = desc_->outputs[i];
             const std::string name{detail::c_text(d.name)};
             output_entry entry = detail::with_c_kind(d.kind, [&](auto tag) {
-                using T = typename decltype(tag)::type;
-                return output_entry{&out_.make<io::output<T>>(name), &detail::c_output_vtable_of<T>()};
+                using payload = decltype(tag)::type;
+                return output_entry{&out_.make<io::output<payload>>(name), &detail::c_output_vtable_of<payload>()};
             });
             output_index_.push_back(entry);
         }
@@ -671,9 +671,9 @@ class c_module final : public module_base {
                 throw std::runtime_error("module '" + name_ + "': property '" + name + "' cannot be a blob");
             }
             property_entry entry = detail::with_c_kind(d.kind, [&](auto tag) {
-                using T = typename decltype(tag)::type;
-                if constexpr (io::property_value<T>) {
-                    return property_entry{&make_property<T>(name, d), &detail::c_property_vtable_of<T>()};
+                using payload = decltype(tag)::type;
+                if constexpr (io::property_value<payload>) {
+                    return property_entry{&make_property<payload>(name, d), &detail::c_property_vtable_of<payload>()};
                 } else {
                     return property_entry{nullptr, nullptr};
                 }
@@ -765,7 +765,7 @@ class c_module final : public module_base {
         }
         c_module& self = *ctx->owner;
         try {
-            return body(self);
+            return std::forward<TFn>(body)(self);
         } catch (...) {
             if (self.pending_ == nullptr) {
                 self.pending_ = std::current_exception();
@@ -782,7 +782,7 @@ class c_module final : public module_base {
         }
         c_module& self = *ctx->owner;
         try {
-            return body(self) ? 1 : 0;
+            return std::forward<TFn>(body)(self) ? 1 : 0;
         } catch (...) {
             if (self.pending_ == nullptr) {
                 self.pending_ = std::current_exception();
@@ -1008,7 +1008,7 @@ class c_module final : public module_base {
 
     const atp_module_desc* desc_;
     std::string name_;
-    version version_{};
+    version version_;
 
     io::inputs in_;
     io::outputs out_;
@@ -1124,9 +1124,9 @@ class c_module_factory final : public module_factory_base {
             throw std::runtime_error("module '" + name_ + "': property '" + name + "' cannot be a blob");
         }
         return detail::with_c_kind(d.kind, [&](auto tag) {
-            using T = typename decltype(tag)::type;
-            if constexpr (io::property_value<T>) {
-                if (!io::property_codec<T>::from_string(detail::c_text(d.default_value))) {
+            using payload = decltype(tag)::type;
+            if constexpr (io::property_value<payload>) {
+                if (!io::property_codec<payload>::from_string(detail::c_text(d.default_value))) {
                     throw std::invalid_argument("module '" + name_ + "': property '" + name +
                                                 "' has an unparsable default '" +
                                                 std::string(detail::c_text(d.default_value)) + "'");
@@ -1135,7 +1135,7 @@ class c_module_factory final : public module_factory_base {
                 if (d.options != nullptr) {
                     options.reserve(d.option_count);
                     for (std::uint32_t i = 0; i < d.option_count; ++i) {
-                        if (!io::property_codec<T>::from_string(detail::c_text(d.options[i]))) {
+                        if (!io::property_codec<payload>::from_string(detail::c_text(d.options[i]))) {
                             throw std::invalid_argument("module '" + name_ + "': property '" + name +
                                                         "' has an unparsable option '" +
                                                         std::string(detail::c_text(d.options[i])) + "'");
@@ -1143,7 +1143,7 @@ class c_module_factory final : public module_factory_base {
                         options.emplace_back(detail::c_text(d.options[i]));
                     }
                 }
-                return property_declaration{std::move(name), io::property_codec<T>::kind,
+                return property_declaration{std::move(name), io::property_codec<payload>::kind,
                                             std::string(detail::c_text(d.default_value)), std::move(options),
                                             d.persistent != 0};
             } else {
@@ -1154,7 +1154,7 @@ class c_module_factory final : public module_factory_base {
 
     const atp_module_desc* desc_;
     std::string name_;
-    version version_{};
+    version version_;
 };
 
 /// What one module registered as, and the file its descriptor pointed at.

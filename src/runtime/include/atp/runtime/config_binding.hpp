@@ -280,18 +280,18 @@ inline void load_fields_into(atp::module_config& target,
 [[nodiscard]] inline atp::config::node save_scalar_field(const atp::module_config::entry& e) {
     switch (e.kind()) {
         case atp::field_kind::boolean:
-            return atp::config::node(e.value<bool>());
+            return {e.value<bool>()};
         case atp::field_kind::integer:
-            return atp::config::node(e.value<std::int64_t>());
+            return {e.value<std::int64_t>()};
         case atp::field_kind::real:
-            return atp::config::node(e.value<double>());
+            return {e.value<double>()};
         case atp::field_kind::string:
-            return atp::config::node(e.to_string());
+            return {e.to_string()};
         case atp::field_kind::object:
         case atp::field_kind::array:
             break;
     }
-    return atp::config::node();
+    return {};
 }
 
 [[nodiscard]] inline atp::config::node save_fields_of(const atp::module_config& source);
@@ -302,18 +302,18 @@ inline void load_fields_into(atp::module_config& target,
     }
     switch (e.element()) {
         case atp::field_kind::boolean:
-            return atp::config::node(e.values<bool>()[i]);
+            return {e.values<bool>()[i]};
         case atp::field_kind::integer:
-            return atp::config::node(e.values<std::int64_t>()[i]);
+            return {e.values<std::int64_t>()[i]};
         case atp::field_kind::real:
-            return atp::config::node(e.values<double>()[i]);
+            return {e.values<double>()[i]};
         case atp::field_kind::string:
-            return atp::config::node(e.element_string(i));
+            return {e.element_string(i)};
         case atp::field_kind::object:
         case atp::field_kind::array:
             break;
     }
-    return atp::config::node();
+    return {};
 }
 
 /// What of one config is worth writing down, in its own declaration order.

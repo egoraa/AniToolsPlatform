@@ -11,8 +11,8 @@
 /// diagnoses it. `atp_add_plugin()` warns about the static CRT at configure time, but a plugin built
 /// by another project — the case this whole path exists for — never runs that check. Comparing this
 /// string at load turns the worst failure mode the platform has into a message.
-#define ATP_STRINGIFY_IMPL(x) #x
-#define ATP_STRINGIFY(x) ATP_STRINGIFY_IMPL(x)
+#define ATP_STRINGIFY_IMPL(x) #x                // NOLINT(cppcoreguidelines-macro-usage)
+#define ATP_STRINGIFY(x) ATP_STRINGIFY_IMPL(x)  // NOLINT(cppcoreguidelines-macro-usage)
 
 #if defined(_MSC_VER)
 #define ATP_BUILD_ID_COMPILER "msvc-" ATP_STRINGIFY(_MSC_VER)
@@ -25,13 +25,15 @@
 #endif
 
 #if defined(_ITERATOR_DEBUG_LEVEL)
-#define ATP_BUILD_ID_STDLIB "-msvcstl-idl" ATP_STRINGIFY(_ITERATOR_DEBUG_LEVEL)
+#define ATP_BUILD_ID_STDLIB \
+    "-msvcstl-idl" ATP_STRINGIFY(_ITERATOR_DEBUG_LEVEL)  // NOLINT(cppcoreguidelines-macro-usage)
 #elif defined(_LIBCPP_VERSION)
-#define ATP_BUILD_ID_STDLIB "-libcxx-" ATP_STRINGIFY(_LIBCPP_VERSION)
+#define ATP_BUILD_ID_STDLIB "-libcxx-" ATP_STRINGIFY(_LIBCPP_VERSION)  // NOLINT(cppcoreguidelines-macro-usage)
 #elif defined(_GLIBCXX_USE_CXX11_ABI)
-#define ATP_BUILD_ID_STDLIB "-libstdcxx-abi" ATP_STRINGIFY(_GLIBCXX_USE_CXX11_ABI)
+#define ATP_BUILD_ID_STDLIB \
+    "-libstdcxx-abi" ATP_STRINGIFY(_GLIBCXX_USE_CXX11_ABI)  // NOLINT(cppcoreguidelines-macro-usage)
 #else
-#define ATP_BUILD_ID_STDLIB "-unknown-stdlib"
+#define ATP_BUILD_ID_STDLIB "-unknown-stdlib"  // NOLINT(cppcoreguidelines-macro-usage)
 #endif
 
 #if defined(__has_feature)
@@ -49,10 +51,10 @@
 #define ATP_BUILD_ID_TSAN "-tsan"
 #endif
 #ifndef ATP_BUILD_ID_ASAN
-#define ATP_BUILD_ID_ASAN ""
+#define ATP_BUILD_ID_ASAN ""  // NOLINT(cppcoreguidelines-macro-usage)
 #endif
 #ifndef ATP_BUILD_ID_TSAN
-#define ATP_BUILD_ID_TSAN ""
+#define ATP_BUILD_ID_TSAN ""  // NOLINT(cppcoreguidelines-macro-usage)
 #endif
 
 namespace atp {

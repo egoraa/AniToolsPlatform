@@ -135,7 +135,7 @@ class group : public module_base {
         child& entry = children_.back();
         entry.subgroup = dynamic_cast<group*>(entry.module.get());
         return *entry.module;
-    }
+    }  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
     /// Creates a child module in place.
     /// @param name name within this group's scope

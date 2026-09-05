@@ -72,12 +72,12 @@ class node {
     /// Copies out of the list, since an initializer_list only ever hands out const references. A
     /// large tree is built through the array_type/object_type constructors, which take ownership.
     [[nodiscard]] static node array(std::initializer_list<node> items) {
-        return node(array_type(items.begin(), items.end()));
+        return {array_type(items.begin(), items.end())};
     }
 
     /// Copies out of the list, for the same reason as array().
     [[nodiscard]] static node object(std::initializer_list<std::pair<std::string, node>> entries) {
-        return node(object_type(entries.begin(), entries.end()));
+        return {object_type(entries.begin(), entries.end())};
     }
 
     /// The form this node holds.

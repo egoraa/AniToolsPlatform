@@ -453,7 +453,7 @@ TEST_F(c_module_test, AFailedCreateStillDestroysWhatThePluginBuilt) {
 TEST_F(c_module_test, AParsedFileCarriesTextAndTreeAtOnce) {
     load(ATP_TEST_PLUGIN_C);
     create("c_config_text", {atp::config::node::object({{"audio", atp::config::node::object({{"rate", 48000}})}}),
-                             "{\"audio\":{\"rate\":48000}}", "rig.json", false});
+                             R"({"audio":{"rate":48000}})", "rig.json", false});
     collect("report", host_.inputs().text);
     run_lifecycle();
 
@@ -489,6 +489,7 @@ TEST_F(c_module_test, DeclarationAnswersFromDescriptorsWithoutCreating) {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool c_create_was_called = false;
 
 void* counting_create(const atp_api*, atp_ctx*, void*) {

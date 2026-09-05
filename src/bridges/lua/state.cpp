@@ -81,6 +81,7 @@ std::vector<std::filesystem::path> scan_paths() {
         std::free(env);
     }
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     if (const char* env = std::getenv("ATP_LUA_PATH"); env != nullptr) {
         split_into(env, ':', paths);
     }

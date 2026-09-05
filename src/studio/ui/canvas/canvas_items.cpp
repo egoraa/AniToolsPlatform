@@ -183,11 +183,7 @@ glyph_layout node_glyph_layout(const QFont& font, double text_top, double inset)
 }
 
 glyph_item::glyph_item(QGraphicsItem* parent, QString artwork, QColor ink, double side)
-    : QGraphicsItem(parent)
-    , artwork_(std::move(artwork))
-    , ink_(std::move(ink))
-    , side_(side)
-    , source_(artwork_for(artwork_)) {
+    : QGraphicsItem(parent), artwork_(std::move(artwork)), ink_(ink), side_(side), source_(artwork_for(artwork_)) {
     setAcceptedMouseButtons(Qt::NoButton);
 }
 
@@ -236,8 +232,8 @@ QImage glyph_item::tinted(int side_pixels) {
     const QRectF& ink = source_->ink;
     const double box = side_pixels;
     const double drawn = box / std::max(ink.width(), ink.height());
-    const double left = -ink.x() * drawn + ((box - (ink.width() * drawn)) / 2.0);
-    const double top = -ink.y() * drawn + ((box - (ink.height() * drawn)) / 2.0);
+    const double left = (-ink.x() * drawn) + ((box - (ink.width() * drawn)) / 2.0);
+    const double top = (-ink.y() * drawn) + ((box - (ink.height() * drawn)) / 2.0);
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);

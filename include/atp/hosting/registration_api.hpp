@@ -55,16 +55,23 @@ class registration_api {
             std::move(name), std::forward<TArgs>(args)...));
     }
 
-   protected:
-    /// Constructible and destructible only as a base, and never copied. Both matter because the
-    /// downcast is unchecked: a standalone or sliced registration_api would send add() through a
-    /// static_cast to a derived object that does not exist, and the registry pointer it reads would
-    /// be whatever the memory held. The heir is not polymorphic, so the destructor is non-virtual on
-    /// purpose — nothing here is ever deleted through this type.
-    registration_api() = default;
-    ~registration_api() = default;
+    /// Never copied, and public so that an attempt to copy one says so rather than complaining
+    /// about access.
     registration_api(const registration_api&) = delete;
     registration_api& operator=(const registration_api&) = delete;
+
+   private:
+    /// Constructible and destructible only by TSelf. Both matter because the downcast is unchecked:
+    /// a standalone or sliced registration_api would send add() through a static_cast to a derived
+    /// object that does not exist, and the registry pointer it reads would be whatever the memory
+    /// held. Private rather than protected, so that the heir named in the parameter is the only one
+    /// that can derive — a second class naming TSelf would inherit the same unchecked downcast. The
+    /// heir is not polymorphic, so the destructor is non-virtual on purpose — nothing here is ever
+    /// deleted through this type.
+    friend TSelf;
+
+    registration_api() = default;
+    ~registration_api() = default;
 };
 
 }  // namespace detail

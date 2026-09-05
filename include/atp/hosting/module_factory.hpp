@@ -116,7 +116,7 @@ class module_factory final : public module_factory_base {
     /// module_config::entry without ever naming the type.
     [[nodiscard]] config_ptr make_config() const override {
         if constexpr (declares_config<TModule>) {
-            return config_ptr(new typename TModule::config_type, config_deleter{});
+            return config_ptr(new TModule::config_type, config_deleter{});
         } else {
             return {};
         }
@@ -132,7 +132,7 @@ class module_factory final : public module_factory_base {
         return std::apply(
             [&](const TArgs&... args) {
                 if constexpr (takes_config<TModule, TArgs...>) {
-                    using config_type = typename TModule::config_type;
+                    using config_type = TModule::config_type;
                     if (dynamic_cast<config_type*>(config.get()) == nullptr) {
                         throw config::access_error("factory '" + name_ + "' was handed a config of another module");
                     }

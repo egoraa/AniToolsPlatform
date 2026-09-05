@@ -44,7 +44,7 @@ std::filesystem::path unicode_name(std::string_view prefix,
     for (const char c : suffix) {
         name.push_back(static_cast<char32_t>(c));
     }
-    return std::filesystem::path(name);
+    return {name};
 }
 
 struct probe_inputs : atp::io::inputs {
@@ -95,6 +95,7 @@ class python_bridge_test : public ::testing::Test {
 #ifdef _WIN32
         _putenv_s("ATP_PYTHON_PATH", dir);
 #else
+        // NOLINTNEXTLINE(concurrency-mt-unsafe)
         setenv("ATP_PYTHON_PATH", dir, 1);
 #endif
     }
@@ -660,6 +661,7 @@ class Probe(atp.Module):
 #ifdef _WIN32
     _wputenv_s(L"ATP_PYTHON_PATH", root.wstring().c_str());
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     setenv("ATP_PYTHON_PATH", root.string().c_str(), 1);
 #endif
 

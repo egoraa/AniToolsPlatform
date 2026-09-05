@@ -8,11 +8,11 @@ namespace atp::lua_bridge {
 
 std::string to_utf8(const std::filesystem::path& path) {
     const std::u8string text = path.u8string();
-    return std::string(reinterpret_cast<const char*>(text.data()), text.size());
+    return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
 std::filesystem::path from_utf8(std::string_view text) {
-    return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
+    return {std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size())};
 }
 
 bool load_chunk(lua_State* state, const std::filesystem::path& file, std::string& error) {

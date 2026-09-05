@@ -168,6 +168,7 @@ log_view* log_panel::current_view() const {
 
 void log_panel::open_view(const log_query& query, const QString& title) {
     for (std::size_t i = 0; i < views_.size(); ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
         if (static_cast<log_filter*>(views_[i]->model())->query() == query) {
             tabs_->setCurrentIndex(static_cast<int>(i));
             return;

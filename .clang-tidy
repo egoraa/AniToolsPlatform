@@ -12,7 +12,9 @@
 # the counts and the reasoning as of 2026-08-03. A check moves out of the second half by having its
 # hits fixed, never by being reclassified into the first — the single exception is
 # readability-redundant-parentheses, moved only because its fix-it was shown to change the meaning of
-# correct code, and the demonstration is recorded with it below.
+# correct code, and the demonstration is recorded with it below. modernize-use-std-print joined the
+# second half after #42 closed, for a reason of a different kind: its finding is real and the fix is
+# a one-liner, but <print> is not in libstdc++ 13, which the tree still builds on.
 #
 # clang-analyzer-* is spelled out although clang-tidy enables it by default: left implicit, a reader
 # of this file cannot tell what is actually running, and its findings are path sensitive, so they
@@ -28,6 +30,9 @@ Checks: >
   readability-*,
   cppcoreguidelines-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-invalid-enum-default-initialization,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -cppcoreguidelines-avoid-c-arrays,
   -cppcoreguidelines-avoid-const-or-ref-data-members,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-non-private-member-variables-in-classes,
@@ -35,6 +40,7 @@ Checks: >
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-union-access,
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   -cppcoreguidelines-special-member-functions,
@@ -42,6 +48,7 @@ Checks: >
   -misc-include-cleaner,
   -misc-no-recursion,
   -misc-non-private-member-variables-in-classes,
+  -modernize-avoid-c-arrays,
   -modernize-use-auto,
   -modernize-use-designated-initializers,
   -modernize-use-trailing-return-type,
@@ -62,11 +69,24 @@ Checks: >
   -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-pro-type-member-init,
   -modernize-use-nodiscard,
+  -modernize-use-std-print,
   -readability-convert-member-functions-to-static,
   -readability-make-member-function-const
 
 # Why each of the above is off:
 #   bugprone-easily-swappable-parameters       — fires on every (name, safety) and (from, to) pair.
+#   bugprone-invalid-enum-default-initialization
+#                                              — every hit is a `atp_value v{}` or `atp_desc d{}`,
+#                                                which is how the C path builds a descriptor before
+#                                                filling it. atp_kind numbers from 1, so the zero is
+#                                                unnamed but representable, and no such struct crosses
+#                                                the boundary with the field still zero.
+#   clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+#                                              — prescribes memcpy_s and snprintf_s for every memcpy
+#                                                and snprintf of the C plugins. Those are Annex K,
+#                                                which glibc and libc++ do not implement, so the
+#                                                advice cannot be taken on two of the three platforms
+#                                                this builds on.
 #   cppcoreguidelines-avoid-const-or-ref-data-members
 #                                              — module_context holds service_directory& by design,
 #                                                and the io sections bind ports as reference members.
@@ -77,6 +97,16 @@ Checks: >
 #   cppcoreguidelines-pro-bounds-*             — the plugin C interface deals in raw arrays, and the
 #                                                unchecked-container-access flavour fires on every
 #                                                subscript in the codebase.
+#   *-avoid-c-arrays                           — the same raw arrays, seen from the declaration side:
+#                                                the descriptor arrays a C module publishes, the
+#                                                PyMethodDef/PyType_Slot tables CPython takes and the
+#                                                luaL_Reg table Lua takes. A std::array buys nothing
+#                                                on a boundary that receives a pointer and a count.
+#   cppcoreguidelines-pro-type-union-access    — atp_value and atp_config_value are tagged unions of
+#                                                the C ABI, and reading the member the tag names is
+#                                                what a tagged union is for. A variant cannot cross a
+#                                                C boundary, so the check has no alternative to offer;
+#                                                the tree declares no other union.
 #   cppcoreguidelines-pro-type-reinterpret-cast— required by GetProcAddress/dlsym in module_loader
 #                                                and by SetThreadDescription in thread_name.
 #   cppcoreguidelines-special-member-functions — the io elements and module_base delete the copy
@@ -122,6 +152,10 @@ Checks: >
 #                                                shape of the SDK; the functions all have bodies and
 #                                                the vtable instantiates them together.
 #   *-magic-numbers                            — mostly test data.
+#   modernize-use-std-print                    — <print> is not in libstdc++ 13, which the tree still
+#                                                builds on, and the nine hits are fprintf(stderr) on
+#                                                the bridges' failure paths. Fixable the day the
+#                                                compiler floor moves, and not before.
 
 # The naming table of docs/code_style.md, made enforceable. Public data members take no trailing
 # underscore (module_context::services, group::child::name); private and protected ones do.
@@ -132,6 +166,7 @@ CheckOptions:
   readability-identifier-naming.UnionCase: lower_case
   readability-identifier-naming.EnumCase: lower_case
   readability-identifier-naming.EnumConstantCase: lower_case
+  readability-identifier-naming.EnumConstantIgnoredRegexp: '^ATP_[A-Z0-9_]+$'
   readability-identifier-naming.FunctionCase: lower_case
   readability-identifier-naming.VariableCase: lower_case
   readability-identifier-naming.ParameterCase: lower_case

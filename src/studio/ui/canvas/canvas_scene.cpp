@@ -113,10 +113,12 @@ QString glyph_tooltip(const module_info* info, bool is_module, const script_lang
 bool drop_allowed(const pin_item& from, const pin_item& to) {
     const pin_item& out = from.is_output() ? from : to;
     const pin_item& in = from.is_output() ? to : from;
-    if (!out.port_type() || !in.port_type()) {
+    const std::optional<std::type_index>& out_type = out.port_type();
+    const std::optional<std::type_index>& in_type = in.port_type();
+    if (!out_type || !in_type) {
         return true;
     }
-    return types_compatible(*out.port_type(), *in.port_type());
+    return types_compatible(*out_type, *in_type);
 }
 
 }  // namespace
@@ -1097,7 +1099,7 @@ void canvas_scene::build_node(const runtime::child_node& c,
         p = fallback.at(name);
         state_.doc.set_position(full, *p);
     }
-    node->setPos(p->x, p->y);
+    node->setPos(static_cast<qreal>(p->x), static_cast<qreal>(p->y));
     node->on_moved = [this, full](node_item& moved) {
         state_.doc.set_position(full, {static_cast<float>(moved.pos().x()), static_cast<float>(moved.pos().y())});
         update_link_paths();

@@ -57,7 +57,7 @@ std::string text_of(PyObject* value) {
         PyErr_Clear();
         return {};
     }
-    return std::string(data, static_cast<std::size_t>(size));
+    return {data, static_cast<std::size_t>(size)};
 }
 
 long long int_of(PyObject* dict, const char* key) {

@@ -62,7 +62,8 @@ struct path_stop {
             ++pos;
         }
         const std::string_view name = path.substr(name_begin, pos - name_begin);
-        if (name.empty() && !(first && pos < path.size() && path[pos] == '[')) {
+        const bool leading_index = first && pos < path.size() && path[pos] == '[';
+        if (name.empty() && !leading_index) {
             throw atp::config::access_error(path_message(path, "empty key", name_begin));
         }
         if (!name.empty() && found != nullptr) {
@@ -87,7 +88,7 @@ struct path_stop {
                 if (index > (static_cast<std::size_t>(-1) - digit) / 10) {
                     throw atp::config::access_error(path_message(path, "index too large", digits));
                 }
-                index = index * 10 + digit;
+                index = (index * 10) + digit;
                 ++pos;
             }
             if (pos == digits) {

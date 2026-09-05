@@ -26,7 +26,9 @@ namespace atp::studio::ui {
 
 namespace {
 
-const QString inline_source = QStringLiteral("(inline)");
+QString inline_source() {
+    return QStringLiteral("(inline)");
+}
 
 }  // namespace
 
@@ -256,7 +258,7 @@ void inspector_widget::build_config_section(const runtime::module_node& m) {
 
     config_source_ = new QComboBox(body_);
     config_source_->setObjectName("config_source");
-    config_source_->addItem(inline_source);
+    config_source_->addItem(inline_source());
     for (const std::string& name : state_.doc.config_names()) {
         config_source_->addItem(QString::fromStdString(name));
     }
@@ -264,7 +266,7 @@ void inspector_widget::build_config_section(const runtime::module_node& m) {
     if (!current.empty() && config_source_->findText(QString::fromStdString(current)) < 0) {
         config_source_->addItem(QString::fromStdString(current));
     }
-    config_source_->setCurrentText(current.empty() ? inline_source : QString::fromStdString(current));
+    config_source_->setCurrentText(current.empty() ? inline_source() : QString::fromStdString(current));
     s.form->addRow("source", config_source_);
     QObject::connect(config_source_, &QComboBox::currentIndexChanged, this,
                      [this](int) { change_config_source(config_source_->currentText()); });
@@ -359,7 +361,7 @@ const atp::config::node* inspector_widget::effective_config() const {
 }
 
 void inspector_widget::change_config_source(const QString& choice) {
-    const std::string next = choice == inline_source ? std::string() : choice.toStdString();
+    const std::string next = choice == inline_source() ? std::string() : choice.toStdString();
     if (next == (shared_name_.empty() ? config_file_ : shared_name_)) {
         return;
     }

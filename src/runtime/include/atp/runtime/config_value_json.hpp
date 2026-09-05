@@ -31,23 +31,23 @@ namespace atp::runtime {
         return atp::config::node{};
     }
     if (node.is_boolean()) {
-        return atp::config::node(node.get<bool>());
+        return {node.get<bool>()};
     }
     if (node.is_number_unsigned()) {
         const std::uint64_t raw = node.get<std::uint64_t>();
         if (raw > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
             throw atp::config::access_error("config: " + std::to_string(raw) + " does not fit an integer");
         }
-        return atp::config::node(static_cast<std::int64_t>(raw));
+        return {static_cast<std::int64_t>(raw)};
     }
     if (node.is_number_integer()) {
-        return atp::config::node(node.get<std::int64_t>());
+        return {node.get<std::int64_t>()};
     }
     if (node.is_number_float()) {
-        return atp::config::node(node.get<double>());
+        return {node.get<double>()};
     }
     if (node.is_string()) {
-        return atp::config::node(node.get<std::string>());
+        return {node.get<std::string>()};
     }
     if (node.is_array()) {
         atp::config::node::array_type items;
@@ -55,14 +55,14 @@ namespace atp::runtime {
         for (const nlohmann::json& item : node) {
             items.push_back(to_config_value(item));
         }
-        return atp::config::node(std::move(items));
+        return {std::move(items)};
     }
     atp::config::node::object_type entries;
     entries.reserve(node.size());
     for (const auto& [key, value] : node.items()) {
         entries.emplace_back(key, to_config_value(value));
     }
-    return atp::config::node(std::move(entries));
+    return {std::move(entries)};
 }
 
 /// Converts a config::node back into JSON, keeping the two number forms apart the same way.

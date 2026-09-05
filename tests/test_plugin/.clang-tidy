@@ -1,0 +1,18 @@
+---
+# The C half of the tree: this directory and examples/plugin_c_demo are the only translation units
+# the repository compiles as C, and two checks of the root config describe C++ rather than a defect
+# here. Scoped to the directory rather than switched off globally, because both are worth keeping
+# over the C++ that is the rest of the codebase — including the C++ fixtures next to these C ones,
+# which give up little for it.
+InheritParentConfig: true
+
+# cppcoreguidelines-init-variables wants an initialiser on every declaration, and these files declare
+# at the top of the block and assign below — which is how C reads and, more to the point, what makes a
+# use before the assignment a diagnosable mistake rather than a silent zero. Seeding a handle with 0
+# would hide exactly the bug the check exists to find.
+# cppcoreguidelines-avoid-non-const-global-variables fires on the counters a C fixture keeps: a C
+# module has no member to put one in, and the plugin's own file scope is the only place left.
+Checks: >
+  -cppcoreguidelines-init-variables,
+  -cppcoreguidelines-avoid-non-const-global-variables
+...

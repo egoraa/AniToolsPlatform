@@ -61,6 +61,10 @@
 extern "C" {
 #endif
 
+/* NOLINTBEGIN(modernize-use-using, cppcoreguidelines-use-enum-class) */
+/* NOLINTBEGIN(cppcoreguidelines-macro-usage, cppcoreguidelines-macro-to-enum, modernize-macro-to-enum) */
+/* NOLINTBEGIN(clang-analyzer-optin.performance.Padding) */
+
 /// Version of this ABI, answered by atp_c_abi_version().
 ///
 /// Independent of atp::plugin_abi, and expected to stay at 1 far longer: the C++ number counts
@@ -536,6 +540,10 @@ ATP_C_EXPORT unsigned atp_module_count(void);
 ///         unloaded — the host keeps the pointer for the lifetime of the registration. NULL is a
 ///         refusal and fails the load.
 ATP_C_EXPORT const atp_module_desc* atp_module_desc_at(unsigned index);
+
+/* NOLINTEND(clang-analyzer-optin.performance.Padding) */
+/* NOLINTEND(cppcoreguidelines-macro-usage, cppcoreguidelines-macro-to-enum, modernize-macro-to-enum) */
+/* NOLINTEND(modernize-use-using, cppcoreguidelines-use-enum-class) */
 
 #ifdef __cplusplus
 }

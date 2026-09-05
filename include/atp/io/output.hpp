@@ -126,7 +126,8 @@ class output : public output_base {
     /// The delivery order does not change: the move goes to whoever would have been served last
     /// anyway, and everyone before it still sees the value intact.
     template <typename TValue>
-    void dispatch(const std::vector<input_base*>& targets, TValue&& value) {
+    void dispatch(const std::vector<input_base*>& targets,
+                  TValue&& value) {  // NOLINT(cppcoreguidelines-missing-std-forward)
         if (targets.empty()) {
             return;
         }

@@ -539,7 +539,7 @@ class module_config {
     }
 
     [[nodiscard]] entry* find(std::string_view name) noexcept {
-        return const_cast<entry*>(std::as_const(*this).find(name));
+        return const_cast<entry*>(std::as_const(*this).find(name));  // NOLINT(cppcoreguidelines-pro-type-const-cast)
     }
 
     /// Bytes of the file this config was read from, verbatim and including a BOM; empty when it did not

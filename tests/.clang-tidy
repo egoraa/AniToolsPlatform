@@ -4,6 +4,16 @@
 # allowance for one shape of name, not a check switched off — the helper types and the modules a
 # test declares still have to be snake_case, and a name like Some_Thing is still rejected.
 InheritParentConfig: true
+
+# bugprone-unchecked-optional-access cannot see through a googletest assertion. ASSERT_TRUE expands
+# to a macro the check's dataflow does not follow, so every `ASSERT_TRUE(o.has_value()); ... *o` in
+# this tree is reported as unchecked — thirty of them, and not one is a defect. Measured, not
+# assumed: binding the optional to a name and asserting on that name immediately above the
+# dereference is still reported, and so is spelling the access `o.value()`. Off here and nowhere
+# else — production code keeps the check, and an empty optional in a test aborts the test loudly
+# rather than corrupting anything.
+Checks: >
+  -bugprone-unchecked-optional-access
 CheckOptions:
   readability-identifier-naming.ClassIgnoredRegexp: '^[A-Z][A-Za-z0-9]*$'
   readability-identifier-naming.StructIgnoredRegexp: '^[A-Z][A-Za-z0-9]*$'
